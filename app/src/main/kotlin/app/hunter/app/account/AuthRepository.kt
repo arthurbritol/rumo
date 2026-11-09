@@ -77,6 +77,10 @@ class AuthRepository(
             gateway.reauthenticate(null)
         }
         if (reauth is AuthResult.Error) return reauth
+        // A reautenticação nunca deve trocar a conta; se trocou, não toca em nenhuma das duas.
+        if (signedUid() != uid) {
+            return AuthResult.Error(AuthError.OTHER, "A conta mudou durante a confirmação. Nada foi apagado.")
+        }
         return withContext(NonCancellable) {
             if (!flag.set(uid)) {
                 // Sem a marca local uma interrupção deixaria a conta sem dados e sem retomada: não começa.
@@ -86,16 +90,17 @@ class AuthRepository(
                 )
             }
             try {
-                withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.deleteAccountData() } }
+                // uid fixado: se a conta logada não for mais [uid], o armazenamento remoto recusa tudo.
+                withTimeout(NET_TIMEOUT_MS) { gate.pinnedTo(uid) { engine.deleteAccountData() } }
             } catch (e: Exception) {
                 // Não dá para saber o que já foi apagado: a marca fica e a retomada refaz (idempotente).
                 return@withContext incomplete(AuthError.NETWORK)
             }
-            val r = deleteUserWithTimeout()
+            val r = deleteUserWithTimeout(uid)
             if (r is AuthResult.Error) {
                 // Melhor esforço: a marca na nuvem já foi apagada por deleteAllUserData; a local é a que vale.
                 try {
-                    withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.markDeletionPending() } }
+                    withTimeout(NET_TIMEOUT_MS) { gate.pinnedTo(uid) { engine.markDeletionPending() } }
                 } catch (e: Exception) {
                     // ignorado de propósito
                 }
@@ -118,18 +123,18 @@ class AuthRepository(
         val flagged = flag.uid()
         if (flagged != null && flagged != uid) flag.clear() // sobra de outra conta: nunca apagar esta
         val pending = flagged == uid || try {
-            withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.isDeletionPending() } }
+            withTimeout(NET_TIMEOUT_MS) { gate.pinnedTo(uid) { engine.isDeletionPending() } }
         } catch (e: Exception) {
             false
         }
         if (!pending) return@withContext false
         flag.set(uid) // melhor esforço: se falhar, a marca da nuvem (ou a já gravada) ainda vale
         try {
-            withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.deleteAccountData() } }
+            withTimeout(NET_TIMEOUT_MS) { gate.pinnedTo(uid) { engine.deleteAccountData() } }
         } catch (e: Exception) {
             return@withContext false
         }
-        val r = deleteUserWithTimeout()
+        val r = deleteUserWithTimeout(uid)
         if (r is AuthResult.Ok) {
             flag.clear()
             return@withContext true
@@ -143,9 +148,9 @@ class AuthRepository(
 
     private fun signedUid(): String? = (gateway.state.value as? AuthState.SignedIn)?.uid
 
-    private suspend fun deleteUserWithTimeout(): AuthResult =
+    private suspend fun deleteUserWithTimeout(uid: String): AuthResult =
         try {
-            withTimeout(NET_TIMEOUT_MS) { gateway.deleteAuthUser() }
+            withTimeout(NET_TIMEOUT_MS) { gateway.deleteAuthUser(uid) }
         } catch (e: Exception) {
             AuthResult.Error(AuthError.NETWORK, "Sem resposta da rede.")
         }
@@ -176,7 +181,7 @@ class AuthRepository(
             )
         }
         try {
-            withTimeoutOrNull(firstSyncTimeoutMs) { gate.pinned { engine.firstSync() } } // nulo = estourou: sincroniza depois
+            withTimeoutOrNull(firstSyncTimeoutMs) { gate.pinnedTo(uid) { engine.firstSync() } } // nulo = estourou: sincroniza depois
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

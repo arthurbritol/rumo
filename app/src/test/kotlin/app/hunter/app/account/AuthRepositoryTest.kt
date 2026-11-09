@@ -28,9 +28,11 @@ private class Events { val list = mutableListOf<String>() }
 private class FakeFlag : PendingDeletionFlag {
     var value: String? = null
     var failSet = false
+    var onSet: (() -> Unit)? = null
     override fun uid() = value
     override fun set(uid: String): Boolean {
         if (failSet) return false
+        onSet?.invoke()
         value = uid
         return true
     }
@@ -119,9 +121,16 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
     }
     override suspend fun resetPassword(email: String): AuthResult = AuthResult.Ok
     override suspend fun sendVerification(): AuthResult { verificationSent++; return verificationResult }
-    override suspend fun reauthenticate(password: String?): AuthResult { reauthCalls += password; return reauthResult }
-    override suspend fun deleteAuthUser(): AuthResult {
+    var onReauth: (() -> Unit)? = null
+    val deletedUids = mutableListOf<String>()
+    override suspend fun reauthenticate(password: String?): AuthResult {
+        reauthCalls += password
+        onReauth?.invoke()
+        return reauthResult
+    }
+    override suspend fun deleteAuthUser(expectedUid: String): AuthResult {
         deleteCalls++
+        deletedUids += expectedUid
         onDelete?.invoke()
         ev.list += "usuario"
         return deleteResults.removeFirstOrNull() ?: AuthResult.Ok
@@ -221,6 +230,38 @@ class AuthRepositoryTest {
         assertFalse(remote.pending)
         assertEquals(0, gateway.deleteCalls)
         assertTrue(ev.list.isEmpty())
+    }
+
+    @Test
+    fun `apagar conta - reautenticacao que troca a conta logada nao apaga nada de nenhuma conta`() = runTest {
+        gateway.onReauth = { gateway.state.value = AuthState.SignedIn("B", "Bia", "b@b.c", true) }
+        val r = repo.deleteAccount(null)
+        assertIs<AuthResult.Error>(r)
+        assertTrue(remote.cloudHasData)
+        assertFalse(remote.pending)
+        assertEquals(0, gateway.deleteCalls)
+        assertTrue(ev.list.isEmpty())
+        assertNull(flag.value)
+    }
+
+    @Test
+    fun `apagar conta - conta trocada depois da checagem e recusada pelo uid fixado`() = runTest {
+        val gate = app.hunter.app.sync.SyncGate { (gateway.state.value as? AuthState.SignedIn)?.uid }
+        val stores = mapOf("u" to FakeRemote(ev), "B" to FakeRemote(ev))
+        val perUser = app.hunter.app.sync.PerUserRemoteStore(
+            { (gateway.state.value as? AuthState.SignedIn)?.uid }, { gate.pinnedUid },
+        ) { stores.getValue(it) }
+        val r = AuthRepository(gateway, SyncEngine(local, perUser) { 1L }, flag, gate)
+        flag.onSet = { gateway.state.value = AuthState.SignedIn("B", "Bia", "b@b.c", true) }
+        assertIs<AuthResult.Error>(r.deleteAccount(null))
+        assertTrue(stores.values.all { it.cloudHasData && !it.pending })
+        assertEquals(0, gateway.deleteCalls)
+    }
+
+    @Test
+    fun `apagar o usuario de auth leva o uid esperado`() = runTest {
+        assertEquals(AuthResult.Ok, repo.deleteAccount(null))
+        assertEquals(listOf("u"), gateway.deletedUids)
     }
 
     @Test

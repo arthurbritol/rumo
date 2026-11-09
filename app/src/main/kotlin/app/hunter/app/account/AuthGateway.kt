@@ -17,6 +17,9 @@ sealed interface AuthResult {
 enum class AuthError {
     NETWORK, WRONG_CREDENTIALS, EMAIL_IN_USE, WEAK_PASSWORD, NEEDS_RECENT_LOGIN, UNAVAILABLE, CANCELLED, OTHER,
     SIGN_OUT_BLOCKED,
+
+    /** O usuário de auth já não existe no servidor (conta apagada em outro aparelho). */
+    USER_GONE,
 }
 
 /** Fronteira com o Firebase Auth; o repositório só conhece esta interface (testável sem Android). */
@@ -29,8 +32,17 @@ interface AuthGateway {
     suspend fun linkGoogleToEmail(email: String, password: String): AuthResult
     suspend fun resetPassword(email: String): AuthResult
     suspend fun sendVerification(): AuthResult
+    /**
+     * Reautentica o usuário JÁ logado (nunca troca de conta): com [password] por e-mail/senha; sem ele pela
+     * folha de contas Google. Uma conta Google diferente da logada é recusada com erro.
+     */
     suspend fun reauthenticate(password: String?): AuthResult
-    suspend fun deleteAuthUser(): AuthResult
+
+    /**
+     * Apaga o usuário de auth logado, só se o uid dele é [expectedUid]; senão devolve erro sem apagar.
+     * [AuthError.USER_GONE] quando o usuário já não existe no servidor (apagado em outro aparelho).
+     */
+    suspend fun deleteAuthUser(expectedUid: String): AuthResult
     fun signOut()
 
     /** Verdadeiro quando o usuário atual entra com e-mail/senha (reautenticação pede a senha, não o Google). */

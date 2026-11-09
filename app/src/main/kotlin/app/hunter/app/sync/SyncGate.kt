@@ -28,4 +28,17 @@ class SyncGate(private val currentUid: () -> String? = { null }) {
             pinnedUid = null
         }
     }
+
+    /**
+     * Como [pinned], mas fixa um uid JÁ conhecido por quem chama (apagar conta captura o uid antes da
+     * reautenticação): se a conta logada não for [uid], o [PerUserRemoteStore] recusa toda chamada.
+     */
+    suspend fun <T> pinnedTo(uid: String, block: suspend () -> T): T = mutex.withLock {
+        pinnedUid = uid
+        try {
+            block()
+        } finally {
+            pinnedUid = null
+        }
+    }
 }

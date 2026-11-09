@@ -73,33 +73,39 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
         auth?.addAuthStateListener { _state.value = it.currentUser.toState() }
     }
 
-    override suspend fun signInGoogle(): AuthResult {
-        val a = auth ?: return unavailable()
-        val act = activity ?: return AuthResult.Error(AuthError.UNAVAILABLE, "Abra o login pela tela do app.")
+    /** Abre a folha de contas Google; devolve a credencial escolhida ou o erro (cancelado, sem conta...). */
+    private suspend fun pickGoogle(): Pair<GoogleIdTokenCredential?, AuthResult.Error?> {
+        val act = activity ?: return null to AuthResult.Error(AuthError.UNAVAILABLE, "Abra o login pela tela do app.")
         val id = appContext.resources.getIdentifier("default_web_client_id", "string", appContext.packageName)
-        if (id == 0) return unavailable()
+        if (id == 0) return null to unavailable()
         val option = GetGoogleIdOption.Builder()
             .setServerClientId(appContext.getString(id))
             .setFilterByAuthorizedAccounts(false)
             .build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
-        val google: GoogleIdTokenCredential
-        try {
+        return try {
             val cred = CredentialManager.create(act).getCredential(act, request).credential
             if (cred !is CustomCredential || cred.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                return AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
+                null to AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
+            } else {
+                GoogleIdTokenCredential.createFrom(cred.data) to null
             }
-            google = GoogleIdTokenCredential.createFrom(cred.data)
         } catch (e: GetCredentialCancellationException) {
-            return AuthResult.Error(AuthError.CANCELLED, "Login cancelado.")
+            null to AuthResult.Error(AuthError.CANCELLED, "Login cancelado.")
         } catch (e: NoCredentialException) {
-            return AuthResult.Error(AuthError.OTHER, "Nenhuma conta Google disponível neste aparelho.")
+            null to AuthResult.Error(AuthError.OTHER, "Nenhuma conta Google disponível neste aparelho.")
         } catch (e: GetCredentialException) {
-            return AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
+            null to AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
+            null to AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
         }
+    }
+
+    override suspend fun signInGoogle(): AuthResult {
+        val a = auth ?: return unavailable()
+        val (google, error) = pickGoogle()
+        if (google == null) return error ?: AuthResult.Error(AuthError.OTHER, "Não foi possível entrar com o Google.")
         val credential = GoogleAuthProvider.getCredential(google.idToken, null)
         return try {
             a.signInWithCredential(credential).await()
@@ -168,19 +174,51 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
         return guarded { user.sendEmailVerification().await(); AuthResult.Ok }
     }
 
-    /** Com [password] reautentica por e-mail/senha; sem ele, repete o login Google. */
+    /**
+     * Com [password] reautentica por e-mail/senha; sem ele, pela folha de contas Google. Em ambos os casos é
+     * `currentUser.reauthenticate`, que falha (ERROR_USER_MISMATCH) se a credencial for de OUTRA conta: nunca
+     * troca a conta logada (um signInWithCredential aqui poderia levar a apagar a conta errada).
+     */
     override suspend fun reauthenticate(password: String?): AuthResult {
         val user = auth?.currentUser ?: return unavailable()
-        if (password != null) {
+        val credential = if (password != null) {
             val email = user.email ?: return AuthResult.Error(AuthError.OTHER, "A conta não tem e-mail.")
-            return guarded { user.reauthenticate(EmailAuthProvider.getCredential(email, password)).await(); AuthResult.Ok }
+            EmailAuthProvider.getCredential(email, password)
+        } else {
+            val (google, error) = pickGoogle()
+            if (google == null) return error ?: AuthResult.Error(AuthError.OTHER, "Não foi possível confirmar com o Google.")
+            GoogleAuthProvider.getCredential(google.idToken, null)
         }
-        return signInGoogle()
+        return try {
+            user.reauthenticate(credential).await()
+            AuthResult.Ok
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: FirebaseAuthInvalidUserException) {
+            if (e.errorCode == "ERROR_USER_MISMATCH") {
+                AuthResult.Error(AuthError.WRONG_CREDENTIALS, "Escolha a mesma conta Google com que você entrou. Nada foi apagado.")
+            } else {
+                map(e)
+            }
+        } catch (e: Exception) {
+            map(e)
+        }
     }
 
-    override suspend fun deleteAuthUser(): AuthResult {
+    override suspend fun deleteAuthUser(expectedUid: String): AuthResult {
         val user = auth?.currentUser ?: return unavailable()
-        return guarded { user.delete().await(); AuthResult.Ok }
+        if (user.uid != expectedUid) return AuthResult.Error(AuthError.OTHER, "A conta mudou. Nada foi apagado.")
+        return try {
+            user.delete().await()
+            AuthResult.Ok
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: FirebaseAuthInvalidUserException) {
+            // Usuário inexistente/desativado no servidor: a conta já foi apagada (em outro aparelho).
+            AuthResult.Error(AuthError.USER_GONE, "A conta já não existe.")
+        } catch (e: Exception) {
+            map(e)
+        }
     }
 
     override fun signOut() {
