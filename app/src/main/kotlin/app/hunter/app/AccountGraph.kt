@@ -12,6 +12,7 @@ import app.hunter.app.data.AppDatabase
 import app.hunter.app.sync.FirestoreRemoteStore
 import app.hunter.app.sync.PerUserRemoteStore
 import app.hunter.app.sync.RoomLocalStore
+import app.hunter.app.sync.SyncGate
 import app.hunter.app.sync.SyncScheduler
 import app.hunter.app.sync.SyncTrigger
 import app.hunter.sync.SyncEngine
@@ -38,13 +39,17 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     val flag = SharedPrefsPendingDeletionFlag(app)
 
     private val local = RoomLocalStore(database, prefs)
+    private fun currentUid(): String? = (gateway.state.value as? AuthState.SignedIn)?.uid
+
+    /** Trava única do motor: agendador, primeira sincronização, sair e apagar conta. */
+    private val gate = SyncGate(::currentUid)
     private val engine = SyncEngine(
         local,
-        PerUserRemoteStore({ (gateway.state.value as? AuthState.SignedIn)?.uid }) { uid ->
+        PerUserRemoteStore(::currentUid, { gate.pinnedUid }) { uid ->
             FirestoreRemoteStore(FirebaseFirestore.getInstance(), uid)
         },
     )
-    val repo = AuthRepository(gateway, engine, flag)
+    val repo = AuthRepository(gateway, engine, flag, gate)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -56,6 +61,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
 
     val scheduler = SyncScheduler(
         engine, scope,
+        gate = gate,
         onError = { Log.w("Rumo/sync", "Falha ao sincronizar", it) },
         isSignedIn = { ready && signedUid() != null && flag.uid() == null },
     )

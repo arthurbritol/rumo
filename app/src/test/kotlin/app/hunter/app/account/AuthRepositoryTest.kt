@@ -8,6 +8,7 @@ import app.hunter.sync.RemoteStore
 import app.hunter.sync.SyncDoc
 import app.hunter.sync.SyncEngine
 import app.hunter.sync.UserProfile
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -501,5 +502,57 @@ class AuthRepositoryTest {
         assertEquals(AuthError.UNAVAILABLE, (repo.signInEmail("a@b.c", "1") as AuthResult.Error).kind)
         assertEquals(AuthError.UNAVAILABLE, (repo.signInGoogle() as AuthResult.Error).kind)
         assertEquals(0, remote.fetches)
+    }
+
+    private class SlowRemote(val ev: Events, val ms: Long) : RemoteStore {
+        var active = 0
+        var maxActive = 0
+        override suspend fun fetchAll(): RemoteSnapshot {
+            active++; maxActive = maxOf(maxActive, active)
+            ev.list += "sync-inicio"
+            try { kotlinx.coroutines.delay(ms) } finally { active-- }
+            ev.list += "sync-fim"
+            return RemoteSnapshot(emptyList(), null, null)
+        }
+        override suspend fun push(docs: List<SyncDoc>) {}
+        override suspend fun pushOdometer(o: OdometerDoc) {}
+        override suspend fun pushProfile(p: UserProfile) {}
+        override suspend fun markDeletionPending() {}
+        override suspend fun deletionPending() = false
+        override suspend fun deleteAllUserData() {}
+    }
+
+    @Test
+    fun signOutWaitsForARunningSyncAndNeverInterleaves() = runTest {
+        val gate = app.hunter.app.sync.SyncGate()
+        val slow = SlowRemote(ev, 5_000)
+        val engine = SyncEngine(local, slow) { 1L }
+        val r = AuthRepository(gateway, engine, flag, gate)
+        val sched = app.hunter.app.sync.SyncScheduler(engine, backgroundScope, 0, 0, {}, gate) { true }
+        sched.syncOnConnectivity()
+        testScheduler.runCurrent()
+        val out = async { r.signOut() }
+        testScheduler.advanceTimeBy(4_000); testScheduler.runCurrent()
+        assertFalse(out.isCompleted)
+        assertEquals(listOf("sync-inicio"), ev.list)
+        testScheduler.advanceTimeBy(1_500); testScheduler.runCurrent()
+        assertIs<AuthResult.Ok>(out.await())
+        assertEquals(listOf("sync-inicio", "sync-fim", "sair"), ev.list)
+    }
+
+    @Test
+    fun firstSyncAndScheduledSyncNeverRunConcurrently() = runTest {
+        val gate = app.hunter.app.sync.SyncGate()
+        val slow = SlowRemote(ev, 1_000)
+        val engine = SyncEngine(local, slow) { 1L }
+        val r = AuthRepository(gateway, engine, flag, gate)
+        val sched = app.hunter.app.sync.SyncScheduler(engine, backgroundScope, 0, 0, {}, gate) { true }
+        sched.syncOnConnectivity()
+        testScheduler.runCurrent()
+        val login = async { r.signInEmail("a@b.c", "x") }
+        testScheduler.advanceTimeBy(5_000); testScheduler.runCurrent()
+        assertIs<AuthResult.Ok>(login.await())
+        assertEquals(1, slow.maxActive)
+        assertEquals(2, ev.list.count { it == "sync-fim" })
     }
 }

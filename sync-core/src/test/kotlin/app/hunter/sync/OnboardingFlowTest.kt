@@ -68,4 +68,15 @@ class OnboardingFlowTest {
         assertEquals(Step.DONE, f.next(start, signedIn = true, skippedLogin = false, hasBikeInAccount = true))
         assertEquals(Step.DONE, f.next(start, signedIn = true, skippedLogin = false, hasBikeInAccount = false))
     }
+
+    @Test
+    fun `reabrir a apresentação como visitante também termina nela, sem login nem permissões nem moto`() {
+        val f = flow(seen = true)
+        assertEquals(Step.DONE, f.next(f.reopenIntro(), signedIn = false, skippedLogin = false, hasBikeInAccount = false))
+    }
+
+    @Test
+    fun `primeira vez como visitante continua indo ao login`() {
+        assertEquals(Step.LOGIN, flow(seen = false).next(Step.INTRO, signedIn = false, skippedLogin = false, hasBikeInAccount = false))
+    }
 }

@@ -13,6 +13,7 @@ import app.hunter.sync.UserProfile
  */
 class PerUserRemoteStore(
     private val currentUid: () -> String?,
+    private val pinnedUid: () -> String? = { null },
     private val factory: (uid: String) -> RemoteStore,
 ) : RemoteStore {
     private val lock = Any()
@@ -21,6 +22,9 @@ class PerUserRemoteStore(
 
     private fun store(): RemoteStore {
         val uid = currentUid() ?: throw IllegalStateException("Nenhum usuário logado.")
+        // Durante uma sincronização o uid é fixo: se a conta mudou no meio, aborta sem tocar em nenhuma nuvem.
+        val pinned = pinnedUid()
+        if (pinned != null && pinned != uid) throw IllegalStateException("A conta mudou durante a sincronização.")
         return synchronized(lock) {
             if (cachedUid != uid || cached == null) {
                 cached = factory(uid)

@@ -48,4 +48,20 @@ class PerUserRemoteStoreTest {
         assertFailsWith<IllegalStateException> { store.fetchAll() }
         assertFailsWith<IllegalStateException> { store.deletionPending() }
     }
+
+    @Test fun pinned_uid_mismatch_aborts_without_touching_any_store() = runTest {
+        var uid: String? = "a"
+        var pinned: String? = "a"
+        val made = mutableListOf<Fake>()
+        val store = PerUserRemoteStore({ uid }, { pinned }) { Fake(it).also(made::add) }
+        store.fetchAll()
+        uid = "b"
+        assertFailsWith<IllegalStateException> { store.fetchAll() }
+        assertFailsWith<IllegalStateException> { store.push(emptyList()) }
+        assertEquals(listOf("a"), made.map { it.uid }) // nenhum store da conta "b" foi criado
+        assertEquals(1, made[0].fetches)
+        pinned = null // fora de uma sincronização fixada vale o uid atual
+        store.fetchAll()
+        assertEquals(listOf("a", "b"), made.map { it.uid })
+    }
 }

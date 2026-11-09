@@ -18,7 +18,7 @@ fun AccountNotice(onCreate: () -> Unit, onDismiss: () -> Unit, modifier: Modifie
     FloatingCard(modifier.padding(horizontal = 12.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
-                "Seus dados estão só neste celular. Crie uma conta para protegê-los e recuperá-los se trocar de aparelho.",
+                "Crie uma conta para proteger seus dados: hoje eles estão só neste celular.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {

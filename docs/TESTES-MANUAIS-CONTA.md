@@ -19,7 +19,7 @@ Convenções: "nuvem" = Firestore; "visitante" = sem conta.
 - [ ] Depois do login/pular, as permissões vêm uma de cada vez, cada uma com "Agora não". Nenhuma pede localização "o tempo todo" (segundo plano).
 - [ ] Por fim, o cadastro da moto (completo com conta, curto sem conta). Dá para "Preencher depois".
 - [ ] Feche e abra o app: a apresentação **não** volta; vai direto ao mapa.
-- [ ] Garagem > ícone de perfil > "Rever apresentação" abre a apresentação de novo, e ao terminar volta ao perfil sem pedir permissões nem login de novo se já estiver logado.
+- [ ] Garagem > ícone de perfil > "Rever apresentação" abre só as 4 telas de apresentação, e ao terminar volta ao perfil. Vale para visitante e para logado: nunca mostra login, permissões nem cadastro da moto.
 
 ## 2. Login com Google
 
@@ -107,7 +107,7 @@ Esse é o teste mais importante: usuários atuais **não podem perder dados**.
 - [ ] Gire durante "Aguarde…" de um login por e-mail: o login termina e o app avança.
 - [ ] Gire com a folha de contas do Google aberta: o login Google conclui ou pode ser repetido, sem travar a tela nem fechar o app.
 - [ ] Gire no cadastro da moto e na tela de permissões: não volta ao começo da apresentação.
-- [ ] Mate o app durante a apresentação (instalação nova) e reabra: volta à apresentação (no passo em que parou ou no começo), sem cair direto no mapa e sem tratar a instalação como antiga.
+- [ ] Mate o app durante a apresentação (instalação nova), inclusive depois de entrar numa conta (quando já há dados sincronizados) ou depois do cadastro da moto, e reabra: volta à apresentação (no passo em que parou ou no começo), sem cair direto no mapa e sem tratar a instalação como antiga (sem o aviso "Crie uma conta para proteger seus dados"). Ao terminar a apresentação, reabrir o app vai direto ao mapa.
 
 ## 13. Gravação em segundo plano sem conta (e com conta)
 
@@ -119,6 +119,8 @@ Esse é o teste mais importante: usuários atuais **não podem perder dados**.
 
 - [ ] Conectar ao Pod, ver a bússola e iniciar uma navegação: manobras e distância aparecem no Pod, como antes.
 - [ ] Com e sem conta, com e sem internet, o Pod segue funcionando; entrar/sair da conta não desconecta o Pod.
+
+- [ ] O serviço de gravação de viagens roda no mesmo processo do app: `adb shell ps | grep companion` mostra um único `app.hunter.companion` (o disparo de sincronização ao terminar a viagem depende disso).
 
 ## 15. Sem Firebase (build sem `google-services.json`)
 

@@ -6,6 +6,9 @@ import app.hunter.app.data.SyncDao
 /** Preferência: mostrar o aviso discreto "crie uma conta para proteger seus dados" (só para quem já usava o app). */
 const val EXISTING_USER_NOTICE_KEY = "existing_user_notice"
 
+/** Preferência: a apresentação da primeira abertura começou e ainda não terminou. */
+const val ONBOARDING_IN_PROGRESS_KEY = "onboarding_in_progress"
+
 /**
  * Decide o destino da abertura (veja [entryRoute]). Quem já usava o app é marcado como "apresentação vista" em
  * silêncio e ganha o aviso para criar conta. Deve rodar ANTES de o HunterViewModel existir: ele grava `seeded`
@@ -17,11 +20,13 @@ suspend fun resolveEntry(prefs: SharedPreferences, syncDao: SyncDao, onboarding:
         seen = seen,
         seeded = prefs.getBoolean("seeded", false),
         localRows = if (seen) 0 else syncDao.localRowCount(),
+        inProgress = prefs.getBoolean(ONBOARDING_IN_PROGRESS_KEY, false),
     )
     if (route == EntryRoute.EXISTING_USER) {
         onboarding.markSeen()
         prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, true).apply()
         return EntryRoute.MAIN
     }
+    if (route == EntryRoute.ONBOARDING) prefs.edit().putBoolean(ONBOARDING_IN_PROGRESS_KEY, true).commit()
     return route
 }

@@ -51,6 +51,7 @@ import app.hunter.app.ui.onboarding.AppBikeSaver
 import app.hunter.app.ui.onboarding.BikeSetupScreen
 import app.hunter.app.ui.onboarding.EXISTING_USER_NOTICE_KEY
 import app.hunter.app.ui.onboarding.EntryRoute
+import app.hunter.app.ui.onboarding.ONBOARDING_IN_PROGRESS_KEY
 import app.hunter.app.ui.onboarding.LoginRoute
 import app.hunter.app.ui.onboarding.OnboardingScreen
 import app.hunter.app.ui.onboarding.PermissionsScreen
@@ -157,7 +158,10 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
         null -> Box(Modifier.fillMaxSize())
         Route.ONBOARDING -> {
             val flow = remember { OnboardingFlow(seen = false) }
-            Onboarding(flow, flow.first()) { route = Route.MAIN }
+            Onboarding(flow, flow.first()) {
+                prefs.edit().putBoolean(ONBOARDING_IN_PROGRESS_KEY, false).apply()
+                route = Route.MAIN
+            }
         }
         else -> Box(Modifier.fillMaxSize()) {
             HunterRoot(
@@ -279,9 +283,12 @@ private fun HunterRoot(
 
             // Quem já usava o app: aviso discreto e dispensável para criar conta (nunca durante a navegação).
             var showNotice by remember { mutableStateOf(prefs.getBoolean(EXISTING_USER_NOTICE_KEY, false)) }
-            if (signedIn && showNotice) {
-                prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
-                showNotice = false
+            // Entrou numa conta: o aviso perde o sentido. Efeito (não durante a composição) para gravar a preferência.
+            LaunchedEffect(signedIn, showNotice) {
+                if (signedIn && showNotice) {
+                    prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
+                    showNotice = false
+                }
             }
             if (showNotice && !signedIn && accountAvailable && !nav.active) {
                 AccountNotice(

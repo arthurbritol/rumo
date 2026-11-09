@@ -1,5 +1,6 @@
 package app.hunter.app.account
 
+import app.hunter.app.sync.SyncGate
 import app.hunter.sync.SyncEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -17,6 +18,7 @@ class AuthRepository(
     private val gateway: AuthGateway,
     private val engine: SyncEngine,
     private val flag: PendingDeletionFlag,
+    private val gate: SyncGate = SyncGate(),
     private val firstSyncTimeoutMs: Long = FIRST_SYNC_TIMEOUT_MS,
 ) {
     val state: StateFlow<AuthState> get() = gateway.state
@@ -41,14 +43,18 @@ class AuthRepository(
 
     /** Só sai se não houver nada pendente de envio; limpa o aparelho e então encerra a sessão. */
     suspend fun signOut(): AuthResult = withContext(NonCancellable) {
-        if (!engine.canSignOut()) return@withContext blocked()
-        try {
-            engine.signOutWipe()
-        } catch (e: IllegalStateException) {
-            return@withContext blocked() // uma edição chegou entre a checagem e a limpeza
+        // Toda a sequência sob a trava do motor: espera uma sincronização em andamento e não deixa outra começar
+        // entre a checagem, a limpeza e o encerramento da sessão.
+        gate.withLock {
+            if (!engine.canSignOut()) return@withLock blocked()
+            try {
+                engine.signOutWipe()
+            } catch (e: IllegalStateException) {
+                return@withLock blocked() // uma edição chegou entre a checagem e a limpeza
+            }
+            gateway.signOut()
+            AuthResult.Ok
         }
-        gateway.signOut()
-        AuthResult.Ok
     }
 
     /**
@@ -80,7 +86,7 @@ class AuthRepository(
                 )
             }
             try {
-                withTimeout(NET_TIMEOUT_MS) { engine.deleteAccountData() }
+                withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.deleteAccountData() } }
             } catch (e: Exception) {
                 // Não dá para saber o que já foi apagado: a marca fica e a retomada refaz (idempotente).
                 return@withContext incomplete(AuthError.NETWORK)
@@ -89,7 +95,7 @@ class AuthRepository(
             if (r is AuthResult.Error) {
                 // Melhor esforço: a marca na nuvem já foi apagada por deleteAllUserData; a local é a que vale.
                 try {
-                    withTimeout(NET_TIMEOUT_MS) { engine.markDeletionPending() }
+                    withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.markDeletionPending() } }
                 } catch (e: Exception) {
                     // ignorado de propósito
                 }
@@ -112,14 +118,14 @@ class AuthRepository(
         val flagged = flag.uid()
         if (flagged != null && flagged != uid) flag.clear() // sobra de outra conta: nunca apagar esta
         val pending = flagged == uid || try {
-            withTimeout(NET_TIMEOUT_MS) { engine.isDeletionPending() }
+            withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.isDeletionPending() } }
         } catch (e: Exception) {
             false
         }
         if (!pending) return@withContext false
         flag.set(uid) // melhor esforço: se falhar, a marca da nuvem (ou a já gravada) ainda vale
         try {
-            withTimeout(NET_TIMEOUT_MS) { engine.deleteAccountData() }
+            withTimeout(NET_TIMEOUT_MS) { gate.withLock { engine.deleteAccountData() } }
         } catch (e: Exception) {
             return@withContext false
         }
@@ -170,7 +176,7 @@ class AuthRepository(
             )
         }
         try {
-            withTimeoutOrNull(firstSyncTimeoutMs) { engine.firstSync() } // nulo = estourou: sincroniza depois
+            withTimeoutOrNull(firstSyncTimeoutMs) { gate.pinned { engine.firstSync() } } // nulo = estourou: sincroniza depois
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

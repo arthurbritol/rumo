@@ -19,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -193,5 +194,60 @@ class SyncSchedulerTest {
         assertEquals(1, errors.size)
         assertTrue(errors[0] is kotlinx.coroutines.TimeoutCancellationException)
         assertEquals(0, remote.active)
+    }
+
+    @Test
+    fun mudancaDeContaNoMeioDaSincronizacaoAbortaSemEnviarParaOutroUsuario() = runTest {
+        var uid: String? = "a"
+        val pushed = mutableListOf<String>()
+        val errors = mutableListOf<Throwable>()
+        class Rec(val id: String) : RemoteStore {
+            override suspend fun fetchAll(): RemoteSnapshot { delay(1_000); return RemoteSnapshot(emptyList(), null, null) }
+            override suspend fun push(docs: List<SyncDoc>) { pushed += id }
+            override suspend fun pushOdometer(o: OdometerDoc) { pushed += id }
+            override suspend fun pushProfile(p: UserProfile) { pushed += id }
+            override suspend fun markDeletionPending() {}
+            override suspend fun deletionPending() = false
+            override suspend fun deleteAllUserData() {}
+        }
+        val gate = SyncGate({ uid })
+        val remote = PerUserRemoteStore({ uid }, { gate.pinnedUid }) { Rec(it) }
+        val local = FakeLocal(listOf(doc))
+        val sched = SyncScheduler(SyncEngine(local, remote) { 100L }, backgroundScope, 0, 0, { errors += it }, gate) { true }
+        sched.syncOnConnectivity()
+        advanceTimeBy(500)
+        uid = "b" // troca de conta com a sincronização da conta "a" em andamento
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(pushed.isEmpty(), "enviou para $pushed")
+        assertEquals(1, errors.size)
+        assertTrue(errors[0] is IllegalStateException)
+        assertEquals(listOf(doc), local.dirty()) // continua sujo: tenta de novo depois
+    }
+
+    @Test
+    fun sairEsperaASincronizacaoEmAndamentoENuncaSeIntercala() = runTest {
+        val log = mutableListOf<String>()
+        val gate = SyncGate()
+        val remote = object : RemoteStore {
+            override suspend fun fetchAll(): RemoteSnapshot { log += "sync-inicio"; delay(5_000); log += "sync-fim"; return RemoteSnapshot(emptyList(), null, null) }
+            override suspend fun push(docs: List<SyncDoc>) {}
+            override suspend fun pushOdometer(o: OdometerDoc) {}
+            override suspend fun pushProfile(p: UserProfile) {}
+            override suspend fun markDeletionPending() {}
+            override suspend fun deletionPending() = false
+            override suspend fun deleteAllUserData() {}
+        }
+        val sched = SyncScheduler(SyncEngine(FakeLocal(), remote) { 100L }, backgroundScope, 0, 0, {}, gate) { true }
+        sched.syncOnConnectivity()
+        runCurrent()
+        val signOut = backgroundScope.launch { gate.withLock { log += "sair" } } // o que AuthRepository.signOut faz
+        advanceTimeBy(4_000)
+        runCurrent()
+        assertEquals(listOf("sync-inicio"), log) // sair ainda espera
+        advanceTimeBy(1_500)
+        runCurrent()
+        assertEquals(listOf("sync-inicio", "sync-fim", "sair"), log)
+        assertTrue(signOut.isCompleted)
     }
 }

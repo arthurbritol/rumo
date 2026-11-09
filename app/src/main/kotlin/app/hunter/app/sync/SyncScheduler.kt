@@ -8,8 +8,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Agenda a sincronização. Kotlin puro: não conhece Android.
@@ -31,12 +29,12 @@ class SyncScheduler(
     private val debounceMs: Long = 5_000,
     private val connectivityCooldownMs: Long = 10_000,
     private val onError: (Throwable) -> Unit = {},
+    private val gate: SyncGate = SyncGate(),
     private val isSignedIn: () -> Boolean,
 ) {
     private val lock = Any()
     private var pending: Job? = null
     private var connectivityJob: Job? = null
-    private val running = Mutex()
 
     @Volatile
     private var syncing = false
@@ -66,8 +64,9 @@ class SyncScheduler(
     }
 
     private suspend fun run() {
-        running.withLock {
-            if (!isSignedIn()) return
+        // A trava é a do grafo da conta: sair/apagar conta/primeiro sync não correm junto com esta sincronização.
+        gate.pinned {
+            if (!isSignedIn()) return@pinned
             syncing = true
             try {
                 withTimeout(SYNC_TIMEOUT_MS) { engine.syncNow() }

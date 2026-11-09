@@ -19,7 +19,7 @@ class OnboardingFlow(private val seen: Boolean) {
 
     fun next(from: Step, signedIn: Boolean, skippedLogin: Boolean, hasBikeInAccount: Boolean): Step = when (from) {
         Step.INTRO -> when {
-            signedIn && seen -> Step.DONE // reaberta pelo menu de ajuda: nada de login nem de permissões de novo
+            seen -> Step.DONE // reaberta pelo menu de ajuda: só a apresentação, nunca login, permissões nem moto
             signedIn -> Step.PERMISSIONS
             else -> Step.LOGIN
         }
