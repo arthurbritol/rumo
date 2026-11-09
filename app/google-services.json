@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1031536329252",
+    "project_id": "rumo-nov",
+    "storage_bucket": "rumo-nov.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1031536329252:android:6b3ea461f1a6780658ceb1",
+        "android_client_info": {
+          "package_name": "app.hunter.companion"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1031536329252-71es19nmr9pd2840ui8k4tajo1tmgrep.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "app.hunter.companion",
+            "certificate_hash": "74dd815089b408f1fa24012979b12cd6318d5dc2"
+          }
+        },
+        {
+          "client_id": "1031536329252-amv3api6mkqd3qa46bvhv9ic4bnoct1g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyByXEZqWUezFcaHM4F-N-Is5ZdUB7TEcJw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1031536329252-amv3api6mkqd3qa46bvhv9ic4bnoct1g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
