@@ -109,4 +109,45 @@ class MergeTest {
         assertNull(mergeOdometer(null, null, now))
         assertEquals(b, mergeOdometer(a.copy(updatedAtMs = 200), b, now))
     }
+
+    @Test
+    fun `número Int de um lado e Double do outro não conta como diferença`() {
+        val remoto = fuel("a", 100).copy(fields = fuel("a", 100).fields + ("liters" to 10))
+        val plan = merge(listOf(fuel("a", 100, liters = 10.0)), listOf(remoto), now)
+        assertTrue(plan.applyLocal.isEmpty() && plan.pushRemote.isEmpty())
+    }
+
+    @Test
+    fun `dedupKey com NaN ou infinito não lança`() {
+        val nan = fuel("a", 1, liters = Double.NaN)
+        val inf = fuel("b", 1, liters = Double.POSITIVE_INFINITY)
+        assertEquals("5000|1000|NaN|60", dedupKey(nan))
+        assertEquals("5000|1000|Infinity|60", dedupKey(inf))
+        merge(listOf(nan), listOf(inf), now)
+    }
+
+    @Test
+    fun `o updatedAtMs limitado é o que é aplicado e enviado`() {
+        val futuro = now + 2 * 86_400_000L
+        val soLocal = merge(listOf(fuel("a", futuro)), emptyList(), now)
+        assertEquals(listOf(fuel("a", now)), soLocal.pushRemote)
+        val soRemoto = merge(emptyList(), listOf(fuel("a", futuro)), now)
+        assertEquals(listOf(fuel("a", now)), soRemoto.applyLocal)
+    }
+
+    @Test
+    fun `timestamp dentro da janela de um dia não é limitado`() {
+        val dentro = now + 86_400_000L
+        val plan = merge(listOf(fuel("a", dentro)), emptyList(), now)
+        assertEquals(listOf(fuel("a", dentro)), plan.pushRemote)
+    }
+
+    @Test
+    fun `grupo de três duplicatas fica com o menor gid e duas lápides`() {
+        val plan = merge(listOf(fuel("c", 100), fuel("a", 100)), listOf(fuel("b", 100)), now)
+        val lapides = listOf(fuel("b", now).copy(deleted = true), fuel("c", now).copy(deleted = true))
+        assertEquals(lapides, plan.pushRemote.filter { it.deleted }.sortedBy { it.gid })
+        assertEquals(listOf("a"), plan.pushRemote.filter { !it.deleted }.map { it.gid }) // "a" só existia local
+        assertEquals(lapides, plan.applyLocal.filter { it.deleted }.sortedBy { it.gid })
+    }
 }

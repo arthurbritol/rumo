@@ -9,7 +9,7 @@ data class MergePlan(val applyLocal: List<SyncDoc>, val pushRemote: List<SyncDoc
 
 private fun fmt(v: Any?): String = when (v) {
     null -> ""
-    is Number -> BigDecimal(v.toDouble()).stripTrailingZeros().toPlainString()
+    is Number -> v.toDouble().let { if (it.isFinite()) BigDecimal(it).stripTrailingZeros().toPlainString() else it.toString() }
     else -> v.toString()
 }
 
@@ -30,6 +30,18 @@ fun dedupKey(d: SyncDoc): String? {
         }
     }
 }
+
+/** Normaliza números (Int/Long/Float -> Double) para que o ciclo de ida e volta no Firestore não conte como mudança. */
+private fun normalize(v: Any?): Any? = when (v) {
+    is Number -> v.toDouble()
+    is Map<*, *> -> v.mapValues { normalize(it.value) }
+    is List<*> -> v.map { normalize(it) }
+    else -> v
+}
+
+private fun sameDoc(a: SyncDoc?, b: SyncDoc): Boolean =
+    a != null && a.kind == b.kind && a.gid == b.gid && a.updatedAtMs == b.updatedAtMs &&
+        a.deleted == b.deleted && normalize(a.fields) == normalize(b.fields)
 
 private fun clamp(ts: Long, nowMs: Long): Long = if (ts > nowMs + DAY_MS) nowMs else ts
 
@@ -63,8 +75,8 @@ fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long): MergePlan {
     val applyLocal = ArrayList<SyncDoc>()
     val pushRemote = ArrayList<SyncDoc>()
     for ((key, doc) in winners) {
-        if (localBy[key] != doc) applyLocal += doc
-        if (remoteBy[key] != doc) pushRemote += doc
+        if (!sameDoc(localBy[key], doc)) applyLocal += doc
+        if (!sameDoc(remoteBy[key], doc)) pushRemote += doc
     }
     return MergePlan(applyLocal, pushRemote)
 }
