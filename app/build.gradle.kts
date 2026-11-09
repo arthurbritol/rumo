@@ -7,6 +7,11 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// O Google Services só entra quando o dono coloca app/google-services.json; sem ele o app compila e roda sem conta.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "app.hunter.app"
     compileSdk = 36
@@ -88,4 +93,11 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.kotlinx.coroutines.android)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 }

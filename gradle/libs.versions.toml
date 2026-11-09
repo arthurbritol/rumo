@@ -9,6 +9,10 @@ lifecycle = "2.9.4"
 coreKtx = "1.17.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
+googleServices = "4.4.4"
+firebaseBom = "34.19.0"
+credentials = "1.6.0"
+googleid = "1.1.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -29,6 +33,12 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version = "2.10.0" }
 maplibre ={ module = "org.maplibre.gl:android-sdk", version = "13.7.1" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
+firebase-auth = { module = "com.google.firebase:firebase-auth" }
+firebase-firestore = { module = "com.google.firebase:firebase-firestore" }
+androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
+androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
+googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
@@ -38,3 +48,4 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
