@@ -26,8 +26,13 @@ private class Events { val list = mutableListOf<String>() }
 
 private class FakeFlag : PendingDeletionFlag {
     var value: String? = null
+    var failSet = false
     override fun uid() = value
-    override fun set(uid: String) { value = uid }
+    override fun set(uid: String): Boolean {
+        if (failSet) return false
+        value = uid
+        return true
+    }
     override fun clear() { value = null }
 }
 
@@ -92,14 +97,19 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
     override var providerIsPassword = false
     var signUpResult: AuthResult = AuthResult.Ok
     var onDelete: (suspend () -> Unit)? = null
+    /** Simula o listener do Firebase ainda não ter rodado: o login dá Ok mas o estado segue Guest. */
+    var stateLagsSignIn = false
 
-    override suspend fun signInGoogle() = googleResult
+    override suspend fun signInGoogle(): AuthResult {
+        if (googleResult is AuthResult.Ok && !stateLagsSignIn) state.value = AuthState.SignedIn(signInUid, "Ana", "a@b.c", true)
+        return googleResult
+    }
     override suspend fun signUpEmail(name: String, email: String, password: String): AuthResult {
         signedUpName = name
         return signUpResult
     }
     override suspend fun signInEmail(email: String, password: String): AuthResult {
-        if (signInResult is AuthResult.Ok) state.value = AuthState.SignedIn(signInUid, "Ana", email, true)
+        if (signInResult is AuthResult.Ok && !stateLagsSignIn) state.value = AuthState.SignedIn(signInUid, "Ana", email, true)
         return signInResult
     }
     override suspend fun linkGoogleToEmail(email: String, password: String): AuthResult {
@@ -439,6 +449,49 @@ class AuthRepositoryTest {
         gateway.deleteResults += err(AuthError.NETWORK)
         repo.deleteAccount(null)
         assertEquals("u", flag.value)
+    }
+
+    @Test
+    fun `login Ok sem uid confirmado (listener atrasado) mantem a flag e nao apaga nem sincroniza`() = runTest {
+        flag.value = "A"
+        gateway.signInUid = "A"
+        gateway.state.value = AuthState.Guest
+        gateway.stateLagsSignIn = true
+        val r = repo.signInEmail("a@b.c", "123456")
+        assertIs<AuthResult.Error>(r)
+        assertTrue(r.message.contains("confirmar o login"))
+        assertEquals("A", flag.value)
+        assertTrue(ev.list.isEmpty())
+        assertEquals(0, gateway.deleteCalls)
+        assertEquals(0, remote.fetches)
+        assertTrue(remote.cloudHasData)
+
+        assertIs<AuthResult.Error>(repo.signInGoogle())
+        assertEquals("A", flag.value)
+        assertEquals(0, remote.fetches)
+        assertEquals(0, gateway.deleteCalls)
+    }
+
+    @Test
+    fun `login Ok sem uid confirmado e sem flag nao sincroniza`() = runTest {
+        gateway.state.value = AuthState.Guest
+        gateway.stateLagsSignIn = true
+        assertIs<AuthResult.Error>(repo.signInEmail("a@b.c", "123456"))
+        assertEquals(0, remote.fetches)
+        assertNull(flag.value)
+    }
+
+    @Test
+    fun `apagar conta - falha ao gravar a flag nao toca em nada`() = runTest {
+        flag.failSet = true
+        val r = repo.deleteAccount(null)
+        assertIs<AuthResult.Error>(r)
+        assertTrue(remote.cloudHasData)
+        assertFalse(remote.pending)
+        assertEquals(0, gateway.deleteCalls)
+        assertTrue(ev.list.isEmpty())
+        assertNull(flag.value)
+        assertIs<AuthState.SignedIn>(gateway.state.value)
     }
 
     @Test

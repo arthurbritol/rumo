@@ -104,6 +104,7 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
         return try {
             a.signInWithCredential(credential).await()
             pendingGoogle = null
+            _state.value = a.currentUser.toState() // não espera o listener: o repositório lê o uid já
             AuthResult.Ok
         } catch (e: FirebaseAuthUserCollisionException) {
             pendingGoogle = credential
@@ -125,6 +126,7 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
                 ?: return@guarded AuthResult.Error(AuthError.OTHER, "Não foi possível entrar.")
             user.linkWithCredential(google).await()
             pendingGoogle = null
+            _state.value = a.currentUser.toState()
             AuthResult.Ok
         }
     }
@@ -149,7 +151,11 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
 
     override suspend fun signInEmail(email: String, password: String): AuthResult {
         val a = auth ?: return unavailable()
-        return guarded { a.signInWithEmailAndPassword(email.trim(), password).await(); AuthResult.Ok }
+        return guarded {
+            a.signInWithEmailAndPassword(email.trim(), password).await()
+            _state.value = a.currentUser.toState()
+            AuthResult.Ok
+        }
     }
 
     override suspend fun resetPassword(email: String): AuthResult {

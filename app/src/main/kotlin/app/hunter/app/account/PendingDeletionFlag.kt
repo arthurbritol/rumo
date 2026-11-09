@@ -8,7 +8,8 @@ import android.content.Context
  */
 interface PendingDeletionFlag {
     fun uid(): String?
-    fun set(uid: String)
+    /** Retorna false se não conseguiu gravar; quem chama não deve seguir sem a marca. */
+    fun set(uid: String): Boolean
     fun clear()
 }
 
@@ -18,9 +19,8 @@ class SharedPrefsPendingDeletionFlag(context: Context) : PendingDeletionFlag {
 
     override fun uid(): String? = prefs.getString(KEY, null)?.takeIf { it.isNotEmpty() }
 
-    override fun set(uid: String) {
+    override fun set(uid: String): Boolean =
         prefs.edit().remove(LEGACY_KEY).putString(KEY, uid).commit()
-    }
 
     override fun clear() {
         prefs.edit().remove(KEY).remove(LEGACY_KEY).commit()

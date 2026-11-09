@@ -72,7 +72,13 @@ class AuthRepository(
         }
         if (reauth is AuthResult.Error) return reauth
         return withContext(NonCancellable) {
-            flag.set(uid)
+            if (!flag.set(uid)) {
+                // Sem a marca local uma interrupção deixaria a conta sem dados e sem retomada: não começa.
+                return@withContext AuthResult.Error(
+                    AuthError.OTHER,
+                    "Não foi possível iniciar a exclusão. Nada foi apagado; tente de novo.",
+                )
+            }
             try {
                 withTimeout(NET_TIMEOUT_MS) { engine.deleteAccountData() }
             } catch (e: Exception) {
@@ -111,7 +117,7 @@ class AuthRepository(
             false
         }
         if (!pending) return@withContext false
-        flag.set(uid)
+        flag.set(uid) // melhor esforço: se falhar, a marca da nuvem (ou a já gravada) ainda vale
         try {
             withTimeout(NET_TIMEOUT_MS) { engine.deleteAccountData() }
         } catch (e: Exception) {
@@ -146,8 +152,13 @@ class AuthRepository(
 
     private suspend fun AuthResult.thenSync(): AuthResult {
         if (this !is AuthResult.Ok) return this
+        // Sem uid confirmado não dá para comparar com a marca: não mexe nela e não sincroniza.
+        val uid = signedUid() ?: return AuthResult.Error(
+            AuthError.OTHER,
+            "Não foi possível confirmar o login. Tente de novo.",
+        )
         val flagged = flag.uid()
-        if (flagged != null && flagged != signedUid()) {
+        if (flagged != null && flagged != uid) {
             flag.clear() // sobra de outra conta: ignorada, só a marca da nuvem da conta logada vale
         } else if (flagged != null) {
             // Exclusão pendente neste aparelho: conclui antes de qualquer sincronização, nada sobe.
