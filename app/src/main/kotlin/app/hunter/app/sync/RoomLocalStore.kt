@@ -65,9 +65,9 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
                     onUpsert = {
                         val byGid = dao.placeByGid(d.gid)
                         // Sem o mesmo gid: se já há um recente nas mesmas coordenadas, ele vira o favorito (sem duplicar).
-                        val cur = byGid ?: dao.placeNear(
+                        val cur = placeMergeTarget(byGid, dao.placeNearRecent(
                             (d.fields["lat"] as? Number)?.toDouble() ?: 0.0, (d.fields["lon"] as? Number)?.toDouble() ?: 0.0,
-                        )
+                        ))
                         val e = placeFromDoc(d, cur, now)
                         if (cur == null) dao.insertPlace(e) else dao.updatePlace(e)
                     })
@@ -122,11 +122,22 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
 
     override suspend fun profile(): UserProfile? = ProfilePrefs.read(prefs)
 
-    override suspend fun applyProfile(p: UserProfile) = ProfilePrefs.write(prefs, p)
+    override suspend fun applyProfile(p: UserProfile) {
+        when (profileApplyDecision(ProfilePrefs.read(prefs), ProfilePrefs.isDirty(prefs), p)) {
+            ProfileApply.WRITE -> ProfilePrefs.write(prefs, p)
+            ProfileApply.CLEAN_ONLY -> ProfilePrefs.markClean(prefs)
+            ProfileApply.SKIP -> Unit // editado durante a sincronização: continua sujo e sobe na próxima
+        }
+    }
 
     override suspend fun hasDirtyOdometerOrProfile(): Boolean =
         maintenance.getOdometer()?.dirty == true || ProfilePrefs.isDirty(prefs)
 
+    /**
+     * Apaga os dados da conta deste aparelho. Também apaga os locais recentes (só locais), de propósito:
+     * privacidade ao sair. A viagem em gravação (e seus pontos) é mantida para não quebrar o gravador.
+     * Lança [IllegalStateException] sem apagar nada se houver qualquer linha suja.
+     */
     override suspend fun clearAll() {
         db.withTransaction {
             val blocker = clearAllBlocker(
@@ -135,7 +146,7 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
                 profileDirty = ProfilePrefs.isDirty(prefs),
             )
             if (blocker != null) throw IllegalStateException(blocker)
-            dao.wipeTrips() // track_points saem por cascata
+            dao.wipeFinishedTrips() // pontos das concluídas saem por cascata; a viagem gravando fica
             dao.wipeFuelups()
             dao.wipeItems()
             dao.wipePlaces()

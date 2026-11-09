@@ -8,6 +8,7 @@ import app.hunter.maintenance.data.OdometerEntity
 import app.hunter.sync.Kind
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.SyncDoc
+import app.hunter.sync.UserProfile
 import app.hunter.sync.dedupKey
 import app.hunter.trips.data.TripEntity
 import kotlin.test.Test
@@ -116,6 +117,23 @@ class RoomLocalStoreMappingTest {
         assertNotNull(clearAllBlocker(1, false, false))
         assertNotNull(clearAllBlocker(0, true, false))
         assertNotNull(clearAllBlocker(0, false, true))
+    }
+
+    @Test fun `local da nuvem nunca adota outro favorito, so recente`() {
+        val fav = place.copy(gid = "outro", favorite = true)
+        val recent = place.copy(gid = "r", favorite = false)
+        assertNull(placeMergeTarget(null, fav))
+        assertEquals(recent, placeMergeTarget(null, recent))
+        assertEquals(fav, placeMergeTarget(fav, recent))
+        assertNull(placeMergeTarget(null, null))
+    }
+
+    @Test fun `perfil da nuvem nao sobrescreve edicao feita durante a sincronizacao`() {
+        val sent = UserProfile("Ana", "Honda", "Hunter", 2024, voice = true)
+        assertEquals(ProfileApply.WRITE, profileApplyDecision(null, false, sent))
+        assertEquals(ProfileApply.WRITE, profileApplyDecision(sent.copy(voice = false), false, sent))
+        assertEquals(ProfileApply.CLEAN_ONLY, profileApplyDecision(sent, true, sent))
+        assertEquals(ProfileApply.SKIP, profileApplyDecision(sent.copy(voice = false), true, sent))
     }
 
     @Test fun `somente voice viaja no perfil`() {

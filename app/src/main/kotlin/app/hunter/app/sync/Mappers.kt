@@ -8,6 +8,7 @@ import app.hunter.maintenance.data.OdometerEntity
 import app.hunter.sync.Kind
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.SyncDoc
+import app.hunter.sync.UserProfile
 import app.hunter.trips.data.TripEntity
 
 // Mapeamento entidade <-> SyncDoc em Kotlin puro (testável na JVM). Os nomes dos campos são os que
@@ -35,6 +36,22 @@ fun clearAllBlocker(dirtyRows: Int, odometerDirty: Boolean, profileDirty: Boolea
     odometerDirty -> "O hodômetro tem alteração ainda não enviada."
     profileDirty -> "O perfil tem alteração ainda não enviada."
     else -> null
+}
+
+/** Linha que um local vindo da nuvem deve atualizar: o mesmo gid, ou um RECENTE próximo; nunca outro favorito. */
+fun placeMergeTarget(byGid: PlaceEntity?, near: PlaceEntity?): PlaceEntity? =
+    byGid ?: near?.takeIf { !it.favorite }
+
+enum class ProfileApply { WRITE, CLEAN_ONLY, SKIP }
+
+/**
+ * [LocalStore.applyProfile]: [incoming] é o perfil que o motor leu/enviou. Sujo e igual ao guardado = o que foi
+ * enviado, só limpa. Sujo e diferente = edição feita durante a sincronização: não sobrescreve nem limpa.
+ */
+fun profileApplyDecision(stored: UserProfile?, dirty: Boolean, incoming: UserProfile): ProfileApply = when {
+    stored == null || !dirty -> ProfileApply.WRITE
+    stored == incoming -> ProfileApply.CLEAN_ONLY
+    else -> ProfileApply.SKIP
 }
 
 // ---------- abastecimento ----------

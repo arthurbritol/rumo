@@ -48,6 +48,10 @@ object ProfilePrefs {
         p.edit().putBoolean(DIRTY, true).apply()
     }
 
+    fun markClean(p: SharedPreferences) {
+        p.edit().putBoolean(DIRTY, false).commit()
+    }
+
     /** Sujo só conta se existe perfil para enviar. */
     fun isDirty(p: SharedPreferences): Boolean = p.getBoolean(DIRTY, false) && p.contains(NAME)
 
