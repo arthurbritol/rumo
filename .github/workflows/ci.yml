@@ -31,14 +31,14 @@ jobs:
 
       - name: Relatórios de teste
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: relatorios-de-teste
           path: "**/build/reports/tests/"
           if-no-files-found: ignore
 
       - name: APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rumo-apk
           path: app/build/outputs/apk/release/app-release.apk
