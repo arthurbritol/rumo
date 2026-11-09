@@ -56,7 +56,7 @@ class BikeFormTest {
         f.selectBike("Royal Enfield", "Hunter 350") // edição do usuário não é sobrescrita
         assertEquals("14,5", f.tankLiters)
         f.odometerKm = "100"
-        assertEquals(14.5, f.toOdometer(1L).tankLiters)
+        assertEquals(14.5, f.toOdometer(1L, tripsDistanceM = 0.0).tankLiters)
         assertEquals(13.0, BikeForm.defaultTankLiters("Outra", "qualquer"))
     }
 
@@ -94,5 +94,24 @@ class BikeFormTest {
         val f = BikeForm(short = true)
         f.selectBike("Honda", "CG 160")
         assertNull(f.toProfile("").brand)
+    }
+
+    @Test fun `hodômetro exibido é igual ao km digitado mesmo com viagens gravadas`() {
+        val f = BikeForm(short = true)
+        f.odometerKm = "5000"
+        val o = f.toOdometer(1L, tripsDistanceM = 123_456.0)
+        assertEquals(5000.0, app.hunter.maintenance.Odometer.currentKm(o.offsetKm, 123_456.0), 1e-9)
+    }
+
+    @Test fun `km recusa notação científica, sufixos, zero negativo e valores absurdos`() {
+        val f = BikeForm(short = true)
+        for (bad in listOf("1e5", "1d", "-0", "0x10", "NaN", "Infinity", "1.2.3", "2000001")) {
+            f.odometerKm = bad
+            assertEquals(setOf(FormField.ODOMETER), fields(f), bad)
+        }
+        for (good in listOf("0", "12,5", "12.5", "2000000")) {
+            f.odometerKm = good
+            assertTrue(f.validate(2026).isEmpty(), good)
+        }
     }
 }

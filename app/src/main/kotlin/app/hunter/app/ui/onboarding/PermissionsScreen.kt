@@ -76,34 +76,36 @@ fun PermissionsScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { resumeTick++ }
 
     val step = steps.getOrNull(index)
+
+    // O próximo índice sai da própria etapa (não de um contador), então dois eventos seguidos não pulam etapas.
+    fun advanceFrom(s: PermStep) {
+        needsSettings = false
+        index = steps.indexOf(s) + 1
+    }
+
     LaunchedEffect(index, resumeTick, steps) {
         val s = steps.getOrNull(index)
         if (s == null) {
             finish()
         } else if (isGranted(context, s)) {
-            needsSettings = false
-            index++
+            advanceFrom(s)
         }
-    }
-    if (step == null) return
-
-    fun next() {
-        needsSettings = false
-        index++
     }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        if (result.isEmpty()) return@rememberLauncherForActivityResult // pedido interrompido
-        if (isGranted(context, step)) {
-            next()
+        val st = step
+        if (st == null || result.isEmpty()) return@rememberLauncherForActivityResult // pedido interrompido
+        if (isGranted(context, st)) {
+            advanceFrom(st)
         } else {
             // Negada. Sem "deveria explicar", o Android não vai mais perguntar: só as configurações resolvem.
             val activity = context.findActivity()
             val canAskAgain = activity != null &&
-                step.permissions.any { it in result && ActivityCompat.shouldShowRequestPermissionRationale(activity, it) }
+                st.permissions.any { it in result && ActivityCompat.shouldShowRequestPermissionRationale(activity, it) }
             needsSettings = !canAskAgain
         }
     }
+    if (step == null) return
 
     Column(
         modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 24.dp),
@@ -133,7 +135,7 @@ fun PermissionsScreen(
             PrimaryButton("Permitir", { launcher.launch(step.permissions.toTypedArray()) })
         }
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = ::next, modifier = Modifier.fillMaxWidth()) { Text("Agora não") }
+        TextButton(onClick = { advanceFrom(step) }, modifier = Modifier.fillMaxWidth()) { Text("Agora não") }
     }
 }
 

@@ -27,9 +27,11 @@ class AccountViewModel(private val repo: AuthRepository) : ViewModel() {
     private val _errorKind = MutableStateFlow<AuthError?>(null)
     val errorKind: StateFlow<AuthError?> = _errorKind.asStateFlow()
 
-    /** Conta quantas operações terminaram com sucesso; a tela observa para mostrar avisos de sucesso. */
-    private val _okCount = MutableStateFlow(0)
-    val okCount: StateFlow<Int> = _okCount.asStateFlow()
+    /** Aviso de sucesso de uma só vez (e-mail de confirmação, link de senha); a tela o mostra e chama [consumeNotice]. */
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
+    fun consumeNotice() { _notice.value = null }
 
     fun clearError() {
         _error.value = null
@@ -38,12 +40,16 @@ class AccountViewModel(private val repo: AuthRepository) : ViewModel() {
 
     fun signInGoogle() = launchOp { repo.signInGoogle() }
     fun signInEmail(email: String, password: String) = launchOp { repo.signInEmail(email, password) }
-    fun signUpEmail(name: String, email: String, password: String) = launchOp { repo.signUpEmail(name, email, password) }
+    fun signUpEmail(name: String, email: String, password: String) = launchOp(
+        okNotice = "Enviamos um e-mail de confirmação para $email. Confira a caixa de entrada.",
+    ) { repo.signUpEmail(name, email, password) }
     fun linkGoogle(password: String) {
         val email = _linkEmail.value ?: return
         launchOp { repo.linkGoogleToEmail(email, password) }
     }
-    fun resetPassword(email: String) = launchOp { repo.resetPassword(email) }
+    fun resetPassword(email: String) = launchOp(
+        okNotice = "Se o e-mail tiver conta, enviamos um link para criar uma nova senha.",
+    ) { repo.resetPassword(email) }
     fun sendVerification() = launchOp { repo.sendVerification() }
     fun signOut() = launchOp { repo.signOut() }
     fun deleteAccount(password: String?) = launchOp { repo.deleteAccount(password) }
@@ -52,17 +58,18 @@ class AccountViewModel(private val repo: AuthRepository) : ViewModel() {
         viewModelScope.launch { repo.resumeDeletionIfNeeded() }
     }
 
-    private fun launchOp(block: suspend () -> AuthResult) {
+    private fun launchOp(okNotice: String? = null, block: suspend () -> AuthResult) {
         if (_busy.value) return
         _busy.value = true
         _error.value = null
         _errorKind.value = null
+        _notice.value = null
         viewModelScope.launch {
             try {
                 when (val r = block()) {
                     AuthResult.Ok -> {
                         _linkEmail.value = null
-                        _okCount.value += 1
+                        if (okNotice != null) _notice.value = okNotice
                     }
                     is AuthResult.Error -> when (r.kind.also { if (it != AuthError.CANCELLED) _errorKind.value = it }) {
                         AuthError.CANCELLED -> Unit

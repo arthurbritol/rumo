@@ -74,32 +74,20 @@ fun LoginRoute(
     val error by vm.error.collectAsStateWithLifecycle()
     val errorKind by vm.errorKind.collectAsStateWithLifecycle()
     val linkEmail by vm.linkEmail.collectAsStateWithLifecycle()
-    val okCount by vm.okCount.collectAsStateWithLifecycle()
+    val notice by vm.notice.collectAsStateWithLifecycle()
 
-    var pending by remember { mutableStateOf<PendingOp?>(null) }
-    var info by remember { mutableStateOf<String?>(null) }
-    var waitingNotice by remember { mutableStateOf(false) }
-    var signedUpEmail by remember { mutableStateOf("") }
+    // Só texto não secreto vai para o estado salvo (sobrevive à rotação); a senha nunca.
+    var pendingName by rememberSaveable { mutableStateOf<String?>(null) }
+    val pending = pendingName?.let { PendingOp.valueOf(it) }
+    val signedIn = state is AuthState.SignedIn
 
     DisposableEffect(Unit) { onDispose { setActivity(null) } }
     LaunchedEffect(busy) { if (!busy) setActivity(null) }
 
-    // Conta criada: mostra o aviso de e-mail de confirmação e espera "Continuar". Outros logins seguem direto.
-    LaunchedEffect(state) {
-        if (state is AuthState.SignedIn) {
-            if (pending == PendingOp.SIGN_UP) {
-                info = "Enviamos um e-mail de confirmação para $signedUpEmail. Confira a caixa de entrada."
-                waitingNotice = true
-            } else {
-                onDone()
-            }
-        }
-    }
-    LaunchedEffect(okCount) {
-        if (okCount > 0 && pending == PendingOp.RESET) {
-            info = "Se o e-mail tiver conta, enviamos um link para criar uma nova senha."
-            pending = null
-        }
+    // Logado e sem operação em andamento (a primeira sincronização já terminou): segue. No cadastro por
+    // e-mail espera o aviso de confirmação e o "Continuar".
+    LaunchedEffect(signedIn, busy, notice, pendingName) {
+        if (signedIn && !busy && (pending != PendingOp.SIGN_UP || notice == null)) onDone()
     }
 
     LoginScreen(
@@ -108,29 +96,29 @@ fun LoginRoute(
         error = error,
         errorKind = errorKind,
         linkEmail = linkEmail,
-        info = info,
-        onInfoContinue = if (waitingNotice) ({ onDone() }) else null,
+        info = notice,
+        onInfoContinue = if (pending == PendingOp.SIGN_UP && signedIn && notice != null) {
+            {
+                vm.consumeNotice()
+                pendingName = null
+            }
+        } else null,
         onGoogle = {
-            pending = PendingOp.GOOGLE
-            info = null
+            pendingName = PendingOp.GOOGLE.name
             setActivity(context.findActivity())
             vm.signInGoogle()
         },
         onSignIn = { email, password ->
-            pending = PendingOp.SIGN_IN
-            info = null
+            pendingName = PendingOp.SIGN_IN.name
             vm.signInEmail(email, password)
         },
         onSignUp = { name, email, password ->
-            pending = PendingOp.SIGN_UP
-            signedUpEmail = email
-            info = null
+            pendingName = PendingOp.SIGN_UP.name
             vm.signUpEmail(name, email, password)
         },
         onLinkGoogle = { password -> vm.linkGoogle(password) },
         onReset = { email ->
-            pending = PendingOp.RESET
-            info = null
+            pendingName = PendingOp.RESET.name
             vm.resetPassword(email)
         },
         onSkip = onSkip,
@@ -164,7 +152,7 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var linkPassword by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
-    var lastWasGoogle by remember { mutableStateOf(false) }
+    var lastOp by remember { mutableStateOf(PendingOp.SIGN_IN) }
 
     val enabled = available && !busy
 
@@ -177,13 +165,27 @@ fun LoginScreen(
             else -> null
         }
         if (localError != null) return
-        lastWasGoogle = false
+        lastOp = if (creating) PendingOp.SIGN_UP else PendingOp.SIGN_IN
         if (creating) onSignUp(name.trim(), email.trim(), password) else onSignIn(email.trim(), password)
+    }
+
+    fun reset() {
+        if (email.contains("@")) {
+            localError = null
+            lastOp = PendingOp.RESET
+            onReset(email.trim())
+        } else {
+            localError = "Digite seu e-mail acima para receber o link."
+        }
     }
 
     fun retry() {
         onDismissError()
-        if (lastWasGoogle) onGoogle() else submit()
+        when (lastOp) {
+            PendingOp.GOOGLE -> onGoogle()
+            PendingOp.RESET -> reset()
+            else -> submit()
+        }
     }
 
     Column(
@@ -217,7 +219,7 @@ fun LoginScreen(
 
         if (info == null || onInfoContinue == null) {
             OutlinedButton(
-                onClick = { lastWasGoogle = true; localError = null; onGoogle() },
+                onClick = { lastOp = PendingOp.GOOGLE; localError = null; onGoogle() },
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text("G   Continuar com Google") }
@@ -255,14 +257,7 @@ fun LoginScreen(
                     }
                     if (!creating) {
                         TextButton(
-                            onClick = {
-                                if (email.contains("@")) {
-                                    localError = null
-                                    onReset(email.trim())
-                                } else {
-                                    localError = "Digite seu e-mail acima para receber o link."
-                                }
-                            },
+                            onClick = ::reset,
                             enabled = enabled,
                         ) { Text("Esqueci a senha") }
                     }
@@ -288,7 +283,7 @@ fun LoginScreen(
         }
 
         Spacer(Modifier.height(4.dp))
-        TextButton(onClick = onSkip, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Pular") }
+        TextButton(onClick = onSkip, enabled = !busy, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Pular") }
         Text(
             "Rotas e viagens ficam só no seu celular.",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

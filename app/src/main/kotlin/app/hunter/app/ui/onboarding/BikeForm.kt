@@ -1,5 +1,6 @@
 package app.hunter.app.ui.onboarding
 
+import app.hunter.maintenance.Odometer
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.UserProfile
 import java.time.Year
@@ -48,7 +49,7 @@ class BikeForm(val short: Boolean) {
         }
         val km = parseNumber(odometerKm)
         if (odometerKm.isBlank()) add(FormError(FormField.ODOMETER, "Informe os km do painel."))
-        else if (km == null || km < 0) add(FormError(FormField.ODOMETER, "Km inválido. Use um número maior ou igual a zero."))
+        else if (km == null || km > MAX_KM) add(FormError(FormField.ODOMETER, "Km inválido. Use um número de 0 a 2.000.000."))
         val tank = parseNumber(tankLiters)
         if (tankLiters.isBlank()) add(FormError(FormField.TANK, "Informe a capacidade do tanque."))
         else if (tank == null || tank <= 0 || tank > MAX_TANK_L) add(FormError(FormField.TANK, "Tanque inválido. Informe os litros, por exemplo 13."))
@@ -64,10 +65,11 @@ class BikeForm(val short: Boolean) {
 
     /**
      * O hodômetro guarda um deslocamento: km do painel menos as viagens já gravadas
-     * ([tripsDistanceM], 0 num app novo). Só chamar depois de [validate] vazio.
+     * ([tripsDistanceM], obrigatório: sem ele o hodômetro exibido sairia errado). Só chamar depois
+     * de [validate] vazio.
      */
-    fun toOdometer(nowMs: Long, tripsDistanceM: Double = 0.0): OdometerDoc = OdometerDoc(
-        offsetKm = (parseNumber(odometerKm) ?: 0.0) - tripsDistanceM / 1000.0,
+    fun toOdometer(nowMs: Long, tripsDistanceM: Double): OdometerDoc = OdometerDoc(
+        offsetKm = Odometer.offsetFor(parseNumber(odometerKm) ?: 0.0, tripsDistanceM),
         tankLiters = parseNumber(tankLiters) ?: DEFAULT_TANK_L,
         updatedAtMs = nowMs,
     )
@@ -76,6 +78,8 @@ class BikeForm(val short: Boolean) {
         const val MIN_YEAR = 1950
         const val DEFAULT_TANK_L = 13.0
         private const val MAX_TANK_L = 60.0
+        private const val MAX_KM = 2_000_000.0
+        private val NUMBER = Regex("""\d+([.,]\d+)?""")
 
         /** Capacidades aproximadas do tanque por modelo (L); o usuário pode ajustar. Sem o modelo na tabela, 13 L. */
         private val TANKS: Map<String, Double> = mapOf(
@@ -99,7 +103,8 @@ class BikeForm(val short: Boolean) {
         fun defaultTankLiters(brand: String, model: String): Double = TANKS[model] ?: DEFAULT_TANK_L
 
         /** Aceita vírgula ou ponto decimal. */
-        private fun parseNumber(text: String): Double? = text.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() }
+        private fun parseNumber(text: String): Double? =
+            text.trim().takeIf { NUMBER.matches(it) }?.replace(',', '.')?.toDoubleOrNull()?.takeIf { it.isFinite() }
 
         fun formatLiters(l: Double): String =
             if (l == Math.floor(l)) l.toInt().toString() else l.toString().replace('.', ',')
