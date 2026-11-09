@@ -162,6 +162,53 @@ class MergeTest {
         assertEquals(0.0, tripsAddedKm(mescladas, mescladas, readingAtMs = 1_000), 1e-9)
     }
 
+    private fun item(gid: String, at: Long = 100, doneAt: Long? = null, doneKm: Double? = null) = SyncDoc(
+        Kind.MAINTENANCE, gid, at, false,
+        mapOf("name" to "Óleo", "intervalKm" to 5000, "intervalDays" to 365, "lastDoneKm" to doneKm, "lastDoneAtMs" to doneAt),
+    )
+
+    private fun alive(plan: MergePlan) = plan.merged.filter { !it.deleted }.map { it.gid }
+
+    @Test
+    fun `item semente sem histórico nunca vence o item com histórico, qualquer que seja o gid ou o lado`() {
+        val semente = { gid: String -> item(gid, at = 900) } // semeado agora há pouco: mais novo
+        val comHistorico = { gid: String -> item(gid, at = 100, doneAt = 50_000, doneKm = 12_000.0) }
+        for ((s, h) in listOf("a" to "b", "b" to "a")) {
+            assertEquals(listOf(h), alive(merge(listOf(semente(s)), listOf(comHistorico(h)), now)))
+            assertEquals(listOf(h), alive(merge(listOf(comHistorico(h)), listOf(semente(s)), now)))
+        }
+    }
+
+    @Test
+    fun `entre duplicatas de manutenção fica a feita mais recentemente, depois a de mais km, depois o menor gid`() {
+        assertEquals(listOf("b"), alive(merge(listOf(item("a", doneAt = 10)), listOf(item("b", doneAt = 20)), now)))
+        assertEquals(listOf("b"), alive(merge(listOf(item("a", doneAt = 10, doneKm = 1.0)), listOf(item("b", doneAt = 10, doneKm = 2.0)), now)))
+        assertEquals(listOf("a"), alive(merge(listOf(item("b", doneAt = 10, doneKm = 2.0)), listOf(item("a", doneAt = 10, doneKm = 2.0)), now)))
+    }
+
+    @Test
+    fun `entre viagens duplicadas fica a cópia local (que pode ter o trajeto)`() {
+        val plan = merge(listOf(trip("z", 100, 5.0)), listOf(trip("a", 100, 5.0)), now)
+        assertEquals(listOf("z"), alive(plan))
+        assertEquals(listOf(trip("a", 100, 5.0).copy(deleted = true, updatedAtMs = now)), plan.pushRemote.filter { it.deleted })
+    }
+
+    @Test
+    fun `dedup mais rico é idempotente e converge nos dois aparelhos`() {
+        val a = listOf(item("a", at = 900)) // aparelho A: semente
+        val nuvem = listOf(item("b", at = 100, doneAt = 50_000, doneKm = 12_000.0))
+        val p1 = merge(a, nuvem, now)
+        // nuvem depois do aparelho A
+        val nuvem2 = (nuvem.associateBy { it.gid } + p1.pushRemote.associateBy { it.gid }).values.toList()
+        val localA = p1.merged
+        val again = merge(localA, nuvem2, now + 1)
+        assertTrue(again.applyLocal.isEmpty() && again.pushRemote.isEmpty())
+        // aparelho B tinha só o item com histórico: recebe a lápide da semente e continua com "b"
+        val pB = merge(nuvem, nuvem2, now + 2)
+        assertEquals(listOf("b"), alive(pB))
+        assertTrue(pB.pushRemote.isEmpty())
+    }
+
     @Test
     fun `grupo de três duplicatas fica com o menor gid e duas lápides`() {
         val plan = merge(listOf(fuel("c", 100), fuel("a", 100)), listOf(fuel("b", 100)), now)

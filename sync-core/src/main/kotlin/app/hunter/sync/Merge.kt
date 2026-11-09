@@ -55,6 +55,25 @@ private fun pick(local: SyncDoc?, remote: SyncDoc?, nowMs: Long): SyncDoc? {
     return if (l.updatedAtMs > r.updatedAtMs) l else r
 }
 
+private fun Map<String, Any?>.long(k: String): Long? = (this[k] as? Number)?.toLong()
+private fun Map<String, Any?>.double(k: String): Double? = (this[k] as? Number)?.toDouble()
+
+/**
+ * Ordem de preferência dentro de um grupo de duplicatas (o primeiro fica). Manutenção: a feita mais
+ * recentemente (maior `lastDoneAtMs`), depois a de maior `lastDoneKm` — assim um item padrão recém-semeado,
+ * sem histórico, nunca apaga o item com histórico da conta. Viagem: a cópia que existe viva neste aparelho
+ * ([isLocal]), que pode ter os pontos do trajeto (a da nuvem nunca tem). Abastecimento e local: indiferente.
+ * Desempate final: o menor gid (determinístico, converge entre aparelhos).
+ */
+private fun richerFirst(isLocal: (SyncDoc) -> Boolean): Comparator<SyncDoc> = Comparator { a, b ->
+    val byKind = when (a.kind) {
+        Kind.MAINTENANCE -> compareValuesBy(b, a, { it.fields.long("lastDoneAtMs") }, { it.fields.double("lastDoneKm") })
+        Kind.TRIP -> compareValuesBy(b, a) { isLocal(it) }
+        else -> 0
+    }
+    if (byKind != 0) byKind else a.gid.compareTo(b.gid)
+}
+
 fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long): MergePlan {
     val localBy = local.associateBy { it.kind to it.gid }
     val remoteBy = remote.associateBy { it.kind to it.gid }
@@ -63,11 +82,11 @@ fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long): MergePlan {
         winners[key] = pick(localBy[key], remoteBy[key], nowMs)!!
     }
 
-    // Mesmo conteúdo com gids diferentes: fica o menor gid, os demais viram apagados.
+    // Mesmo conteúdo com gids diferentes: fica o documento mais rico (ver [richerFirst]), os demais viram apagados.
     val groups = winners.values.filter { !it.deleted }.groupBy { it.kind to dedupKey(it) }
     for (group in groups.values) {
         if (group.size < 2) continue
-        val keep = group.minOf { it.gid }
+        val keep = group.minWith(richerFirst { localBy[it.kind to it.gid]?.deleted == false }).gid
         for (d in group) {
             if (d.gid != keep) winners[d.kind to d.gid] = d.copy(deleted = true, updatedAtMs = nowMs)
         }
