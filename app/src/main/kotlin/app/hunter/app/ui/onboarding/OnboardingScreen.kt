@@ -19,8 +19,8 @@ import app.hunter.sync.Step
  * Hospeda os passos da primeira abertura. Recebe tudo por parâmetro (a integração com a conta fica
  * para a MainActivity): [signedIn] e [flow] vêm de fora; cada tela de passo é um slot.
  *
- * Ao chegar em DONE grava a preferência e chama [onFinished]. [login] recebe `onSkip` (Pular o login);
- * se [signedIn] virar verdadeiro durante o login o fluxo avança sozinho.
+ * Ao chegar em DONE grava a preferência e chama [onFinished]. [login] recebe `onSkip` (Pular o login) e
+ * `onDone` (conta pronta; a tela de login chama quando quiser, p.ex. depois do aviso de e-mail de confirmação).
  */
 @Composable
 fun OnboardingScreen(
@@ -28,7 +28,7 @@ fun OnboardingScreen(
     signedIn: Boolean,
     prefs: OnboardingPrefs,
     onFinished: () -> Unit,
-    login: @Composable (onSkip: () -> Unit) -> Unit,
+    login: @Composable (onSkip: () -> Unit, onDone: () -> Unit) -> Unit,
     permissions: @Composable (onNext: () -> Unit) -> Unit,
     bike: @Composable (short: Boolean, onNext: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
@@ -49,19 +49,18 @@ fun OnboardingScreen(
             finish()
         }
     }
-    // Login concluído (conta criada ou entrou): segue sem exigir outro toque.
-    LaunchedEffect(signedIn, step) {
-        if (step == Step.LOGIN && signedIn) advance()
-    }
 
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             when (step) {
                 Step.INTRO -> IntroPages(onFinish = { advance() })
-                Step.LOGIN -> login {
-                    skippedLogin = true
-                    advance()
-                }
+                Step.LOGIN -> login(
+                    {
+                        skippedLogin = true
+                        advance()
+                    },
+                    { advance() },
+                )
                 Step.PERMISSIONS -> permissions { advance() }
                 Step.BIKE -> bike(flow.shortBike(signedIn)) { advance() }
                 Step.DONE -> Unit

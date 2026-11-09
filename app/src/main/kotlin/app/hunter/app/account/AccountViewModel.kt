@@ -23,7 +23,18 @@ class AccountViewModel(private val repo: AuthRepository) : ViewModel() {
     private val _linkEmail = MutableStateFlow<String?>(null)
     val linkEmail: StateFlow<String?> = _linkEmail.asStateFlow()
 
-    fun clearError() { _error.value = null }
+    /** Tipo do último erro (para a tela decidir, por exemplo, oferecer "tentar de novo" na falta de rede). */
+    private val _errorKind = MutableStateFlow<AuthError?>(null)
+    val errorKind: StateFlow<AuthError?> = _errorKind.asStateFlow()
+
+    /** Conta quantas operações terminaram com sucesso; a tela observa para mostrar avisos de sucesso. */
+    private val _okCount = MutableStateFlow(0)
+    val okCount: StateFlow<Int> = _okCount.asStateFlow()
+
+    fun clearError() {
+        _error.value = null
+        _errorKind.value = null
+    }
 
     fun signInGoogle() = launchOp { repo.signInGoogle() }
     fun signInEmail(email: String, password: String) = launchOp { repo.signInEmail(email, password) }
@@ -45,11 +56,15 @@ class AccountViewModel(private val repo: AuthRepository) : ViewModel() {
         if (_busy.value) return
         _busy.value = true
         _error.value = null
+        _errorKind.value = null
         viewModelScope.launch {
             try {
                 when (val r = block()) {
-                    AuthResult.Ok -> _linkEmail.value = null
-                    is AuthResult.Error -> when (r.kind) {
+                    AuthResult.Ok -> {
+                        _linkEmail.value = null
+                        _okCount.value += 1
+                    }
+                    is AuthResult.Error -> when (r.kind.also { if (it != AuthError.CANCELLED) _errorKind.value = it }) {
                         AuthError.CANCELLED -> Unit
                         AuthError.EMAIL_IN_USE -> {
                             _linkEmail.value = r.email
