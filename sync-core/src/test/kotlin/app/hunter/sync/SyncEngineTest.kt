@@ -312,4 +312,12 @@ class SyncEngineTest {
         assertFalse(local.hasDirtyOdometerOrProfile())
         assertEquals(OdometerDoc(1.0, 2.0, 100), remote.odo)
     }
+
+    @Test
+    fun `marcar exclusao pendente e consultar passam pelo remoto`() = runTest {
+        assertFalse(engine.isDeletionPending())
+        engine.markDeletionPending()
+        assertTrue(remote.pending)
+        assertTrue(engine.isDeletionPending())
+    }
 }

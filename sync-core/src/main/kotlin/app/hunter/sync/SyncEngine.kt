@@ -45,6 +45,12 @@ class SyncEngine(
         remote.deleteAllUserData()
     }
 
+    /** Há exclusão de conta pendente no remoto. */
+    suspend fun isDeletionPending(): Boolean = remote.deletionPending()
+
+    /** Marca a exclusão como pendente sem apagar nada (usado quando a exclusão do usuário falha). */
+    suspend fun markDeletionPending() = remote.markDeletionPending()
+
     /** Conclui uma exclusão interrompida. Retorna true se havia exclusão pendente. */
     suspend fun resumePendingDeletion(): Boolean {
         if (!remote.deletionPending()) return false
