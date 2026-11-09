@@ -5,6 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 ## [0.3.0]
 
 ### Adicionado
+- Atualização pelo próprio app: avisa quando há release nova no GitHub, mostra as alterações e baixa/instala o APK.
 - Nome **Rumo**, ícone adaptativo (com versão monocromática) e identidade visual.
 - Busca de destino com favoritos e recentes instantâneos, distância até cada resultado e atalhos.
 - Aviso de falta de internet e novo cálculo automático da rota quando a conexão volta.

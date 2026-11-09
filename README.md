@@ -54,7 +54,8 @@ Baixe o APK na aba [Releases](https://github.com/arthurbritol/rumo/releases) (ou
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-Requer Android 8.0+ e celular arm64. O APK é assinado com a chave de debug, então instala direto, sem Play Store.
+Requer Android 8.0+ e celular arm64. Instala direto, sem Play Store. Depois da primeira instalação o app avisa
+sozinho quando sai uma release nova (consulta o GitHub ao abrir, no máximo a cada 6 h) e atualiza com um toque.
 
 ## Desenvolvimento
 

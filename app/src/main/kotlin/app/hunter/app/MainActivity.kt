@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +37,7 @@ import app.hunter.app.ui.MapScreen
 import app.hunter.app.ui.PodScreen
 import app.hunter.app.ui.Tab
 import app.hunter.app.ui.TripsScreen
+import app.hunter.app.ui.UpdateBanner
 
 class MainActivity : ComponentActivity() {
     private val vm: HunterViewModel by viewModels()
@@ -105,6 +107,15 @@ private fun HunterRoot(vm: HunterViewModel) {
             }
             // Composto depois do MapScreen para ter prioridade sobre o "voltar" do mapa.
             BackHandler(enabled = tab != Tab.Map) { tabIndex = Tab.Map.ordinal }
+
+            // Aviso de versão nova por cima de tudo, exceto durante a navegação (nada atrapalha a condução).
+            val update by vm.update.collectAsStateWithLifecycle()
+            update?.takeIf { !nav.active }?.let { u ->
+                UpdateBanner(
+                    u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate,
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+                )
+            }
         }
     }
 }

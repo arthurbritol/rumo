@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Só a pasta onde o atualizador guarda o APK baixado. -->
+    <cache-path name="updates" path="updates/" />
+</paths>

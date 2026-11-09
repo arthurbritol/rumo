@@ -58,6 +58,14 @@ data class FuelAdviceUi(
     val stationsError: String? = null,
 )
 
+/** Aviso de versão nova: [progress] vai de 0 a 1 (ou -1 se o tamanho é desconhecido) durante o download. */
+data class UpdateUi(
+    val update: app.hunter.nav.AppUpdate,
+    val downloading: Boolean = false,
+    val progress: Float = 0f,
+    val message: String? = null,
+)
+
 data class SearchUi(
     val query: String = "",
     val results: List<Place> = emptyList(),
@@ -123,10 +131,57 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     _online.value = true
                     // Voltou a internet com uma rota falhada na tela: tenta de novo sozinho.
                     if (!was) viewModelScope.launch { if (_preview.value?.error != null) retryRoutes() }
+                    if (!was) checkUpdate()
                 }
 
                 override fun onLost(network: android.net.Network) { _online.value = false }
             })
+        }
+    }
+
+    // ---------- atualização do app ----------
+
+    private val updater = AppUpdater(app)
+    private val _update = MutableStateFlow<UpdateUi?>(null)
+    /** Versão nova disponível (e o andamento do download), ou `null`. */
+    val update: StateFlow<UpdateUi?> = _update.asStateFlow()
+    private var downloadJob: Job? = null
+
+    /** Consulta o GitHub no máximo a cada 6 h (ou sempre, com [force]). Falha de rede é silenciosa. */
+    fun checkUpdate(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (_update.value != null || (!force && now - prefs.getLong("update_checked_at", 0L) < 6 * 3_600_000L)) return
+        viewModelScope.launch {
+            val found = try { app.hunter.nav.UpdateChecker().check(updater.installedCode()) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return@launch }
+            prefs.edit().putLong("update_checked_at", now).apply()
+            if (found != null && (force || found.build != prefs.getInt("update_skip_build", -1))) _update.value = UpdateUi(found)
+        }
+    }
+
+    /** "Agora não": esconde o aviso desta build; só volta numa build ainda mais nova. */
+    fun dismissUpdate() {
+        val u = _update.value ?: return
+        if (u.downloading) return
+        prefs.edit().putInt("update_skip_build", u.update.build).apply()
+        _update.value = null
+    }
+
+    fun installUpdate() {
+        val u = _update.value ?: return
+        if (u.downloading) return
+        downloadJob = viewModelScope.launch {
+            _update.update { it?.copy(downloading = true, progress = 0f, message = null) }
+            try {
+                val apk = updater.download(u.update) { p -> _update.update { it?.copy(progress = p) } }
+                val opened = updater.install(apk)
+                _update.update {
+                    it?.copy(downloading = false, message = if (opened) null else "Permita que o Rumo instale apps e toque em Atualizar de novo.")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _update.update { it?.copy(downloading = false, message = "Não foi possível baixar. Verifique a internet e tente de novo.") }
+            }
         }
     }
 
@@ -371,6 +426,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         NavStatus.setVoice(prefs.getBoolean("voice", true))
         PodStatus.restore(app)
         watchConnection()
+        checkUpdate()
 
         // Busca com debounce; cancela a anterior quando o texto muda.
         viewModelScope.launch {
