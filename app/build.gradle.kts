@@ -104,6 +104,7 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.kotlinx.coroutines.test)
     // Só para Migration2To3Test (JVM puro): SQLite real em memória para exercitar o SQL da migração.
     testImplementation(libs.sqlite.jdbc)
 }
