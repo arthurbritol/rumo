@@ -15,6 +15,7 @@ import app.hunter.app.sync.RoomLocalStore
 import app.hunter.app.sync.SyncGate
 import app.hunter.app.sync.SyncScheduler
 import app.hunter.app.sync.SyncTrigger
+import app.hunter.sync.DeletionPendingException
 import app.hunter.sync.SyncEngine
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
@@ -62,7 +63,15 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     val scheduler = SyncScheduler(
         engine, scope,
         gate = gate,
-        onError = { Log.w("Rumo/sync", "Falha ao sincronizar", it) },
+        onError = {
+            if (it is DeletionPendingException) {
+                // A conta foi apagada (marca permanente na nuvem, talvez por outro aparelho): nada subiu; conclui
+                // a exclusão e encerra a sessão neste aparelho. Fora da trava (a retomada a pega de novo).
+                scope.launch { runCatching { repo.resumeDeletionIfNeeded() } }
+            } else {
+                Log.w("Rumo/sync", "Falha ao sincronizar", it)
+            }
+        },
         isSignedIn = { ready && signedUid() != null && flag.uid() == null },
     )
 

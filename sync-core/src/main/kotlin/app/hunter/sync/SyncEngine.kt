@@ -1,6 +1,12 @@
 package app.hunter.sync
 
 /**
+ * A conta tem a marca de exclusão (apagada ou sendo apagada): a sincronização não envia nada. Quem
+ * recebe deve concluir a exclusão / encerrar a sessão neste aparelho.
+ */
+class DeletionPendingException : IllegalStateException("A conta foi apagada; nada é sincronizado.")
+
+/**
  * Motor de sincronização entre o armazenamento local e o remoto. Não conhece Room nem Firestore.
  * A mesclagem de registros e do hodômetro vem de [merge] e [mergeOdometer].
  */
@@ -39,19 +45,25 @@ class SyncEngine(
         local.clearAll()
     }
 
-    /** Marca a exclusão como pendente e só então apaga; se falhar no meio, [resumePendingDeletion] conclui. */
+    /**
+     * Grava a marca de exclusão e só então apaga os dados. A marca é PERMANENTE (só `pending:true`, sem
+     * dado pessoal): nunca é removida, então nenhum aparelho volta a enviar dados para este uid.
+     */
     suspend fun deleteAccountData() {
         remote.markDeletionPending()
         remote.deleteAllUserData()
     }
 
-    /** Há exclusão de conta pendente no remoto. */
+    /** A conta tem exclusão pedida (marca presente). Uma vez verdadeiro, é verdadeiro para sempre. */
     suspend fun isDeletionPending(): Boolean = remote.deletionPending()
 
-    /** Marca a exclusão como pendente sem apagar nada (usado quando a exclusão do usuário falha). */
+    /** Grava a marca de exclusão sem apagar nada. */
     suspend fun markDeletionPending() = remote.markDeletionPending()
 
-    /** Conclui uma exclusão interrompida. Retorna true se havia exclusão pendente. */
+    /**
+     * Se a conta tem a marca de exclusão, apaga os dados de novo (idempotente; conclui uma exclusão
+     * interrompida) e retorna true. A marca continua: a resposta para o mesmo uid nunca volta a ser false.
+     */
     suspend fun resumePendingDeletion(): Boolean {
         if (!remote.deletionPending()) return false
         remote.deleteAllUserData()
@@ -59,11 +71,10 @@ class SyncEngine(
     }
 
     /**
-     * Baixa o remoto, mescla e aplica. Todo o envio ao remoto acontece antes de qualquer escrita
-     * local, então uma falha de rede deixa o local intacto.
+     * Baixa o remoto, mescla e aplica.
      *
-     * Se houver exclusão de conta pendente (aqui ou em outro aparelho), conclui a exclusão e
-     * aborta sem enviar nada, para não ressuscitar os dados.
+     * Marca de exclusão presente (exclusão pedida aqui ou em outro aparelho): apaga de novo, não envia
+     * nada e lança [DeletionPendingException], para a camada do app encerrar a sessão neste aparelho.
      *
      * Perfil (sem timestamp): só local sobe; só remoto é aplicado; nos dois, o remoto vence, a menos
      * que [LocalStore.hasDirtyOdometerOrProfile] indique alteração local pendente, caso em que o
@@ -71,7 +82,7 @@ class SyncEngine(
      * também proteger o perfil local).
      */
     private suspend fun reconcile() {
-        if (resumePendingDeletion()) return
+        if (resumePendingDeletion()) throw DeletionPendingException()
         val now = clock()
         val snap = remote.fetchAll()
         val dirtyBefore = local.dirty()

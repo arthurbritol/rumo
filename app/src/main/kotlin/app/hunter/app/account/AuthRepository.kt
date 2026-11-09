@@ -1,6 +1,7 @@
 package app.hunter.app.account
 
 import app.hunter.app.sync.SyncGate
+import app.hunter.sync.DeletionPendingException
 import app.hunter.sync.SyncEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -20,6 +21,8 @@ class AuthRepository(
     private val flag: PendingDeletionFlag,
     private val gate: SyncGate = SyncGate(),
     private val firstSyncTimeoutMs: Long = FIRST_SYNC_TIMEOUT_MS,
+    /** Chamado (ainda dentro da trava) quando a primeira sincronização do login termina com sucesso. */
+    private val onSynced: () -> Unit = {},
 ) {
     val state: StateFlow<AuthState> get() = gateway.state
 
@@ -97,18 +100,22 @@ class AuthRepository(
                 return@withContext incomplete(AuthError.NETWORK)
             }
             val r = deleteUserWithTimeout(uid)
-            if (r is AuthResult.Error) {
-                // Melhor esforço: a marca na nuvem já foi apagada por deleteAllUserData; a local é a que vale.
-                try {
-                    withTimeout(NET_TIMEOUT_MS) { gate.pinnedTo(uid) { engine.markDeletionPending() } }
-                } catch (e: Exception) {
-                    // ignorado de propósito
-                }
+            if (r is AuthResult.Error && r.kind != AuthError.USER_GONE) {
+                // A marca na nuvem é permanente e a local fica: a retomada conclui.
                 return@withContext incomplete(r.kind)
             }
-            flag.clear()
+            finished(r)
             AuthResult.Ok
         }
+    }
+
+    /**
+     * O usuário de auth foi apagado: desliga a marca local. Apagado aqui, o Firebase já encerra a sessão; se
+     * ele já não existia (apagado em outro aparelho), encerra a sessão local aqui.
+     */
+    private fun finished(r: AuthResult) {
+        flag.clear()
+        if (r is AuthResult.Error && r.kind == AuthError.USER_GONE) gateway.signOut()
     }
 
     /**
@@ -135,8 +142,9 @@ class AuthRepository(
             return@withContext false
         }
         val r = deleteUserWithTimeout(uid)
-        if (r is AuthResult.Ok) {
-            flag.clear()
+        if (r is AuthResult.Ok || (r is AuthResult.Error && r.kind == AuthError.USER_GONE)) {
+            // Concluída: aqui, ou já em outro aparelho (este só vê a marca permanente) — sai localmente.
+            finished(r)
             return@withContext true
         }
         if (r is AuthResult.Error && r.kind == AuthError.NEEDS_RECENT_LOGIN) {
@@ -174,21 +182,28 @@ class AuthRepository(
         } else if (flagged != null) {
             // Exclusão pendente neste aparelho: conclui antes de qualquer sincronização, nada sobe.
             resumeDeletionIfNeeded()
-            return AuthResult.Error(
-                AuthError.OTHER,
-                "Havia uma exclusão de conta pendente neste aparelho. Ela foi concluída ou será concluída " +
-                    "automaticamente; entre de novo depois.",
-            )
+            return deletionPendingError()
         }
         try {
-            withTimeoutOrNull(firstSyncTimeoutMs) { gate.pinnedTo(uid) { engine.firstSync() } } // nulo = estourou: sincroniza depois
+            val done = withTimeoutOrNull(firstSyncTimeoutMs) { gate.pinnedTo(uid) { engine.firstSync() } } // nulo = estourou: sincroniza depois
+            if (done != null) onSynced()
         } catch (e: CancellationException) {
             throw e
+        } catch (e: DeletionPendingException) {
+            // A conta tem a marca de exclusão (permanente): nada subiu; conclui e sai.
+            resumeDeletionIfNeeded()
+            return deletionPendingError()
         } catch (e: Exception) {
             // sem rede ou falha do servidor: continua logado, o agendador tenta de novo
         }
         return AuthResult.Ok
     }
+
+    private fun deletionPendingError() = AuthResult.Error(
+        AuthError.OTHER,
+        "Esta conta tem uma exclusão pendente. Ela foi concluída ou será concluída automaticamente; " +
+            "entre de novo depois.",
+    )
 
     private fun blocked() = AuthResult.Error(
         AuthError.SIGN_OUT_BLOCKED,

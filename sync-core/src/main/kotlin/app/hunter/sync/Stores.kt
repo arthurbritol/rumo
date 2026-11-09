@@ -42,12 +42,15 @@ interface RemoteStore {
     suspend fun push(docs: List<SyncDoc>)
     suspend fun pushOdometer(o: OdometerDoc)
     suspend fun pushProfile(p: UserProfile)
+    /** Grava a marca de exclusão (`pending:true`, nenhum dado pessoal). */
     suspend fun markDeletionPending()
+
+    /** A marca de exclusão existe. Como ela é permanente, depois de true é sempre true para o mesmo uid. */
     suspend fun deletionPending(): Boolean
 
     /**
-     * Apaga subcoleções e perfil; idempotente. A marca de exclusão pendente deve ser
-     * removida por último, para que uma falha no meio mantenha [deletionPending] verdadeiro.
+     * Apaga subcoleções, hodômetro e perfil; idempotente. NÃO apaga a marca de exclusão: ela é
+     * permanente, para que um segundo aparelho ainda logado na conta nunca volte a enviar dados.
      */
     suspend fun deleteAllUserData()
 }

@@ -68,8 +68,11 @@ A conta é **opcional**. O `sync-core` não conhece Room nem Firestore: o `app` 
   sync. Sem usuário logado nada sincroniza. Offline o app funciona normalmente e tudo sobe depois.
 - **Uma instância por processo:** o `PerUserRemoteStore` resolve o uid a cada chamada e recria o armazenamento
   remoto quando a conta muda.
-- **Sair** só é permitido sem nada pendente e limpa os dados do aparelho; **apagar a conta** exige reautenticar, usa uma
-  marca local (com o uid) e outra na nuvem, e é retomada ao abrir o app se for interrompida, antes de qualquer sync.
+- **Sair** só é permitido sem nada pendente e limpa os dados do aparelho; **apagar a conta** exige reautenticar a
+  MESMA conta (o Google usa `reauthenticate`, que recusa outra conta), roda com o uid fixado, usa uma marca local (com
+  o uid) e outra na nuvem, e é retomada ao abrir o app se for interrompida, antes de qualquer sync. A marca na nuvem
+  (`config/exclusao`, só `pending: true`) é **permanente**: um segundo aparelho ainda logado na conta apagada nunca
+  reenvia os dados dele; ao ver a marca ele conclui a exclusão e sai da conta localmente.
 - **Sem `google-services.json`** o Firebase não é inicializado (`AccountConfig.isAvailable` falso): o app é só
   visitante e o login fica desabilitado.
 

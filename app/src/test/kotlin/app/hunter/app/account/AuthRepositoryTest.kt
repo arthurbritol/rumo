@@ -78,7 +78,7 @@ private class FakeRemote(val ev: Events) : RemoteStore {
     override suspend fun deleteAllUserData() {
         if (hangDelete) awaitCancellation()
         deleteError?.let { throw it }
-        ev.list += "dados"; cloudHasData = false; pending = false
+        ev.list += "dados"; cloudHasData = false // a marca é permanente
     }
 }
 
@@ -290,7 +290,7 @@ class AuthRepositoryTest {
         assertEquals(listOf<String?>("senha"), gateway.reauthCalls)
         assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
         assertFalse(remote.cloudHasData)
-        assertFalse(remote.pending)
+        assertTrue(remote.pending) // marca permanente: nenhum aparelho volta a enviar para este uid
         assertNull(flag.value)
     }
 
@@ -307,21 +307,41 @@ class AuthRepositoryTest {
     }
 
     @Test
-    fun `apagar conta - falha ao apagar o usuario e ao regravar a marca - a bandeira local conclui no proximo inicio`() = runTest {
+    fun `apagar conta - falha ao apagar o usuario - a bandeira local conclui no proximo inicio`() = runTest {
         gateway.deleteResults += err(AuthError.NETWORK)
-        gateway.onDelete = { remote.markError = IOException("sem rede") }
         assertIs<AuthResult.Error>(repo.deleteAccount(null))
-        assertFalse(remote.pending)
+        assertTrue(remote.pending)
         assertFalse(remote.cloudHasData)
         assertEquals("u", flag.value)
         assertEquals(0, gateway.signOuts)
 
-        remote.markError = null
-        gateway.onDelete = null
         assertTrue(repo.resumeDeletionIfNeeded())
         assertNull(flag.value)
-        assertFalse(remote.pending)
+        assertTrue(remote.pending)
         assertEquals(listOf("pendente", "dados", "usuario", "pendente", "dados", "usuario"), ev.list)
+    }
+
+    @Test
+    fun `aparelho B ve a marca de uma conta ja apagada - para de sincronizar e sai localmente`() = runTest {
+        remote.pending = true // apagada no aparelho A
+        gateway.deleteResults += err(AuthError.USER_GONE)
+        assertTrue(repo.resumeDeletionIfNeeded())
+        assertNull(flag.value)
+        assertEquals(1, gateway.signOuts)
+        assertIs<AuthState.Guest>(gateway.state.value)
+        assertTrue(remote.pending)
+    }
+
+    @Test
+    fun `login numa conta com marca de exclusao conclui a exclusao em vez de sincronizar`() = runTest {
+        remote.pending = true
+        gateway.state.value = AuthState.Guest
+        gateway.deleteResults += err(AuthError.USER_GONE)
+        val r = repo.signInEmail("a@b.c", "123456")
+        assertIs<AuthResult.Error>(r)
+        assertTrue(remote.pending)
+        assertEquals(1, gateway.signOuts)
+        assertNull(flag.value)
     }
 
     @Test
@@ -369,7 +389,7 @@ class AuthRepositoryTest {
         gateway.onDelete = { job.cancel(); yield() }
         job.join()
         assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
-        assertFalse(remote.pending)
+        assertNull(flag.value)
     }
 
     @Test
@@ -384,7 +404,7 @@ class AuthRepositoryTest {
         flag.value = "u"
         assertTrue(repo.resumeDeletionIfNeeded())
         assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
-        assertFalse(remote.pending)
+        assertTrue(remote.pending)
         assertNull(flag.value)
         assertEquals(0, gateway.signOuts)
     }

@@ -79,7 +79,7 @@ class FakeRemoteStore : RemoteStore {
         events += "delete"
         docs.clear(); odo = null; prof = null
         if (failDeleteOnce) { failDeleteOnce = false; throw IOException("falha no meio") }
-        pending = false
+        // A marca é permanente: nunca sai.
     }
 }
 
@@ -209,14 +209,32 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `deleteAccountData marca pendente antes de apagar`() = runTest {
+    fun `deleteAccountData marca pendente antes de apagar e a marca fica para sempre`() = runTest {
         remote.docs[Kind.FUELUP to "a"] = fuel("a")
         engine.deleteAccountData()
         assertEquals(listOf("pending", "delete"), remote.events)
         assertTrue(remote.docs.isEmpty())
-        assertFalse(remote.deletionPending())
+        assertTrue(remote.deletionPending())
         engine.deleteAccountData() // idempotente
         assertTrue(remote.docs.isEmpty())
+        assertTrue(remote.deletionPending())
+    }
+
+    @Test
+    fun `conta apagada nunca volta a receber envio de outro aparelho`() = runTest {
+        engine.deleteAccountData()
+        // aparelho B, ainda logado com a mesma conta, com tudo sujo
+        local.put(fuel("b"), dirty = true)
+        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        local.prof = perfil; local.profDirty = true
+        repeat(3) {
+            assertFailsWith<DeletionPendingException> { engine.syncNow() }
+            assertFailsWith<DeletionPendingException> { engine.firstSync() }
+        }
+        assertTrue(remote.pushed.isEmpty() && remote.docs.isEmpty())
+        assertNull(remote.odo)
+        assertNull(remote.prof)
+        assertTrue(remote.deletionPending())
     }
 
     @Test
@@ -227,9 +245,9 @@ class SyncEngineTest {
         assertTrue(remote.deletionPending())
 
         assertTrue(engine.resumePendingDeletion())
-        assertFalse(remote.deletionPending())
+        assertTrue(remote.deletionPending())
         assertTrue(remote.docs.isEmpty())
-        assertFalse(engine.resumePendingDeletion())
+        assertTrue(engine.resumePendingDeletion()) // marca permanente: continua pendente (idempotente)
     }
 
     @Test
@@ -255,17 +273,15 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `sync com exclusão pendente conclui a exclusão e não sobe nada`() = runTest {
+    fun `sync com exclusão pendente conclui a exclusão, não sobe nada e avisa`() = runTest {
         local.put(fuel("a"), dirty = true)
         remote.docs[Kind.FUELUP to "x"] = fuel("x")
         remote.pending = true
-        engine.syncNow()
+        assertFailsWith<DeletionPendingException> { engine.syncNow() }
         assertTrue(remote.docs.isEmpty() && remote.pushed.isEmpty())
-        assertFalse(remote.pending)
-        remote.pending = true
-        engine.firstSync()
+        assertTrue(remote.pending)
+        assertFailsWith<DeletionPendingException> { engine.firstSync() }
         assertTrue(remote.docs.isEmpty() && remote.pushed.isEmpty())
-        assertFalse(remote.pending)
         assertEquals(1, local.dirty().size)
     }
 

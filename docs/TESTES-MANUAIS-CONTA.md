@@ -72,9 +72,10 @@ Convenções: "nuvem" = Firestore; "visitante" = sem conta.
 ## 8. Apagar a conta
 
 - [ ] Conta de e-mail: Perfil > "Apagar meus dados e minha conta": a confirmação pede digitar **APAGAR** (outras grafias não habilitam) e a senha. Senha errada não apaga nada.
-- [ ] Com a senha certa: aparece o progresso; no console somem `usuarios/{uid}` (todas as subcoleções) e o usuário em Authentication. O app vira visitante e os dados **locais** continuam, como no uso sem conta.
+- [ ] Com a senha certa: aparece o progresso; no console somem o perfil `usuarios/{uid}`, todas as subcoleções de dados e o hodômetro (fica só `config/exclusao` com `pending: true`) e o usuário em Authentication. O app vira visitante e os dados **locais** continuam, como no uso sem conta.
 - [ ] Conta Google: mesma confirmação, sem campo de senha; o app pede a conta Google de novo (reautenticação) e então apaga.
-- [ ] **Exclusão interrompida:** inicie a exclusão e ligue o modo avião logo em seguida (ou feche o app durante o progresso). O perfil mostra "Concluindo a exclusão da conta" e não permite sair/apagar. Ao reabrir o app com internet, ela conclui sozinha (ou use "Tentar concluir agora"). No console, a conta e os dados somem.
+- [ ] **Exclusão interrompida:** inicie a exclusão e ligue o modo avião logo em seguida (ou feche o app durante o progresso). O perfil mostra "Concluindo a exclusão da conta" e não permite sair/apagar. Ao reabrir o app com internet, ela conclui sozinha (ou use "Tentar concluir agora"). No console, a conta e os dados somem; só fica `usuarios/{uid}/config/exclusao` com `pending: true` (permanente, de propósito).
+- [ ] Conta Google, na reautenticação escolha **outra** conta Google da folha: aparece um erro, **nada** é apagado (nem da conta logada, nem da outra) e o app continua logado na mesma conta.
 - [ ] Entrar de novo na mesma conta depois de uma exclusão interrompida não ressuscita os dados da nuvem.
 
 ## 9. Atualizar por cima da versão atual (migração do banco v2 para v3)
@@ -92,7 +93,7 @@ Esse é o teste mais importante: usuários atuais **não podem perder dados**.
 - [ ] Offline nos dois, edite **o mesmo abastecimento** com valores diferentes (A e depois B, B mais recente). Ligue a internet nos dois: os dois acabam com o valor do que foi editado por último; um único abastecimento, sem duplicata.
 - [ ] Crie um abastecimento no A: aparece no B (pode levar até um sincronismo: reabra o app ou mude de aba/volte a internet).
 - [ ] Apague um item no A: some no B depois de sincronizar, e não ressuscita.
-- [ ] Apague a conta no A: no B, o próximo sync não recria dados na nuvem.
+- [ ] Apague a conta no A: no B (ainda logado, com algo pendente), o próximo sync não recria dados na nuvem (console: só `config/exclusao`), e o B sai da conta sozinho e segue como visitante com os dados locais.
 
 ## 11. Permissões negadas
 

@@ -81,7 +81,7 @@ class FirestoreRemoteStore(
         }
         odometerRef.delete().await()
         user.delete().await()
-        // A marca vai por último: se algo falhar acima, deletionPending continua verdadeiro.
-        markerRef.delete().await()
+        // A marca (config/exclusao, só pending:true) NÃO é apagada: é permanente, para que outro aparelho
+        // ainda logado nesta conta veja a exclusão e nunca reenvie os dados dele.
     }
 }
