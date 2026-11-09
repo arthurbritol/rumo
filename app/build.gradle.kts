@@ -15,10 +15,24 @@ android {
         applicationId = "app.hunter.companion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
+        // No CI o código vem do número da execução (100 + run), para cada release ser uma atualização válida.
+        versionCode = (project.findProperty("rumo.versionCode") as String?)?.toIntOrNull() ?: 99
         versionName = "0.3.0"
         // O MapLibre traz bibliotecas nativas por arquitetura; celulares atuais são arm64.
         ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    // Chave fixa de release (vem do CI ou de variáveis de ambiente). Sem ela cai na chave de debug.
+    val rumoKeystore = System.getenv("RUMO_KEYSTORE")
+    signingConfigs {
+        if (rumoKeystore != null) {
+            create("rumo") {
+                storeFile = file(rumoKeystore)
+                storePassword = System.getenv("RUMO_STORE_PASS")
+                keyAlias = "rumo"
+                keyPassword = System.getenv("RUMO_STORE_PASS")
+            }
+        }
     }
 
     buildTypes {
@@ -27,7 +41,7 @@ android {
         release {
             isMinifyEnabled = false
             isDebuggable = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (rumoKeystore != null) "rumo" else "debug")
         }
     }
 

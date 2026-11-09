@@ -1,27 +1,116 @@
 name: Release
 
-# Publica o APK ao criar uma tag no formato v0.3.0
+# A cada push na main que altera o app, roda os testes, gera o APK e publica uma release nova
+# com a lista das alterações desde a release anterior.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths:
+      - "app/**"
+      - "core-model/**"
+      - "pod-protocol/**"
+      - "pod-ble/**"
+      - "navigation/**"
+      - "trips/**"
+      - "maintenance/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
+    name: Publicar release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # histórico e tags completos, para listar as alterações
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
+
       - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew test :app:assembleRelease --console=plain
-      - name: Renomear APK
-        run: cp app/build/outputs/apk/release/app-release.apk "Rumo-${GITHUB_REF_NAME}.apk"
-      - uses: softprops/action-gh-release@v3
-        with:
-          files: Rumo-*.apk
-          generate_release_notes: true
+
+      - name: Versão
+        id: ver
+        run: |
+          NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          CODE=$((100 + GITHUB_RUN_NUMBER))
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NAME}-b${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Testes
+        run: ./gradlew test --console=plain
+
+      - name: Chave de assinatura
+        id: sign
+        env:
+          KS_B64: ${{ secrets.RUMO_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.RUMO_STORE_PASS }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/rumo.keystore"
+            echo "RUMO_KEYSTORE=$RUNNER_TEMP/rumo.keystore" >> "$GITHUB_ENV"
+            echo "RUMO_STORE_PASS=$KS_PASS" >> "$GITHUB_ENV"
+            echo "fixed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Segredos RUMO_KEYSTORE_B64/RUMO_STORE_PASS ausentes: assinando com chave de debug (cada build terá assinatura diferente)."
+            echo "fixed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: APK de release
+        run: ./gradlew :app:assembleRelease -Prumo.versionCode=${{ steps.ver.outputs.code }} --console=plain
+
+      - name: Notas da release
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$PREV" ]; then RANGE="$PREV..HEAD"; SINCE="desde \`$PREV\`"; else RANGE="HEAD"; SINCE="(primeira release)"; fi
+          {
+            echo "## O que mudou $SINCE"
+            echo
+            # Cada commit vira um item; o corpo do commit entra recuado. Ignora trailers e commits de merge.
+            git log $RANGE --no-merges --pretty=format:'%s%n%b%x00' \
+              | awk -v RS='\0' '
+                  {
+                    n = split($0, l, "\n"); subj = l[1]; gsub(/^[ \t\n]+/, "", subj)
+                    if (subj == "") next
+                    print "- **" subj "**"
+                    for (i = 2; i <= n; i++) {
+                      if (l[i] ~ /^[ \t]*$/ || l[i] ~ /^Co-Authored-By:/) continue
+                      sub(/^[ \t]*-[ \t]*/, "", l[i]); print "  - " l[i]
+                    }
+                  }'
+            echo
+            echo "---"
+            echo "Versão ${{ steps.ver.outputs.name }} · build ${GITHUB_RUN_NUMBER} · commit \`${GITHUB_SHA::7}\`"
+            echo
+            if [ "${{ steps.sign.outputs.fixed }}" != "true" ]; then
+              echo "> Aviso: esta build usa uma chave de assinatura temporária. Se o celular recusar a atualização, desinstale o Rumo antes (os dados do app serão apagados)."
+              echo
+            fi
+            echo "Instale com \`adb install -r Rumo-${{ steps.ver.outputs.tag }}.apk\` ou abra o arquivo no celular (permitindo fontes desconhecidas). O APK atualiza a versão instalada."
+          } > notes.md
+          cat notes.md
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "Rumo-${{ steps.ver.outputs.tag }}.apk"
+          gh release create "${{ steps.ver.outputs.tag }}" "Rumo-${{ steps.ver.outputs.tag }}.apk" \
+            --target "$GITHUB_SHA" \
+            --title "Rumo ${{ steps.ver.outputs.name }} (build ${GITHUB_RUN_NUMBER})" \
+            --notes-file notes.md \
+            --latest
