@@ -60,6 +60,7 @@ class AuthRepository(
      * não é cancelável, mas cada chamada de rede tem limite de [NET_TIMEOUT_MS].
      */
     suspend fun deleteAccount(password: String?): AuthResult {
+        val uid = signedUid() ?: return AuthResult.Error(AuthError.OTHER, "Entre na conta para apagá-la.")
         val reauth = if (gateway.providerIsPassword) {
             if (password.isNullOrEmpty()) {
                 AuthResult.Error(AuthError.WRONG_CREDENTIALS, "Informe sua senha para apagar a conta.")
@@ -71,7 +72,7 @@ class AuthRepository(
         }
         if (reauth is AuthResult.Error) return reauth
         return withContext(NonCancellable) {
-            flag.set()
+            flag.set(uid)
             try {
                 withTimeout(NET_TIMEOUT_MS) { engine.deleteAccountData() }
             } catch (e: Exception) {
@@ -101,14 +102,16 @@ class AuthRepository(
      * outra falha mantém a marca e a sessão e retorna false. Sem laço.
      */
     suspend fun resumeDeletionIfNeeded(): Boolean = withContext(NonCancellable) {
-        if (gateway.state.value is AuthState.Guest) return@withContext false
-        val pending = flag.isSet() || try {
+        val uid = signedUid() ?: return@withContext false // sem usuário: a flag fica como está
+        val flagged = flag.uid()
+        if (flagged != null && flagged != uid) flag.clear() // sobra de outra conta: nunca apagar esta
+        val pending = flagged == uid || try {
             withTimeout(NET_TIMEOUT_MS) { engine.isDeletionPending() }
         } catch (e: Exception) {
             false
         }
         if (!pending) return@withContext false
-        flag.set()
+        flag.set(uid)
         try {
             withTimeout(NET_TIMEOUT_MS) { engine.deleteAccountData() }
         } catch (e: Exception) {
@@ -126,6 +129,8 @@ class AuthRepository(
         false
     }
 
+    private fun signedUid(): String? = (gateway.state.value as? AuthState.SignedIn)?.uid
+
     private suspend fun deleteUserWithTimeout(): AuthResult =
         try {
             withTimeout(NET_TIMEOUT_MS) { gateway.deleteAuthUser() }
@@ -141,7 +146,10 @@ class AuthRepository(
 
     private suspend fun AuthResult.thenSync(): AuthResult {
         if (this !is AuthResult.Ok) return this
-        if (flag.isSet()) {
+        val flagged = flag.uid()
+        if (flagged != null && flagged != signedUid()) {
+            flag.clear() // sobra de outra conta: ignorada, só a marca da nuvem da conta logada vale
+        } else if (flagged != null) {
             // Exclusão pendente neste aparelho: conclui antes de qualquer sincronização, nada sobe.
             resumeDeletionIfNeeded()
             return AuthResult.Error(
