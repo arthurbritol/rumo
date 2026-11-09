@@ -5,7 +5,8 @@ import java.util.Locale
 
 private const val DAY_MS = 86_400_000L
 
-data class MergePlan(val applyLocal: List<SyncDoc>, val pushRemote: List<SyncDoc>)
+/** [merged]: o estado final de todos os registros (vencedores, inclusive lápides) depois da mesclagem. */
+data class MergePlan(val applyLocal: List<SyncDoc>, val pushRemote: List<SyncDoc>, val merged: List<SyncDoc> = emptyList())
 
 private fun fmt(v: Any?): String = when (v) {
     null -> ""
@@ -78,7 +79,7 @@ fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long): MergePlan {
         if (!sameDoc(localBy[key], doc)) applyLocal += doc
         if (!sameDoc(remoteBy[key], doc)) pushRemote += doc
     }
-    return MergePlan(applyLocal, pushRemote)
+    return MergePlan(applyLocal, pushRemote, winners.values.toList())
 }
 
 fun mergeOdometer(local: OdometerDoc?, remote: OdometerDoc?, nowMs: Long): OdometerDoc? {
@@ -87,4 +88,50 @@ fun mergeOdometer(local: OdometerDoc?, remote: OdometerDoc?, nowMs: Long): Odome
     if (l == null) return r
     if (r == null) return l
     return if (l.updatedAtMs > r.updatedAtMs) l else r
+}
+
+/**
+ * Km das viagens que a mesclagem trouxe ao lado vencedor do hodômetro e que já estavam rodadas quando o painel
+ * foi lido: viagens vivas de [merged] que não estavam vivas em [winnerSide] (nem pelo gid, nem pelo conteúdo —
+ * [dedupKey], para uma duplicata não contar) e que terminaram até [readingAtMs]. Campo da viagem: `distanceM`
+ * (metros), `endedAtMs` (ou `startedAtMs`).
+ */
+fun tripsAddedKm(winnerSide: List<SyncDoc>, merged: List<SyncDoc>, readingAtMs: Long): Double {
+    val live = winnerSide.filter { it.kind == Kind.TRIP && !it.deleted }
+    val gids = live.mapTo(HashSet()) { it.gid }
+    val keys = live.mapTo(HashSet()) { dedupKey(it) }
+    return merged.asSequence()
+        .filter { it.kind == Kind.TRIP && !it.deleted && it.gid !in gids && dedupKey(it) !in keys }
+        .filter { tripEndMs(it) <= readingAtMs }
+        .sumOf { ((it.fields["distanceM"] as? Number)?.toDouble() ?: 0.0) / 1000.0 }
+}
+
+private fun tripEndMs(d: SyncDoc): Long =
+    ((d.fields["endedAtMs"] ?: d.fields["startedAtMs"]) as? Number)?.toLong() ?: 0L
+
+/**
+ * Hodômetro vencedor (último a escrever, [mergeOdometer]) corrigido pelas viagens da mesclagem.
+ *
+ * O km mostrado é `offsetKm + soma das viagens do aparelho`, e o deslocamento é relativo às viagens que o
+ * aparelho que leu o painel tinha naquele momento. Se a mesclagem traz ao lado vencedor viagens que ele não
+ * tinha e que já tinham sido rodadas na leitura (o painel já as inclui), elas seriam somadas duas vezes — caso
+ * típico: reinstalar, cadastrar o painel como visitante sem viagens e depois entrar na conta com o histórico.
+ * Então `offset' = offset − km dessas viagens` ([tripsAddedKm]), com `updatedAtMs` novo (agora) para o valor
+ * corrigido vencer em todo aparelho. Pressupostos: o relógio do aparelho é razoável (viagem terminada depois da
+ * leitura não é descontada) e uma viagem com o mesmo [dedupKey] é a mesma viagem. Sem ajuste, devolve o vencedor
+ * como está (idempotente: na segunda vez os dois lados já têm as mesmas viagens).
+ */
+fun mergeOdometerWithTrips(
+    local: OdometerDoc?,
+    remote: OdometerDoc?,
+    localDocs: List<SyncDoc>,
+    remoteDocs: List<SyncDoc>,
+    merged: List<SyncDoc>,
+    nowMs: Long,
+): OdometerDoc? {
+    val winner = mergeOdometer(local, remote, nowMs) ?: return null
+    val localWins = local != null && (remote == null || clamp(local.updatedAtMs, nowMs) > clamp(remote.updatedAtMs, nowMs))
+    val km = tripsAddedKm(if (localWins) localDocs else remoteDocs, merged, winner.updatedAtMs)
+    if (km == 0.0) return winner
+    return winner.copy(offsetKm = winner.offsetKm - km, updatedAtMs = maxOf(nowMs, winner.updatedAtMs + 1))
 }

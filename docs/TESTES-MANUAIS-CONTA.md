@@ -44,7 +44,7 @@ Convenções: "nuvem" = Firestore; "visitante" = sem conta.
 - [ ] "Entrar" (perfil) e crie/entre numa conta: **todos os dados continuam** na tela, sem duplicados (abastecimentos, manutenção, favoritos, viagem).
 - [ ] No console, os documentos estão em `usuarios/{uid}` (abastecimentos, manutenção, locais, viagens, config/hodometro).
 - [ ] Repita entrando numa conta que **já tinha** dados na nuvem: os dados dos dois lados aparecem juntos, sem duplicar itens iguais (ex.: os mesmos itens de manutenção padrão).
-- [ ] Hodômetro do visitante x o da conta no primeiro login: o mais recentemente alterado vence (último a escrever). Confirme que o resultado é o esperado (ex.: ajustou o hodômetro como visitante agora há pouco: o valor do visitante prevalece).
+- [ ] Hodômetro do visitante x o da conta no primeiro login: o mais recentemente alterado vence (último a escrever), e as viagens que vieram do outro lado e já tinham sido rodadas antes da leitura do painel **não** são somadas de novo. Ex.: reinstalar, "Pular", cadastro curto com o km do painel, rodar nada e então entrar na conta com histórico: a Garagem mostra exatamente o km digitado (não painel + histórico).
 
 ## 5. Desinstalar, reinstalar e recuperar
 

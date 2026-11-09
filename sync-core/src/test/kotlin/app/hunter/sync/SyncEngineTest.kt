@@ -360,6 +360,106 @@ class SyncEngineTest {
         assertTrue(local.odoDirty)
     }
 
+    // ---------- hodômetro x viagens trazidas pela mesclagem ----------
+
+    private fun trip(gid: String, ended: Long, km: Double, at: Long = 10) = SyncDoc(
+        Kind.TRIP, gid, at, false,
+        mapOf("startedAtMs" to ended - 1_000, "endedAtMs" to ended, "distanceM" to km * 1000),
+    )
+
+    /** O que a Garagem mostra: deslocamento + soma das viagens vivas do aparelho. */
+    private suspend fun shownKm(): Double =
+        local.odometer()!!.offsetKm + local.all().filter { it.kind == Kind.TRIP && !it.deleted }
+            .sumOf { (it.fields["distanceM"] as Number).toDouble() / 1000 }
+
+    @Test
+    fun `reinstalar como visitante e depois entrar - hodometro mostrado igual ao painel`() = runTest {
+        // nuvem: 3 viagens antigas e o hodômetro antigo
+        remote.docs[Kind.TRIP to "t1"] = trip("t1", 1_000, 100.0)
+        remote.docs[Kind.TRIP to "t2"] = trip("t2", 2_000, 200.0)
+        remote.docs[Kind.TRIP to "t3"] = trip("t3", 3_000, 300.0)
+        remote.odo = OdometerDoc(9_400.0, 13.0, 5_000) // 9400 + 600 = 10000 no painel
+        // aparelho reinstalado: cadastro curto com o painel 10500, sem viagens, mais novo
+        local.odo = OdometerDoc(10_500.0, 13.0, 900_000); local.odoDirty = true
+
+        engine.firstSync()
+
+        assertEquals(10_500.0, shownKm(), 1e-9)
+        assertEquals(local.odometer(), remote.odo)
+        assertEquals(now, remote.odo!!.updatedAtMs)
+        assertFalse(local.hasDirtyOdometerOrProfile())
+        // idempotente: um segundo sync não muda nada
+        engine.syncNow()
+        assertEquals(10_500.0, shownKm(), 1e-9)
+        assertEquals(local.odometer(), remote.odo)
+    }
+
+    @Test
+    fun `os dois lados com viagens - cada vencedor desconta só as do outro lado`() = runTest {
+        local.put(trip("l", 1_000, 10.0), dirty = true)
+        remote.docs[Kind.TRIP to "r"] = trip("r", 1_100, 20.0)
+        // local vence: o painel (510) foi lido com a viagem l -> deslocamento 500
+        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        remote.odo = OdometerDoc(100.0, 13.0, 1_500)
+        engine.syncNow()
+        assertEquals(510.0, shownKm(), 1e-9)
+
+        // remoto vence: o painel (900) foi lido no outro aparelho com a viagem r
+        local.docs.clear(); local.dirtyKeys.clear(); remote.docs.clear()
+        local.put(trip("l2", 1_000, 10.0), dirty = true)
+        remote.docs[Kind.TRIP to "r2"] = trip("r2", 1_100, 20.0)
+        local.odo = OdometerDoc(1.0, 13.0, 1_000); local.odoDirty = false
+        remote.odo = OdometerDoc(880.0, 13.0, 3_000)
+        engine.syncNow()
+        assertEquals(900.0, shownKm(), 1e-9)
+    }
+
+    @Test
+    fun `viagem do outro lado terminada depois da leitura do painel soma normalmente`() = runTest {
+        remote.docs[Kind.TRIP to "r"] = trip("r", 5_000, 20.0) // rodou depois da leitura local
+        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        engine.syncNow()
+        assertEquals(520.0, shownKm(), 1e-9)
+        assertEquals(OdometerDoc(500.0, 13.0, 2_000), remote.odo) // sem ajuste
+    }
+
+    @Test
+    fun `sem viagens de um lado o hodometro nao muda`() = runTest {
+        local.put(trip("l", 1_000, 10.0), dirty = true)
+        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        remote.odo = OdometerDoc(100.0, 13.0, 1_500)
+        engine.syncNow()
+        assertEquals(OdometerDoc(500.0, 13.0, 2_000), remote.odo)
+        assertEquals(510.0, shownKm(), 1e-9)
+    }
+
+    @Test
+    fun `viagem duplicada (outro gid) nao e descontada nem contada duas vezes`() = runTest {
+        local.put(trip("dup-b", 1_000, 10.0), dirty = true)
+        remote.docs[Kind.TRIP to "dup-a"] = trip("dup-a", 1_000, 10.0)
+        remote.docs[Kind.TRIP to "r"] = trip("r", 1_100, 20.0)
+        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        engine.syncNow()
+        assertEquals(510.0, shownKm(), 1e-9)
+        engine.syncNow()
+        assertEquals(510.0, shownKm(), 1e-9)
+    }
+
+    @Test
+    fun `ajuste que nao sobe fica sujo no aparelho e sobe depois`() = runTest {
+        remote.docs[Kind.TRIP to "r"] = trip("r", 1_100, 20.0)
+        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        remote.pushOdoError = IOException("sem rede")
+        assertFailsWith<IOException> { engine.syncNow() }
+        assertEquals(500.0, shownKm(), 1e-9) // a viagem trazida já entrou e o ajuste também
+        assertTrue(local.odoDirty)
+        remote.pushOdoError = null
+        engine.syncNow()
+        assertEquals(500.0, shownKm(), 1e-9)
+        assertEquals(local.odometer(), remote.odo)
+        assertFalse(local.odoDirty)
+    }
+
     @Test
     fun `marcar exclusao pendente e consultar passam pelo remoto`() = runTest {
         assertFalse(engine.isDeletionPending())

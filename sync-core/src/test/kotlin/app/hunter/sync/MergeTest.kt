@@ -142,6 +142,26 @@ class MergeTest {
         assertEquals(listOf(fuel("a", dentro)), plan.pushRemote)
     }
 
+    private fun trip(gid: String, ended: Long, km: Double, at: Long = 10, deleted: Boolean = false) = SyncDoc(
+        Kind.TRIP, gid, at, deleted,
+        mapOf("startedAtMs" to ended - 1_000, "endedAtMs" to ended, "distanceM" to km * 1000),
+    )
+
+    @Test
+    fun `km das viagens trazidas ao lado vencedor - por gid ou conteúdo, só as terminadas até a leitura`() {
+        val lado = listOf(trip("a", 100, 5.0), trip("dup-b", 200, 7.0), trip("x", 300, 1.0, deleted = true))
+        val mescladas = listOf(
+            trip("a", 100, 5.0), // já estava no lado vencedor
+            trip("dup-a", 200, 7.0), // a mesma viagem, outro gid (dedup): já estava
+            trip("r", 250, 11.0), // trazida e terminada antes da leitura: conta
+            trip("x", 300, 1.0), // estava só como apagada: conta
+            trip("depois", 2_000, 13.0), // terminou depois da leitura: não conta
+            trip("apagada", 260, 17.0, deleted = true), // apagada não conta
+        )
+        assertEquals(12.0, tripsAddedKm(lado, mescladas, readingAtMs = 1_000), 1e-9)
+        assertEquals(0.0, tripsAddedKm(mescladas, mescladas, readingAtMs = 1_000), 1e-9)
+    }
+
     @Test
     fun `grupo de três duplicatas fica com o menor gid e duas lápides`() {
         val plan = merge(listOf(fuel("c", 100), fuel("a", 100)), listOf(fuel("b", 100)), now)

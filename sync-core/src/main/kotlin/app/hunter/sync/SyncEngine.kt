@@ -95,8 +95,11 @@ class SyncEngine(
         val localOdo = local.odometer()
         val localProfile = local.profile()
 
-        val plan = merge(local.all(), snap.docs, now)
-        val odo = mergeOdometer(localOdo, snap.odometer, now)
+        val localDocs = local.all()
+        val plan = merge(localDocs, snap.docs, now)
+        // Último a escrever vence, corrigido pelas viagens que a mesclagem trouxe ao lado vencedor (ver KDoc).
+        val odo = mergeOdometerWithTrips(localOdo, snap.odometer, localDocs, snap.docs, plan.merged, now)
+        val odoAdjusted = odo != null && odo != mergeOdometer(localOdo, snap.odometer, now)
         val profile: UserProfile? = when {
             localProfile == null -> snap.profile
             snap.profile == null || localDirtyMeta -> localProfile
@@ -115,6 +118,9 @@ class SyncEngine(
             val err = if (odo == snap.odometer) null else attempt { remote.pushOdometer(odo) }
             if (err != null) {
                 failure = err
+                // As viagens trazidas já foram aplicadas: o ajuste precisa ficar no aparelho (sujo) e subir depois,
+                // senão a diferença some e o hodômetro fica contado em dobro.
+                if (odoAdjusted) local.applyOdometer(odo, dirty = true)
             } else if (odo != localOdo || localDirtyMeta) {
                 local.applyOdometer(odo)
             }
