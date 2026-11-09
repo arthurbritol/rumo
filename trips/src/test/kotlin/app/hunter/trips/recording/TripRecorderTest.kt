@@ -23,7 +23,8 @@ private class FakeStore : TripStore {
     var statsUpdates = 0
     private var nextId = 1L
 
-    override suspend fun createTrip(startedAtMs: Long): Long = nextId++.also { trips += Trip(it, startedAtMs) }
+    override suspend fun createTrip(startedAtMs: Long, title: String?): Long = nextId++.also { trips += Trip(it, startedAtMs) }
+    override suspend fun renameTrip(tripId: Long, title: String?) {}
     override suspend fun appendPoint(tripId: Long, index: Int, point: TrackPoint) {
         points.getOrPut(tripId) { mutableListOf() } += index to point
     }

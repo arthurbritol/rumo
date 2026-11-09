@@ -1,9 +1,15 @@
 package app.hunter.app.ui
 
-enum class Tab(val label: String, val emoji: String) {
-    Ride("Pedal", "🏍️"),
-    History("Histórico", "🗺️"),
-    Fuel("Combustível", "⛽"),
-    Maintenance("Manutenção", "🔧"),
-    Pod("Pod", "📡"),
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.graphics.vector.ImageVector
+
+enum class Tab(val label: String, val icon: ImageVector) {
+    Map("Mapa", Icons.Default.Place),
+    Trips("Viagens", Icons.AutoMirrored.Filled.List),
+    Garage("Garagem", Icons.Default.Build),
+    Pod("Pod", Icons.Default.Settings),
 }

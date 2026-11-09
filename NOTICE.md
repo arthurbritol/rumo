@@ -25,5 +25,5 @@ Projeto pessoal, independente, **sem afiliação** com Royal Enfield / Eicher Mo
 ## Aviso de compatibilidade
 
 O protocolo foi observado apenas no Pod da **Meteor 350**. A compatibilidade com o Pod da **Hunter 350** é
-esperada, mas **não verificada** (a moto chega em 30/11/2026). Os testes de `pod-protocol` garantem que os
+esperada, mas **não verificada**. Os testes de `pod-protocol` garantem que os
 bytes gerados batem com as capturas documentadas, não que o Pod da Hunter os aceite.

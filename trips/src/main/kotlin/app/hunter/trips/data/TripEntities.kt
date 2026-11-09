@@ -23,12 +23,13 @@ data class TripEntity(
     val maxSpeedMps: Double = 0.0,
     val elevationGainM: Double = 0.0,
     val elevationLossM: Double = 0.0,
+    val title: String? = null,
 ) {
     fun stats() = TripStats(
         distanceM, elapsedMs, movingTimeMs, stoppedTimeMs, stopCount, maxSpeedMps, elevationGainM, elevationLossM,
     )
 
-    fun toSummary() = TripSummary(id, startedAtMs, endedAtMs, stats())
+    fun toSummary() = TripSummary(id, startedAtMs, endedAtMs, stats(), title)
 
     fun withStats(s: TripStats) = copy(
         distanceM = s.distanceM, elapsedMs = s.elapsedMs, movingTimeMs = s.movingTimeMs,

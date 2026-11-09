@@ -1,6 +1,7 @@
 package app.hunter.podble
 
 import android.content.Context
+import app.hunter.nav.PodBottomMode
 import app.hunter.pod.CompassDirection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,8 @@ data class PodUiState(
     /** Setor da bússola enviado ao Pod, quando conectado e em movimento. */
     val direction: CompassDirection? = null,
     val pairedName: String? = null,
+    /** Linha inferior mostrada no Pod durante a navegação. */
+    val bottomMode: PodBottomMode = PodBottomMode.ARRIVAL_TIME,
 )
 
 /** Estado do Pod visível para a UI (processo único → singleton). */
@@ -24,6 +27,12 @@ object PodStatus {
 
     internal fun update(f: (PodUiState) -> PodUiState) {
         _state.value = f(_state.value)
+    }
+
+    /** Carrega o que foi salvo (Pod pareado, linha inferior) quando o app abre. */
+    fun restore(context: Context) {
+        val p = PodPrefs(context)
+        update { it.copy(pairedName = p.pairedName() ?: p.pairedMac(), bottomMode = p.bottomMode) }
     }
 }
 
@@ -35,6 +44,9 @@ internal class PodPrefs(context: Context) {
     fun pairedName(): String? = sp.getString("name", null)
     fun markPaired(mac: String, name: String?) = sp.edit().putString("mac", mac).putString("name", name).apply()
     fun forget() = sp.edit().remove("mac").remove("name").apply()
+    var bottomMode: PodBottomMode
+        get() = PodBottomMode.entries.getOrElse(sp.getInt("bottomMode", 0)) { PodBottomMode.ARRIVAL_TIME }
+        set(v) { sp.edit().putInt("bottomMode", v.ordinal).apply() }
     var is12h: Boolean
         get() = sp.getBoolean("is12h", false)
         set(v) { sp.edit().putBoolean("is12h", v).apply() }

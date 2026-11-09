@@ -39,7 +39,7 @@ class TripRecorder(
     val isRecording: Boolean get() = tripId != null
 
     /** Retoma o trajeto aberto (processo morto no meio) ou cria um novo. @return id do trajeto. */
-    suspend fun startOrResume(): Long {
+    suspend fun startOrResume(title: String? = null): Long {
         tripId?.let { return it }
         val active = store.activeTrip()
         val id: Long
@@ -55,7 +55,7 @@ class TripRecorder(
             nextIndex = 0
             startedAtMs = clock()
             lastPoint = null
-            id = store.createTrip(startedAtMs)
+            id = store.createTrip(startedAtMs, title)
         }
         tripId = id
         sinceFlush = 0

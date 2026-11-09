@@ -27,6 +27,7 @@ dependencies {
     api(project(":pod-protocol"))
     // LocationSource (GPS) reaproveitado para a bússola.
     implementation(project(":trips"))
+    api(project(":navigation"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
 }

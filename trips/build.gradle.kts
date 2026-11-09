@@ -30,6 +30,7 @@ kotlin {
 
 dependencies {
     api(project(":core-model"))
+    api(project(":navigation"))
     implementation(libs.androidx.core.ktx)
     // Entidades/DAO ficam aqui; o RoomDatabase (e o processador KSP) fica no :app.
     api(libs.androidx.room.runtime)

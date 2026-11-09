@@ -28,6 +28,8 @@ data class TripSummary(
     /** null enquanto o trajeto ainda está sendo gravado. */
     val endedAtMs: Long?,
     val stats: TripStats,
+    /** Nome da viagem (destino da navegação, quando houve). */
+    val title: String? = null,
 ) {
     val isActive: Boolean get() = endedAtMs == null
 }

@@ -8,11 +8,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.IBinder
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import app.hunter.nav.NavServices
+import app.hunter.nav.NavSession
+import app.hunter.nav.NavStatus
 import app.hunter.trips.R
 import app.hunter.trips.data.TripsGraph
 import app.hunter.trips.recording.AndroidLocationSource
@@ -32,10 +37,11 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * Serviço em primeiro plano que grava o trajeto com a tela bloqueada.
+ * Serviço em primeiro plano da viagem: grava o trajeto e, se houver uma rota em [NavStatus], conduz a
+ * navegação (progresso, recálculo, voz) — tudo com a tela bloqueada.
  *
  * - [start] inicia/retoma; [stop] encerra e salva. Se o sistema matar o processo no meio, o trajeto fica
- *   aberto no banco e é retomado (START_STICKY → intent nulo → retoma).
+ *   aberto no banco e é retomado (START_STICKY → intent nulo → retoma). A navegação não é retomada.
  * - Exige permissão de localização concedida *antes* de [start] (a UI pede).
  * - A Application precisa implementar [TripsGraph].
  */
@@ -45,6 +51,9 @@ class TrackingService : Service() {
     private var job: Job? = null
     private var lastNotifiedMs = 0L
 
+    private var tts: TextToSpeech? = null
+    @Volatile private var ttsReady = false
+
     @Volatile
     private var destroyed = false
 
@@ -52,6 +61,22 @@ class TrackingService : Service() {
     internal var locationSourceFactory: (Context) -> LocationSource = { AndroidLocationSource(it) }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        tts = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val r = tts?.setLanguage(Locale.forLanguageTag("pt-BR"))
+                tts?.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
+                ttsReady = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
+            }
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -81,12 +106,19 @@ class TrackingService : Service() {
             TrackingStatus.publish(state)
             notifyThrottled(state)
         })
+        val nav = NavSession(
+            scope = scope,
+            reroute = { from, to, profile, via -> NavServices.router.route(from, to.latLon, profile, via = via).firstOrNull() },
+        )
         val source = locationSourceFactory(this)
 
         job = scope.launch {
             try {
-                recorder.startOrResume()
-                source.updates().collect { recorder.onPoint(it) }
+                recorder.startOrResume(NavStatus.state.value.destination?.let { "Para ${it.name}" })
+                source.updates().collect { p ->
+                    recorder.onPoint(p)
+                    nav.onPoint(p)?.forEach(::speak)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SecurityException) {
@@ -97,6 +129,7 @@ class TrackingService : Service() {
                 if (!destroyed) {
                     withContext(NonCancellable) {
                         recorder.finish()
+                        NavStatus.stop()
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
@@ -114,19 +147,29 @@ class TrackingService : Service() {
         j.cancel() // o finally do job salva o trajeto e chama stopSelf()
     }
 
+    private fun speak(text: String) {
+        if (!ttsReady || !NavStatus.voice.value) return
+        tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "nav-${System.nanoTime()}")
+    }
+
     private fun notifyThrottled(state: RecordingState) {
         val now = System.currentTimeMillis()
-        if (now - lastNotifiedMs < 5_000) return
+        if (now - lastNotifiedMs < 3_000) return
         lastNotifiedMs = now
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state))
     }
 
     private fun buildNotification(state: RecordingState): Notification {
         val stats = state.stats
-        val text = if (state.isRecording && stats.elapsedMs > 0) {
-            String.format(Locale.getDefault(), "%.1f km · %s", stats.distanceKm, formatDuration(stats.elapsedMs))
-        } else {
-            getString(R.string.tracking_waiting_gps)
+        val nav = NavStatus.state.value
+        val text = when {
+            nav.active && nav.progress != null -> {
+                val p = nav.progress!!
+                "${p.upcoming.instruction} · ${formatDistance(p.distanceToUpcomingM)}"
+            }
+            state.isRecording && stats.elapsedMs > 0 ->
+                String.format(Locale.getDefault(), "%.1f km · %s", stats.distanceKm, formatDuration(stats.elapsedMs))
+            else -> getString(R.string.tracking_waiting_gps)
         }
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -137,12 +180,12 @@ class TrackingService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle(getString(R.string.tracking_title))
+            .setContentTitle(getString(if (nav.active) R.string.tracking_title_nav else R.string.tracking_title))
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .addAction(0, getString(R.string.tracking_stop), stop)
             .build()
     }
@@ -161,6 +204,8 @@ class TrackingService : Service() {
         // Não finaliza o trajeto aqui: se foi o sistema que destruiu, ele é retomado na próxima partida.
         destroyed = true
         scope.cancel()
+        tts?.stop()
+        tts?.shutdown()
         TrackingStatus.publish(RecordingState())
         super.onDestroy()
     }
@@ -172,7 +217,7 @@ class TrackingService : Service() {
         const val ACTION_START = "app.hunter.trips.START"
         const val ACTION_STOP = "app.hunter.trips.STOP"
 
-        /** Inicia (ou retoma) a gravação. Chamar com o app em primeiro plano e a localização já permitida. */
+        /** Inicia (ou retoma) a viagem. Chamar com o app em primeiro plano e a localização já permitida. */
         fun start(context: Context) {
             context.startForegroundService(Intent(context, TrackingService::class.java).setAction(ACTION_START))
         }
@@ -185,5 +230,8 @@ class TrackingService : Service() {
             val s = ms / 1000
             return String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
         }
+
+        internal fun formatDistance(m: Double): String =
+            if (m >= 1000) String.format(Locale.getDefault(), "%.1f km", m / 1000) else String.format(Locale.getDefault(), "%.0f m", m)
     }
 }

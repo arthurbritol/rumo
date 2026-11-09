@@ -13,7 +13,8 @@ data class ActiveTrip(val id: Long, val startedAtMs: Long)
  * ser testável na JVM com um fake.
  */
 interface TripStore {
-    suspend fun createTrip(startedAtMs: Long): Long
+    suspend fun createTrip(startedAtMs: Long, title: String? = null): Long
+    suspend fun renameTrip(tripId: Long, title: String?)
     suspend fun appendPoint(tripId: Long, index: Int, point: TrackPoint)
     suspend fun updateStats(tripId: Long, stats: TripStats)
     suspend fun finishTrip(tripId: Long, endedAtMs: Long, stats: TripStats)

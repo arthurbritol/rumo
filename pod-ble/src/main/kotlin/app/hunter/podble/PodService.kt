@@ -13,6 +13,9 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import app.hunter.nav.NavStatus
+import app.hunter.nav.PodBottomMode
+import app.hunter.nav.PodNavPackets
 import app.hunter.pod.CompassDirection
 import app.hunter.pod.CompassFilter
 import app.hunter.pod.PodPackets
@@ -26,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -59,8 +63,15 @@ class PodService : Service() {
             ACTION_STOP -> shutdown()
             ACTION_PIN -> intent.getStringExtra(EXTRA_PIN)?.let { submitPin(it) }
             ACTION_FORGET -> prefs.forget().also { PodStatus.update { it.copy(pairedName = null) } }
+            ACTION_BOTTOM -> {
+                val mode = PodBottomMode.entries.getOrNull(intent.getIntExtra(EXTRA_BOTTOM, 0)) ?: PodBottomMode.ARRIVAL_TIME
+                prefs.bottomMode = mode
+                PodStatus.update { it.copy(bottomMode = mode) }
+            }
             else -> connect()
         }
+        // Comandos de configuração com o serviço parado não devem deixá-lo ligado à toa.
+        if (job?.isActive != true && intent?.action in setOf(ACTION_FORGET, ACTION_BOTTOM, ACTION_PIN)) stopSelf()
         return START_NOT_STICKY
     }
 
@@ -80,7 +91,7 @@ class PodService : Service() {
             stopSelf()
             return
         }
-        PodStatus.update { it.copy(pairedName = prefs.pairedName() ?: prefs.pairedMac()) }
+        PodStatus.update { it.copy(pairedName = prefs.pairedName() ?: prefs.pairedMac(), bottomMode = prefs.bottomMode) }
 
         job = scope.launch {
             while (isActive) {
@@ -117,7 +128,7 @@ class PodService : Service() {
                 SessionState.CONNECTED -> onConnected()
                 else -> dropped.complete(Unit)
             }
-            compassJob = scope.launch { feedCompass(s) }
+            compassJob = scope.launch { coroutineScope { launch { feedNavigation(s) }; launch { feedCompass(s) } } }
             dropped.await()
             PodStatus.update { it.copy(phase = PodPhase.SCANNING, message = "Pod desconectado. Reconectando…", direction = null) }
         } catch (e: CancellationException) {
@@ -148,7 +159,9 @@ class PodService : Service() {
         }
     }
 
-    /** Bússola: rumo do GPS (mais firme que o magnetômetro na moto) com histerese; só em movimento. */
+    @Volatile private var lastDirection: CompassDirection? = null
+
+    /** Bússola: rumo do GPS (mais firme que o magnetômetro na moto) com histerese; só em movimento e sem rota. */
     private suspend fun feedCompass(s: PodSession) {
         val filter = CompassFilter()
         var sent: CompassDirection? = null
@@ -158,6 +171,8 @@ class PodService : Service() {
                 val bearing = p.bearingDeg ?: return@collect
                 if ((p.speedMps ?: 0f) < MIN_COMPASS_SPEED_MPS) return@collect
                 val dir = filter.update(bearing)
+                lastDirection = dir
+                if (NavStatus.state.value.active) return@collect // navegando: o Pod mostra a rota
                 if (dir != sent) {
                     sent = dir
                     s.setScreen(PodPackets.compass(dir, night = isNight()))
@@ -166,6 +181,46 @@ class PodService : Service() {
             }
         } catch (e: SecurityException) {
             PodStatus.update { it.copy(message = "Sem permissão de localização: bússola desativada.") }
+        }
+    }
+
+    /**
+     * Navegação no Pod: manobra, distância, próxima manobra e rodapé (hora de chegada/tempo/distância).
+     * Ao iniciar mostra "rota iniciada" por ~2 s; ao recalcular, o ícone de recalculando; ao terminar, volta à bússola.
+     */
+    private suspend fun feedNavigation(s: PodSession) {
+        var lastPacket: ByteArray? = null
+        var startShown = false
+        var wasActive = false
+        NavStatus.state.collect { st ->
+            if (s.state.value != SessionState.CONNECTED) return@collect
+            val night = isNight()
+            if (!st.active) {
+                if (wasActive) {
+                    wasActive = false
+                    startShown = false
+                    lastPacket = null
+                    s.setScreen(PodPackets.compass(lastDirection ?: CompassDirection.N, night))
+                }
+                return@collect
+            }
+            wasActive = true
+            if (st.rerouting) {
+                val p = PodPackets.recalculating(night)
+                if (lastPacket?.contentEquals(p) != true) { lastPacket = p; s.setScreen(p) }
+                return@collect
+            }
+            val prog = st.progress ?: return@collect
+            if (!startShown) {
+                startShown = true
+                s.setScreen(PodPackets.routeStarted())
+                delay(ROUTE_STARTED_MS)
+            }
+            val pkt = PodNavPackets.navigation(prog, night, prefs.bottomMode, prefs.is12h)
+            if (lastPacket?.contentEquals(pkt) != true) {
+                lastPacket = pkt
+                s.setScreen(pkt)
+            }
         }
     }
 
@@ -223,7 +278,17 @@ class PodService : Service() {
         const val ACTION_STOP = "app.hunter.podble.STOP"
         const val ACTION_PIN = "app.hunter.podble.PIN"
         const val ACTION_FORGET = "app.hunter.podble.FORGET"
+        const val ACTION_BOTTOM = "app.hunter.podble.BOTTOM"
         const val EXTRA_PIN = "pin"
+        const val EXTRA_BOTTOM = "bottom"
+        private const val ROUTE_STARTED_MS = 2_000L
+
+        /** Linha inferior do Pod na navegação (funciona com ou sem conexão ativa). */
+        fun setBottomMode(context: Context, mode: PodBottomMode) {
+            context.startService(
+                Intent(context, PodService::class.java).setAction(ACTION_BOTTOM).putExtra(EXTRA_BOTTOM, mode.ordinal),
+            )
+        }
 
         fun connect(context: Context) {
             context.startForegroundService(Intent(context, PodService::class.java).setAction(ACTION_CONNECT))

@@ -1,0 +1,71 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-11-09T14:04:05Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 561522252,
+  "lat": -8.0623410,
+  "lon": -34.9321264,
+  "tags": {
+    "amenity": "fuel",
+    "ethanol": "yes",
+    "name": "Posto Texaco"
+  }
+},
+{
+  "type": "node",
+  "id": 561522254,
+  "lat": -8.0627017,
+  "lon": -34.9329981,
+  "tags": {
+    "amenity": "fuel"
+  }
+},
+{
+  "type": "node",
+  "id": 561900188,
+  "lat": -8.0553712,
+  "lon": -34.9237334,
+  "tags": {
+    "amenity": "fuel"
+  }
+},
+{
+  "type": "node",
+  "id": 1416859227,
+  "lat": -8.0489473,
+  "lon": -34.8926231,
+  "tags": {
+    "amenity": "fuel",
+    "brand": "Petrobras",
+    "compressed_air": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 1417438430,
+  "lat": -8.0409036,
+  "lon": -34.8821465,
+  "tags": {
+    "amenity": "fuel"
+  }
+},
+{
+  "type": "node",
+  "id": 2098682001,
+  "lat": -8.0456592,
+  "lon": -34.9300840,
+  "tags": {
+    "amenity": "fuel",
+    "name": "Federal"
+  }
+}
+
+  ]
+}

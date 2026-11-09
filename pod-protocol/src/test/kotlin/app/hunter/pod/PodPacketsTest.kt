@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
  *  - REAL: pacote capturado de um Pod real (Meteor 350) que o desenhou;
  *  - EXT:  valor de referência externo (CRC padrão, pacotes documentados de outros apps);
  *  - LOCK: trava de regressão, layout ainda não visto no hardware.
- * Nada aqui foi validado na Hunter 350 (a moto chega em 30/11/2026).
+ * Nada aqui foi validado na Hunter 350.
  */
 class PodPacketsTest {
 

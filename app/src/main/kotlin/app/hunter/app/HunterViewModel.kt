@@ -3,44 +3,160 @@ package app.hunter.app
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import app.hunter.app.data.PlaceEntity
 import app.hunter.maintenance.Odometer
 import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceItemEntity
 import app.hunter.maintenance.data.OdometerEntity
 import app.hunter.model.DueState
 import app.hunter.model.DueStatus
+import app.hunter.model.FuelAdvice
 import app.hunter.model.FuelMath
+import app.hunter.model.FuelPlanner
+import app.hunter.model.FuelState
 import app.hunter.model.FuelSummary
 import app.hunter.model.Fuelup
 import app.hunter.model.MaintenanceItem
 import app.hunter.model.MaintenanceMath
 import app.hunter.model.TrackPoint
 import app.hunter.model.TripSummary
+import app.hunter.nav.LatLon
+import app.hunter.nav.NavServices
+import app.hunter.nav.NavStatus
+import app.hunter.nav.Place
+import app.hunter.nav.Route
+import app.hunter.nav.RouteProfile
 import app.hunter.podble.PodStatus
+import app.hunter.trips.recording.AndroidLocationSource
 import app.hunter.trips.recording.TrackingStatus
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class MaintenanceRow(val item: MaintenanceItem, val status: DueStatus)
 
+/** Aviso de autonomia para a rota em pré-visualização, com postos próximos do ponto de parada sugerido. */
+data class FuelAdviceUi(
+    val advice: FuelAdvice,
+    val state: FuelState,
+    val stations: List<Place> = emptyList(),
+    val loadingStations: Boolean = false,
+    val stationsError: String? = null,
+)
+
+data class SearchUi(
+    val query: String = "",
+    val results: List<Place> = emptyList(),
+    /** Favoritos e recentes que combinam com o texto: aparecem na hora, antes da rede. */
+    val local: List<Place> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
+/** Pré-visualização da rota até um destino, antes de iniciar a navegação. */
+data class PreviewUi(
+    val place: Place,
+    val profile: RouteProfile = RouteProfile.FASTEST,
+    val routes: List<Route> = emptyList(),
+    val selected: Int = 0,
+    val loading: Boolean = true,
+    val error: String? = null,
+    /** Posto escolhido como parada intermediária. */
+    val via: Place? = null,
+    val fuel: FuelAdviceUi? = null,
+    /** Rota longa e sem tanque cheio registrado: não dá para estimar a autonomia. */
+    val noFuelData: Boolean = false,
+) {
+    val route: Route? get() = routes.getOrNull(selected)
+}
+
+@OptIn(FlowPreview::class)
 class HunterViewModel(app: Application) : AndroidViewModel(app) {
     private val hunter = app as HunterApp
     private val store = hunter.tripStore
     private val dao = hunter.maintenanceDao
+    private val places = hunter.placeDao
+    private val prefs = app.getSharedPreferences("app", 0)
 
     val recording = TrackingStatus.state
     val pod = PodStatus.state
+    val nav = NavStatus.state
+    val voice = NavStatus.voice
 
-    private fun <T> kotlinx.coroutines.flow.Flow<T>.hot(initial: T): StateFlow<T> =
+    private fun <T> Flow<T>.hot(initial: T): StateFlow<T> =
         stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initial)
+
+    // ---------- localização para o mapa ----------
+
+    private val _live = MutableStateFlow<TrackPoint?>(null)
+    /** Última posição conhecida (do GPS enquanto a tela do mapa está aberta). */
+    val live: StateFlow<TrackPoint?> = _live.asStateFlow()
+    private var locationJob: Job? = null
+
+    // ---------- conexão ----------
+
+    private val _online = MutableStateFlow(true)
+    /** Há internet agora? (rotas e busca precisam; o mapa baixado e a gravação não). */
+    val online: StateFlow<Boolean> = _online.asStateFlow()
+
+    private fun watchConnection() {
+        val cm = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        _online.value = cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        runCatching {
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    val was = _online.value
+                    _online.value = true
+                    // Voltou a internet com uma rota falhada na tela: tenta de novo sozinho.
+                    if (!was) viewModelScope.launch { if (_preview.value?.error != null) retryRoutes() }
+                }
+
+                override fun onLost(network: android.net.Network) { _online.value = false }
+            })
+        }
+    }
+
+    fun startLocation() {
+        if (locationJob?.isActive == true) return
+        locationJob = viewModelScope.launch {
+            try {
+                AndroidLocationSource(getApplication(), includeNetwork = true).updates().collect { _live.value = it }
+            } catch (e: SecurityException) {
+                // sem permissão: o mapa fica sem a posição até o usuário permitir
+            }
+        }
+    }
+
+    fun stopLocation() {
+        locationJob?.cancel()
+        locationJob = null
+    }
+
+    // ---------- viagens ----------
 
     /** Todos os trajetos, incluindo o que está gravando agora. */
     private val allTrips: StateFlow<List<TripSummary>> = store.observeTrips().hot(emptyList())
     val finishedTrips: StateFlow<List<TripSummary>> = allTrips.map { l -> l.filter { !it.isActive } }.hot(emptyList())
+
+    fun deleteTrip(id: Long) = viewModelScope.launch { store.deleteTrip(id) }
+    fun renameTrip(id: Long, title: String) = viewModelScope.launch { store.renameTrip(id, title) }
+    suspend fun points(tripId: Long): List<TrackPoint> = store.points(tripId)
+
+    // ---------- combustível, manutenção, hodômetro ----------
 
     val fuelups: StateFlow<List<Fuelup>> = dao.observeFuelups().map { l -> l.map { it.toModel() } }.hot(emptyList())
     val fuelSummary: StateFlow<FuelSummary> = fuelups.map { FuelMath.summarize(it) }.hot(FuelMath.summarize(emptyList()))
@@ -50,7 +166,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     private val tripsDistanceM: StateFlow<Double> = allTrips.map { l -> l.sumOf { it.stats.distanceM } }.hot(0.0)
 
-    /** Hodômetro da moto (km): deslocamento informado + soma dos pedais (inclui o que está gravando). */
+    /** Hodômetro da moto (km): deslocamento informado + soma das viagens (inclui a que está gravando). */
     val odometerKm: StateFlow<Double> =
         combine(odometerEntity, tripsDistanceM) { o, m -> Odometer.currentKm(o?.offsetKm ?: 0.0, m) }.hot(0.0)
 
@@ -61,13 +177,221 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                 .sortedBy { order(it.status.state) }
         }.hot(emptyList())
 
-    /** Itens vencidos ou perto de vencer (para o alerta na tela inicial). */
+    /** Itens vencidos ou perto de vencer (alerta na tela inicial). */
     val attention: StateFlow<List<MaintenanceRow>> =
         maintenance.map { l -> l.filter { it.status.state == DueState.OVERDUE || it.status.state == DueState.SOON } }.hot(emptyList())
 
+    // ---------- destinos salvos ----------
+
+    val favorites: StateFlow<List<Place>> = places.observeFavorites().map { l -> l.map { it.toPlace() } }.hot(emptyList())
+    val recents: StateFlow<List<Place>> = places.observeRecents().map { l -> l.map { it.toPlace() } }.hot(emptyList())
+
+    fun isFavorite(p: Place, favs: List<Place>) = favs.any { same(it, p) }
+
+    fun toggleFavorite(p: Place) = viewModelScope.launch {
+        val e = places.find(p.lat, p.lon)
+        if (e == null) {
+            places.insert(PlaceEntity(name = p.name, subtitle = p.subtitle, lat = p.lat, lon = p.lon, favorite = true, lastUsedMs = System.currentTimeMillis(), useCount = 0))
+        } else {
+            places.update(e.copy(favorite = !e.favorite))
+        }
+    }
+
+    private suspend fun rememberPlace(p: Place) {
+        val e = places.find(p.lat, p.lon)
+        val now = System.currentTimeMillis()
+        if (e == null) places.insert(PlaceEntity(name = p.name, subtitle = p.subtitle, lat = p.lat, lon = p.lon, favorite = false, lastUsedMs = now, useCount = 1))
+        else places.update(e.copy(lastUsedMs = now, useCount = e.useCount + 1))
+    }
+
+    private fun same(a: Place, b: Place) = kotlin.math.abs(a.lat - b.lat) < 0.0001 && kotlin.math.abs(a.lon - b.lon) < 0.0001
+
+    // ---------- busca de destino ----------
+
+    private val _search = MutableStateFlow(SearchUi())
+    val search: StateFlow<SearchUi> = _search.asStateFlow()
+    private val queryFlow = MutableStateFlow("")
+
+    fun onQuery(q: String) {
+        val t = q.trim().lowercase()
+        val local = if (t.length < 2) emptyList() else (favorites.value + recents.value)
+            .distinctBy { "${it.lat},${it.lon}" }
+            .filter { it.name.lowercase().contains(t) || it.subtitle.orEmpty().lowercase().contains(t) }
+            .take(4)
+        _search.update { it.copy(query = q, local = local, error = null, loading = t.length >= 3) }
+        queryFlow.value = q
+    }
+
+    fun clearSearch() {
+        _search.value = SearchUi()
+        queryFlow.value = ""
+    }
+
+    // ---------- pré-visualização de rota e navegação ----------
+
+    private val _preview = MutableStateFlow<PreviewUi?>(null)
+    val preview: StateFlow<PreviewUi?> = _preview.asStateFlow()
+    private var routeJob: Job? = null
+
+    fun previewTo(place: Place) {
+        clearSearch()
+        _preview.value = PreviewUi(place)
+        loadRoutes()
+    }
+
+    fun setProfile(profile: RouteProfile) {
+        _preview.update { it?.copy(profile = profile, routes = emptyList(), selected = 0, loading = true, error = null) }
+        loadRoutes()
+    }
+
+    fun selectRoute(i: Int) {
+        _preview.update { it?.copy(selected = i) }
+        refreshFuelAdvice()
+    }
+
+    fun cancelPreview() {
+        routeJob?.cancel()
+        adviceJob?.cancel()
+        _preview.value = null
+    }
+
+    /** Insere um posto como parada: a rota é recalculada passando por ele. */
+    fun chooseStation(station: Place) {
+        _preview.update { it?.copy(via = station, routes = emptyList(), selected = 0, loading = true, error = null, fuel = null) }
+        loadRoutes()
+    }
+
+    fun clearVia() {
+        _preview.update { it?.copy(via = null, routes = emptyList(), selected = 0, loading = true, error = null, fuel = null) }
+        loadRoutes()
+    }
+
+    private var adviceJob: Job? = null
+
+    /** Estima a autonomia (último tanque cheio + consumo) e, se a rota não cabe, procura postos no ponto de parada sugerido. */
+    private fun refreshFuelAdvice() {
+        val p = _preview.value ?: return
+        val route = p.route ?: return
+        adviceJob?.cancel()
+        adviceJob = viewModelScope.launch {
+            val fuelups = dao.observeFuelups().first().map { it.toModel() }
+            val od = dao.getOdometer()
+            val tripsM = store.observeTrips().first().sumOf { it.stats.distanceM }
+            val odo = Odometer.currentKm(od?.offsetKm ?: 0.0, tripsM)
+            val state = FuelPlanner.state(od?.tankLiters ?: DEFAULT_TANK_L, FuelMath.summarize(fuelups).avgKmPerL, odo, fuelups)
+            if (state == null) {
+                _preview.update { cur -> if (cur != null && cur.route === route) cur.copy(fuel = null, noFuelData = route.distanceM > 60_000) else cur }
+                return@launch
+            }
+            val advice = FuelPlanner.advise(route.distanceM / 1000.0, state.rangeKm)
+            val base = FuelAdviceUi(advice, state, loadingStations = advice.needsStop && p.via == null)
+            _preview.update { cur -> if (cur != null && cur.route === route) cur.copy(fuel = base, noFuelData = false) else cur }
+            if (!advice.needsStop || p.via != null) return@launch
+
+            val at = route.pointAt((advice.stopAtKm ?: 0.0) * 1000.0)
+            val result = try {
+                val st = NavServices.fuelStations.near(at)
+                base.copy(stations = st, loadingStations = false, stationsError = if (st.isEmpty()) "Nenhum posto encontrado perto do km ${(advice.stopAtKm ?: 0.0).toInt()}." else null)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                base.copy(loadingStations = false, stationsError = "Não foi possível buscar postos (sem internet?).")
+            }
+            _preview.update { cur -> if (cur != null && cur.route === route) cur.copy(fuel = result) else cur }
+        }
+    }
+
+    fun retryRoutes() {
+        _preview.update { it?.copy(loading = true, error = null) }
+        loadRoutes()
+    }
+
+    private fun loadRoutes() {
+        val p = _preview.value ?: return
+        routeJob?.cancel()
+        routeJob = viewModelScope.launch {
+            // Espera até 20 s pela primeira posição (GPS ou rede) em vez de desistir de cara.
+            val from = _live.value ?: kotlinx.coroutines.withTimeoutOrNull(20_000) { _live.filterNotNull().first() }
+            if (from == null) {
+                _preview.update { it?.copy(loading = false, error = "Sem sinal de localização. Vá para um local aberto e toque em Tentar de novo.") }
+                return@launch
+            }
+            try {
+                val routes = NavServices.router.route(
+                    LatLon(from.latitude, from.longitude), p.place.latLon, p.profile, alternates = 2,
+                    via = listOfNotNull(p.via?.latLon),
+                )
+                _preview.update { cur ->
+                    if (cur == null || cur.place != p.place || cur.profile != p.profile || cur.via != p.via) cur
+                    else cur.copy(routes = routes, selected = 0, loading = false, error = if (routes.isEmpty()) "Nenhuma rota encontrada." else null)
+                }
+                refreshFuelAdvice()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _preview.update {
+                    it?.copy(
+                        loading = false,
+                        error = if (_online.value) "O servidor de rotas não respondeu. Tente de novo em instantes." else "Sem internet para calcular a rota.",
+                    )
+                }
+            }
+        }
+    }
+
+    /** Confirma a rota escolhida e marca a navegação como ativa. A UI então liga o serviço. */
+    fun commitNavigation(): Boolean {
+        val p = _preview.value ?: return false
+        val route = p.route ?: return false
+        viewModelScope.launch { rememberPlace(p.place) }
+        NavStatus.start(route, p.place, via = listOfNotNull(p.via?.latLon))
+        adviceJob?.cancel()
+        _preview.value = null
+        return true
+    }
+
+    /** Garante que a navegação termina na UI mesmo se o serviço já tiver parado. */
+    fun stopNavigationNow() = NavStatus.stop()
+
+    fun toggleVoice() {
+        val on = !NavStatus.voice.value
+        NavStatus.setVoice(on)
+        prefs.edit().putBoolean("voice", on).apply()
+    }
+
+    /** Toque longo no mapa: usa o endereço mais próximo como destino. */
+    fun previewAt(p: LatLon) {
+        viewModelScope.launch {
+            val found = try { NavServices.geocoder.reverse(p) } catch (e: Exception) { null }
+            previewTo(found?.copy(lat = p.lat, lon = p.lon) ?: Place("Local no mapa", "%.4f, %.4f".format(p.lat, p.lon), p.lat, p.lon))
+        }
+    }
+
     init {
+        NavStatus.setVoice(prefs.getBoolean("voice", true))
+        PodStatus.restore(app)
+        watchConnection()
+
+        // Busca com debounce; cancela a anterior quando o texto muda.
+        viewModelScope.launch {
+            queryFlow.debounce(180).distinctUntilChanged().collectLatest { q ->
+                if (q.trim().length < 3) {
+                    _search.update { it.copy(results = emptyList(), loading = false) }
+                    return@collectLatest
+                }
+                try {
+                    val near = _live.value?.let { LatLon(it.latitude, it.longitude) }
+                    val res = NavServices.geocoder.search(q, near)
+                    _search.update { if (it.query == q) it.copy(results = res, loading = false, error = if (res.isEmpty() && it.local.isEmpty()) "Nada encontrado para \"${q.trim()}\"." else null) else it }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _search.update { it.copy(loading = false, error = "Sem conexão para buscar endereços.") }
+                }
+            }
+        }
+
         // Sugestões iniciais de manutenção, uma única vez (conferir com o manual da moto).
-        val prefs = app.getSharedPreferences("app", 0)
         if (!prefs.getBoolean("seeded", false)) {
             viewModelScope.launch {
                 if (dao.itemCount() == 0) {
@@ -80,7 +404,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // --- ações
+    // ---------- ações de garagem ----------
+
     fun addFuelup(odometerKm: Double, liters: Double, totalCost: Double, full: Boolean) = viewModelScope.launch {
         dao.insertFuelup(FuelupEntity(dateMs = System.currentTimeMillis(), odometerKm = odometerKm, liters = liters, totalCost = totalCost, fullTank = full))
         // Abastecer em hodômetro maior que o calculado é um bom sinal de que o painel mudou: ajusta o deslocamento.
@@ -110,10 +435,6 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteItem(id: Long) = viewModelScope.launch { dao.deleteItem(id) }
-
-    fun deleteTrip(id: Long) = viewModelScope.launch { store.deleteTrip(id) }
-
-    suspend fun points(tripId: Long): List<TrackPoint> = store.points(tripId)
 
     private fun order(s: DueState) = when (s) {
         DueState.OVERDUE -> 0; DueState.SOON -> 1; DueState.UNKNOWN -> 2; DueState.OK -> 3

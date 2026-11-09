@@ -8,7 +8,13 @@ import kotlinx.coroutines.flow.map
 
 class RoomTripStore(private val dao: TripDao) : TripStore {
 
-    override suspend fun createTrip(startedAtMs: Long): Long = dao.insertTrip(TripEntity(startedAtMs = startedAtMs))
+    override suspend fun createTrip(startedAtMs: Long, title: String?): Long =
+        dao.insertTrip(TripEntity(startedAtMs = startedAtMs, title = title))
+
+    override suspend fun renameTrip(tripId: Long, title: String?) {
+        val t = dao.getTrip(tripId) ?: return
+        dao.updateTrip(t.copy(title = title?.takeIf { it.isNotBlank() }))
+    }
 
     override suspend fun appendPoint(tripId: Long, index: Int, point: TrackPoint) =
         dao.insertPoint(TrackPointEntity.from(tripId, index, point))

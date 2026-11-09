@@ -15,13 +15,19 @@ android {
         applicationId = "app.hunter.companion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
+        // O MapLibre traz bibliotecas nativas por arquitetura; celulares atuais são arm64.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     buildTypes {
+        // Release sem debug: o Compose roda várias vezes mais rápido que no build de debug (que era o que travava).
+        // Assinado com a chave de debug só para instalar direto no celular.
         release {
             isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -47,6 +53,9 @@ dependencies {
     implementation(project(":core-model"))
     implementation(project(":pod-protocol"))
     implementation(project(":pod-ble"))
+    implementation(project(":navigation"))
+    implementation(libs.maplibre)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(project(":trips"))
     implementation(project(":maintenance"))
 
@@ -57,6 +66,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.ui.tooling.preview)
 
     implementation(libs.androidx.room.runtime)
