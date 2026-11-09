@@ -183,6 +183,10 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             deletionPending = account::deletionPending,
                             needsPassword = { account.gateway.providerIsPassword },
                             setActivity = { account.gateway.activity = it },
+                            readProfile = { ProfilePrefs.read(prefs) },
+                            onSaveProfile = { form ->
+                                account.saveProfile(form.toProfile(voice = prefs.getBoolean(ProfilePrefs.VOICE, true)))
+                            },
                             onSignIn = { overlay = Overlay.LOGIN_FROM_PROFILE.name },
                             onReopenIntro = { overlay = Overlay.INTRO.name },
                             onBack = { overlay = Overlay.NONE.name },

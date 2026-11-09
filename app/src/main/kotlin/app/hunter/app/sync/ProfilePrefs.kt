@@ -32,14 +32,22 @@ object ProfilePrefs {
     }
 
     /** Grava o perfil vindo da nuvem/mesclado e o marca como sincronizado. */
-    fun write(p: SharedPreferences, profile: UserProfile) {
+    fun write(p: SharedPreferences, profile: UserProfile) = write(p, profile, dirty = false)
+
+    /**
+     * Grava um perfil alterado no aparelho JÁ marcado como sujo, numa única escrita: não há instante em que ele
+     * pareça sincronizado (uma sincronização nesse instante aplicaria o perfil da nuvem por cima da edição).
+     */
+    fun writeDirty(p: SharedPreferences, profile: UserProfile) = write(p, profile, dirty = true)
+
+    private fun write(p: SharedPreferences, profile: UserProfile, dirty: Boolean) {
         p.edit().apply {
             putString(NAME, profile.displayName)
             if (profile.brand != null) putString(BRAND, profile.brand) else remove(BRAND)
             if (profile.model != null) putString(MODEL, profile.model) else remove(MODEL)
             profile.year?.let { putInt(YEAR, it) } ?: remove(YEAR)
             putBoolean(VOICE, profile.voice)
-            putBoolean(DIRTY, false)
+            putBoolean(DIRTY, dirty)
         }.commit()
     }
 

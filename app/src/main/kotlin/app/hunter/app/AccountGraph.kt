@@ -15,8 +15,14 @@ import app.hunter.app.sync.RoomLocalStore
 import app.hunter.app.sync.SyncGate
 import app.hunter.app.sync.SyncScheduler
 import app.hunter.app.sync.SyncTrigger
+import app.hunter.app.account.defaultProfileFor
+import app.hunter.app.sync.ProfilePrefs
 import app.hunter.sync.DeletionPendingException
 import app.hunter.sync.SyncEngine
+import app.hunter.sync.UserProfile
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,9 +56,35 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
             FirestoreRemoteStore(FirebaseFirestore.getInstance(), uid)
         },
     )
-    val repo = AuthRepository(gateway, engine, flag, gate)
+    val repo = AuthRepository(gateway, engine, flag, gate, onSynced = ::afterSync)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _syncedUid = MutableStateFlow<String?>(null)
+
+    /** uid da última conta que sincronizou com sucesso neste processo (a semente de manutenção espera por ele). */
+    val syncedUid: StateFlow<String?> = _syncedUid.asStateFlow()
+
+    /**
+     * Depois de cada sincronização bem-sucedida (primeiro login ou agendada; ainda dentro da trava): registra a
+     * conta como sincronizada e, se ela não tem perfil (nem local, nem vindo da nuvem), cria um a partir do nome
+     * da conta, sujo, para subir junto com a voz na próxima sincronização.
+     */
+    private fun afterSync() {
+        val s = gateway.state.value as? AuthState.SignedIn ?: return
+        _syncedUid.value = s.uid
+        val created = defaultProfileFor(ProfilePrefs.read(prefs), s.name, s.email, prefs.getBoolean(ProfilePrefs.VOICE, true))
+        if (created != null) {
+            ProfilePrefs.writeDirty(prefs, created)
+            scheduler.requestSync()
+        }
+    }
+
+    /** "Editar perfil": grava sujo (numa escrita só) e pede sincronização. */
+    fun saveProfile(p: UserProfile) {
+        ProfilePrefs.writeDirty(prefs, p)
+        scheduler.requestSync()
+    }
 
     /** Só vira verdadeiro depois de concluir uma exclusão interrompida: nenhuma sincronização antes disso. */
     @Volatile
@@ -72,6 +104,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
                 Log.w("Rumo/sync", "Falha ao sincronizar", it)
             }
         },
+        onSynced = ::afterSync,
         isSignedIn = { ready && signedUid() != null && flag.uid() == null },
     )
 

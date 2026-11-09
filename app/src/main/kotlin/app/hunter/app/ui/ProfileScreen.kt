@@ -37,8 +37,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableIntStateOf
 import app.hunter.app.account.AccountViewModel
+import app.hunter.app.account.AuthState
+import app.hunter.app.ui.onboarding.BikeForm
+import app.hunter.app.ui.onboarding.FormError
+import app.hunter.app.ui.onboarding.FormField
 import app.hunter.app.ui.onboarding.findActivity
+import app.hunter.sync.UserProfile
 import kotlinx.coroutines.delay
 
 /** Intervalo com que a tela confere se ainda há algo por enviar / exclusão por concluir. */
@@ -58,6 +64,8 @@ fun ProfileRoute(
     deletionPending: () -> Boolean,
     needsPassword: () -> Boolean,
     setActivity: (Activity?) -> Unit,
+    readProfile: () -> UserProfile?,
+    onSaveProfile: (ProfileEditForm) -> Unit,
     onSignIn: () -> Unit,
     onReopenIntro: () -> Unit,
     onBack: () -> Unit,
@@ -67,6 +75,9 @@ fun ProfileRoute(
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
+    var saves by remember { mutableIntStateOf(0) }
+    // Relido quando a conta/operação muda e depois de salvar (o perfil vindo da nuvem chega pela sincronização).
+    val profile = remember(state, busy, saves) { readProfile() }
 
     // Reconfere a cada poucos segundos e sempre que a conta ou a operação em curso mudam.
     val pending by produceState(false, state, busy) {
@@ -102,7 +113,83 @@ fun ProfileRoute(
         onReopenIntro = onReopenIntro,
         onBack = onBack,
         onDismissMessage = { vm.clearError(); vm.consumeNotice() },
+        editProfile = (state as? AuthState.SignedIn)?.let { s -> { ProfileEditForm.from(profile, s.name) } },
+        profileSummary = profile?.let(::profileSummary),
+        onSaveProfile = { onSaveProfile(it); saves++ },
     )
+}
+
+/** "Ana · Honda CG 160 (2020)" ou "Ana · moto não informada". */
+private fun profileSummary(p: UserProfile): String {
+    val bike = listOfNotNull(p.brand, p.model).joinToString(" ").ifBlank { null }
+        ?.let { b -> p.year?.let { "$b ($it)" } ?: b }
+    return "${p.displayName} · ${bike ?: "moto não informada"}"
+}
+
+/**
+ * "Seu perfil": resumo e "Editar" (nome, marca, modelo, ano). Validação de [ProfileEditForm]; o km fica na
+ * Garagem. Salvar grava o perfil como alterado e pede sincronização (por [onSave]).
+ */
+@Composable
+private fun ProfileEditSection(summary: String?, busy: Boolean, start: () -> ProfileEditForm, onSave: (ProfileEditForm) -> Unit) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var brand by rememberSaveable { mutableStateOf("") }
+    var model by rememberSaveable { mutableStateOf("") }
+    var year by rememberSaveable { mutableStateOf("") }
+    var errors by remember { mutableStateOf<List<FormError>>(emptyList()) }
+    fun errorOf(f: FormField) = errors.firstOrNull { it.field == f }?.message
+
+    SectionTitle("Seu perfil")
+    if (!editing) {
+        Text(
+            summary ?: "Perfil ainda não preenchido.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = {
+                val f = start()
+                name = f.name; brand = f.brand; model = f.model; year = f.year
+                errors = emptyList()
+                editing = true
+            },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Editar") }
+        return
+    }
+    @Composable
+    fun field(label: String, value: String, f: FormField, number: Boolean = false, onChange: (String) -> Unit) {
+        OutlinedTextField(
+            value, onChange, label = { Text(label) }, singleLine = true, isError = errorOf(f) != null,
+            supportingText = errorOf(f)?.let { { Text(it) } },
+            keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    field("Nome", name, FormField.NAME) { name = it.take(BikeForm.MAX_TEXT) }
+    field("Marca (opcional)", brand, FormField.BRAND) { brand = it.take(BikeForm.MAX_TEXT) }
+    field("Modelo (opcional)", model, FormField.MODEL) { model = it.take(BikeForm.MAX_TEXT) }
+    field("Ano (opcional)", year, FormField.YEAR, number = true) { year = it.filter(Char::isDigit).take(4) }
+    Text(
+        "O km da moto se ajusta na Garagem.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { editing = false }, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+        Button(
+            onClick = {
+                val form = ProfileEditForm(name, brand, model, year)
+                errors = form.validate()
+                if (errors.isEmpty()) {
+                    onSave(form)
+                    editing = false
+                }
+            },
+            enabled = !busy,
+            modifier = Modifier.weight(1f),
+        ) { Text("Salvar") }
+    }
 }
 
 /** Tela sem ViewModel: tudo entra por parâmetro. */
@@ -122,6 +209,10 @@ fun ProfileScreen(
     onBack: () -> Unit,
     onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Logado: cria o formulário a partir do perfil atual. Null para visitante (perfil é dado da conta). */
+    editProfile: (() -> ProfileEditForm)? = null,
+    profileSummary: String? = null,
+    onSaveProfile: (ProfileEditForm) -> Unit = {},
 ) {
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -168,6 +259,10 @@ fun ProfileScreen(
         notice?.let {
             Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
             TextButton(onClick = onDismissMessage) { Text("Ok") }
+        }
+
+        if (editProfile != null) {
+            ProfileEditSection(summary = profileSummary, busy = busy, start = editProfile, onSave = onSaveProfile)
         }
 
         SectionTitle("Apresentação")

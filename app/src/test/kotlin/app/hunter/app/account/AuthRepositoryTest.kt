@@ -154,6 +154,20 @@ class AuthRepositoryTest {
     }
 
     @Test
+    fun `onSynced so quando a primeira sincronizacao do login termina`() = runTest {
+        var synced = 0
+        val r = AuthRepository(gateway, SyncEngine(local, remote) { 1L }, flag, onSynced = { synced++ })
+        assertEquals(AuthResult.Ok, r.signInEmail("a@b.c", "123456"))
+        assertEquals(1, synced)
+        remote.hang = true // estoura os 15 s: continua logado, sem onSynced
+        assertEquals(AuthResult.Ok, r.signInEmail("a@b.c", "123456"))
+        remote.hang = false
+        remote.fetchError = IOException("sem rede")
+        assertEquals(AuthResult.Ok, r.signInEmail("a@b.c", "123456"))
+        assertEquals(1, synced)
+    }
+
+    @Test
     fun `login com erro nao sincroniza`() = runTest {
         gateway.signInResult = AuthResult.Error(AuthError.WRONG_CREDENTIALS, "x")
         assertIs<AuthResult.Error>(repo.signInEmail("a@b.c", "1"))

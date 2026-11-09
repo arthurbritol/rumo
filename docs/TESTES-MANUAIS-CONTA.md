@@ -46,6 +46,11 @@ Convenções: "nuvem" = Firestore; "visitante" = sem conta.
 - [ ] Repita entrando numa conta que **já tinha** dados na nuvem: os dados dos dois lados aparecem juntos, sem duplicar itens iguais (ex.: os mesmos itens de manutenção padrão).
 - [ ] Hodômetro do visitante x o da conta no primeiro login: o mais recentemente alterado vence (último a escrever), e as viagens que vieram do outro lado e já tinham sido rodadas antes da leitura do painel **não** são somadas de novo. Ex.: reinstalar, "Pular", cadastro curto com o km do painel, rodar nada e então entrar na conta com histórico: a Garagem mostra exatamente o km digitado (não painel + histórico).
 
+- [ ] Entrar (Google ou e-mail) e tocar "Preencher depois" no cadastro da moto: no console, `usuarios/{uid}` ganha um perfil com o nome da conta (sem moto) logo depois da sincronização; desligar a voz no app também sobe (`voice`).
+- [ ] Perfil > "Seu perfil" > "Editar": mude nome, marca, modelo e ano e salve. O resumo muda na hora e o console mostra os novos valores depois de sincronizar. Nome vazio, textos acima de 60 e ano fora da faixa mostram erro e não salvam.
+- [ ] Atualizar da 0.3, criar a conta pelo aviso: os itens de manutenção antigos (com "feito em") continuam e **não** aparecem itens padrão duplicados.
+- [ ] Reinstalar, entrar numa conta cujos itens de manutenção têm "feito em": nenhum item padrão novo aparece duplicado e o histórico continua (inclusive se o primeiro sync demorar: os itens padrão só são criados depois que a conta sincroniza).
+
 ## 5. Desinstalar, reinstalar e recuperar
 
 - [ ] Com a conta cheia (moto, abastecimentos, manutenção, favoritos, ao menos 2 viagens, voz desligada), espere sincronizar (perfil não mostra "ainda sincronizando" ao tentar sair) e desinstale.

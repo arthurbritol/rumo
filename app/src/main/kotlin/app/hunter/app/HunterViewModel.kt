@@ -32,6 +32,9 @@ import app.hunter.trips.recording.AndroidLocationSource
 import app.hunter.trips.recording.TrackingStatus
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import app.hunter.app.account.AuthState
+import app.hunter.app.account.SeedDecision
+import app.hunter.app.account.maintenanceSeedDecision
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -467,12 +470,23 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        // Sugestões iniciais de manutenção, uma única vez (conferir com o manual da moto).
+        // Sugestões iniciais de manutenção, uma única vez (conferir com o manual da moto). Logado, espera a primeira
+        // sincronização da conta: os itens dela (com histórico) chegam antes e a semente não vira duplicata.
         if (!prefs.getBoolean("seeded", false)) {
             viewModelScope.launch {
-                if (dao.itemCount() == 0) {
-                    MaintenanceMath.defaultItems.forEach { (n, km, days) ->
-                        dao.insertItem(MaintenanceItemEntity(name = n, intervalKm = km, intervalDays = days))
+                combine(account.gateway.state, account.syncedUid) { s, synced ->
+                    val uid = (s as? AuthState.SignedIn)?.uid
+                    (uid != null) to (uid != null && synced == uid)
+                }.first { (signedIn, synced) ->
+                    when (maintenanceSeedDecision(dao.itemCount(), signedIn, synced)) {
+                        SeedDecision.WAIT -> false
+                        SeedDecision.MARK_ONLY -> true
+                        SeedDecision.SEED -> {
+                            MaintenanceMath.defaultItems.forEach { (n, km, days) ->
+                                dao.insertItem(MaintenanceItemEntity(name = n, intervalKm = km, intervalDays = days))
+                            }
+                            true
+                        }
                     }
                 }
                 prefs.edit().putBoolean("seeded", true).apply()

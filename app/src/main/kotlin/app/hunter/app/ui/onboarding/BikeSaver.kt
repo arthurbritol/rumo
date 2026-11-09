@@ -49,8 +49,7 @@ class AppBikeSaver(
         if (!form.short) {
             val existing = ProfilePrefs.read(prefs)
             val voice = existing?.voice ?: prefs.getBoolean(ProfilePrefs.VOICE, true)
-            ProfilePrefs.write(prefs, BikeProfileMerge.merge(existing, form, name, voice))
-            ProfilePrefs.markDirty(prefs)
+            ProfilePrefs.writeDirty(prefs, BikeProfileMerge.merge(existing, form, name, voice))
         }
         requestSync()
     }

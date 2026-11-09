@@ -30,6 +30,8 @@ class SyncScheduler(
     private val connectivityCooldownMs: Long = 10_000,
     private val onError: (Throwable) -> Unit = {},
     private val gate: SyncGate = SyncGate(),
+    /** Chamado (ainda dentro da trava) depois de cada sincronização bem-sucedida. */
+    private val onSynced: () -> Unit = {},
     private val isSignedIn: () -> Boolean,
 ) {
     private val lock = Any()
@@ -70,6 +72,7 @@ class SyncScheduler(
             syncing = true
             try {
                 withTimeout(SYNC_TIMEOUT_MS) { engine.syncNow() }
+                onSynced()
             } catch (e: TimeoutCancellationException) {
                 onError(e)
             } catch (e: CancellationException) {

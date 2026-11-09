@@ -80,6 +80,20 @@ class SyncSchedulerTest {
     }
 
     @Test
+    fun onSyncedSoAposSincronizacaoBemSucedida() = runTest {
+        val remote = FakeRemote().apply { failWith = IOException("sem rede") }
+        var synced = 0
+        val sched = SyncScheduler(
+            SyncEngine(FakeLocal(), remote) { 100L }, backgroundScope, 0, 0, onSynced = { synced++ },
+        ) { true }
+        sched.requestSync(); advanceTimeBy(10); runCurrent()
+        assertEquals(0, synced)
+        remote.failWith = null
+        sched.requestSync(); advanceTimeBy(10); runCurrent()
+        assertEquals(1, synced)
+    }
+
+    @Test
     fun erroDeRedeMantemSujoEReTentaQuandoAConexaoVolta() = runTest {
         val local = FakeLocal(listOf(doc))
         val remote = FakeRemote().apply { failWith = IOException("sem rede") }

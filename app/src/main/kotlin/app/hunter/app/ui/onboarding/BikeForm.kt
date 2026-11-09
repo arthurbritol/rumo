@@ -5,7 +5,7 @@ import app.hunter.sync.OdometerDoc
 import app.hunter.sync.UserProfile
 import java.time.Year
 
-enum class FormField { BRAND, MODEL, YEAR, ODOMETER, TANK }
+enum class FormField { NAME, BRAND, MODEL, YEAR, ODOMETER, TANK }
 
 data class FormError(val field: FormField, val message: String)
 
