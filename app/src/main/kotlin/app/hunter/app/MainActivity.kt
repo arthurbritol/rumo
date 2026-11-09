@@ -1,5 +1,6 @@
 package app.hunter.app
 
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -23,24 +24,49 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.hunter.app.account.AccountViewModel
+import app.hunter.app.account.AuthState
+import app.hunter.app.account.accountViewModelFactory
+import app.hunter.app.sync.ProfilePrefs
+import app.hunter.app.ui.AccountNotice
 import app.hunter.app.ui.GarageScreen
 import app.hunter.app.ui.HunterTheme
 import app.hunter.app.ui.MapScreen
 import app.hunter.app.ui.PodScreen
+import app.hunter.app.ui.ProfileRoute
 import app.hunter.app.ui.Tab
 import app.hunter.app.ui.TripsScreen
 import app.hunter.app.ui.UpdateBanner
+import app.hunter.app.ui.onboarding.AppBikeSaver
+import app.hunter.app.ui.onboarding.BikeSetupScreen
+import app.hunter.app.ui.onboarding.EXISTING_USER_NOTICE_KEY
+import app.hunter.app.ui.onboarding.EntryRoute
+import app.hunter.app.ui.onboarding.LoginRoute
+import app.hunter.app.ui.onboarding.OnboardingScreen
+import app.hunter.app.ui.onboarding.PermissionsScreen
+import app.hunter.app.ui.onboarding.SharedPrefsOnboardingPrefs
+import app.hunter.app.ui.onboarding.resolveEntry
+import app.hunter.sync.OnboardingFlow
+import app.hunter.sync.Step
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    // Só é criado quando o destino é o app principal: o HunterViewModel semeia a manutenção e grava `seeded`,
+    // e isso não pode acontecer antes de resolveEntry decidir se é uma instalação nova.
     private val vm: HunterViewModel by viewModels()
+    private val account get() = (application as HunterApp).account
+    private val accountVm: AccountViewModel by viewModels { accountViewModelFactory(account.repo) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -50,14 +76,148 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             HunterTheme {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { HunterRoot(vm) }
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    AppEntry(application as HunterApp, { vm }, accountVm)
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        // O gateway guarda só uma referência fraca; limpar aqui evita usar uma Activity destruída no login Google.
+        if (account.gateway.activity === this) account.gateway.activity = null
+        super.onDestroy()
+    }
+}
+
+private object Route {
+    const val MAIN = "MAIN"
+    const val ONBOARDING = "ONBOARDING"
+}
+
+private enum class Overlay { NONE, PROFILE, LOGIN_FROM_PROFILE, LOGIN, INTRO }
+
+/** Decide entre apresentação (instalação nova) e app, e hospeda perfil, login e "Rever apresentação" por cima. */
+@Composable
+private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountVm: AccountViewModel) {
+    val account = app.account
+    val prefs = remember { app.getSharedPreferences("app", 0) }
+    val onboardingPrefs = remember { SharedPrefsOnboardingPrefs(app) }
+    var route by rememberSaveable { mutableStateOf<String?>(null) }
+    var overlay by rememberSaveable { mutableStateOf(Overlay.NONE.name) }
+    val authState by accountVm.state.collectAsStateWithLifecycle()
+    val signedIn = authState is AuthState.SignedIn
+
+    LaunchedEffect(Unit) {
+        if (route == null) {
+            route = withContext(Dispatchers.IO) {
+                when (resolveEntry(prefs, app.syncDao, onboardingPrefs)) {
+                    EntryRoute.ONBOARDING -> Route.ONBOARDING
+                    else -> Route.MAIN
+                }
+            }
+        }
+    }
+
+    val bikeSaver = remember { AppBikeSaver(app.maintenanceDao, app.tripDao, prefs, account.scheduler::requestSync) }
+    // Avaliado a cada transição, depois da primeira sincronização do login: o perfil vindo da conta já está gravado.
+    val hasBikeInAccount: () -> Boolean = {
+        ProfilePrefs.read(prefs)?.let { it.brand != null && it.model != null } == true
+    }
+
+    @Composable
+    fun Onboarding(flow: OnboardingFlow, initialStep: Step, onFinished: () -> Unit) {
+        OnboardingScreen(
+            flow = flow,
+            signedIn = signedIn,
+            hasBikeInAccount = hasBikeInAccount,
+            prefs = onboardingPrefs,
+            onFinished = onFinished,
+            initialStep = initialStep,
+            login = { onSkip, onDone ->
+                LoginRoute(
+                    vm = accountVm, available = account.available,
+                    setActivity = { account.gateway.activity = it },
+                    onDone = onDone, onSkip = onSkip,
+                )
+            },
+            permissions = { onNext -> PermissionsScreen(onFinished = onNext) },
+            bike = { short, onNext ->
+                BikeSetupScreen(
+                    short = short,
+                    name = (authState as? AuthState.SignedIn)?.name.orEmpty(),
+                    saver = bikeSaver,
+                    onDone = onNext,
+                )
+            },
+        )
+    }
+
+    when (route) {
+        null -> Box(Modifier.fillMaxSize())
+        Route.ONBOARDING -> {
+            val flow = remember { OnboardingFlow(seen = false) }
+            Onboarding(flow, flow.first()) { route = Route.MAIN }
+        }
+        else -> Box(Modifier.fillMaxSize()) {
+            HunterRoot(
+                vm = vmProvider(),
+                prefs = prefs,
+                signedIn = signedIn,
+                accountAvailable = account.available,
+                onOpenProfile = { overlay = Overlay.PROFILE.name },
+                onCreateAccount = { overlay = Overlay.LOGIN.name },
+            )
+            when (Overlay.valueOf(overlay)) {
+                Overlay.NONE -> Unit
+                Overlay.PROFILE -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                        ProfileRoute(
+                            vm = accountVm,
+                            authAvailable = account.available,
+                            hasUnsynced = account::hasUnsynced,
+                            deletionPending = account::deletionPending,
+                            needsPassword = { account.gateway.providerIsPassword },
+                            setActivity = { account.gateway.activity = it },
+                            onSignIn = { overlay = Overlay.LOGIN_FROM_PROFILE.name },
+                            onReopenIntro = { overlay = Overlay.INTRO.name },
+                            onBack = { overlay = Overlay.NONE.name },
+                        )
+                    }
+                    BackHandler { overlay = Overlay.NONE.name }
+                }
+                Overlay.LOGIN, Overlay.LOGIN_FROM_PROFILE -> {
+                    val back = if (overlay == Overlay.LOGIN_FROM_PROFILE.name) Overlay.PROFILE else Overlay.NONE
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                            LoginRoute(
+                                vm = accountVm, available = account.available,
+                                setActivity = { account.gateway.activity = it },
+                                onDone = { overlay = back.name }, onSkip = { overlay = back.name },
+                            )
+                        }
+                        BackHandler { overlay = back.name }
+                    }
+                }
+                Overlay.INTRO -> {
+                    val flow = remember { OnboardingFlow(seen = true) }
+                    Onboarding(flow, flow.reopenIntro()) { overlay = Overlay.PROFILE.name }
+                    BackHandler { overlay = Overlay.PROFILE.name }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HunterRoot(vm: HunterViewModel) {
+private fun HunterRoot(
+    vm: HunterViewModel,
+    prefs: SharedPreferences,
+    signedIn: Boolean,
+    accountAvailable: Boolean,
+    onOpenProfile: () -> Unit,
+    onCreateAccount: () -> Unit,
+) {
     var tabIndex by rememberSaveable { mutableStateOf(0) }
     val tab = Tab.entries[tabIndex]
     val nav by vm.nav.collectAsStateWithLifecycle()
@@ -97,7 +257,7 @@ private fun HunterRoot(vm: HunterViewModel) {
                         Box(Modifier.fillMaxSize().statusBarsPadding()) {
                             when (t) {
                                 Tab.Trips -> TripsScreen(vm)
-                                Tab.Garage -> GarageScreen(vm)
+                                Tab.Garage -> GarageScreen(vm, onOpenProfile)
                                 Tab.Pod -> PodScreen(vm)
                                 Tab.Map -> {}
                             }
@@ -114,6 +274,23 @@ private fun HunterRoot(vm: HunterViewModel) {
                 UpdateBanner(
                     u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate,
                     modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+                )
+            }
+
+            // Quem já usava o app: aviso discreto e dispensável para criar conta (nunca durante a navegação).
+            var showNotice by remember { mutableStateOf(prefs.getBoolean(EXISTING_USER_NOTICE_KEY, false)) }
+            if (signedIn && showNotice) {
+                prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
+                showNotice = false
+            }
+            if (showNotice && !signedIn && accountAvailable && !nav.active) {
+                AccountNotice(
+                    onCreate = onCreateAccount,
+                    onDismiss = {
+                        prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
+                        showNotice = false
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
                 )
             }
         }

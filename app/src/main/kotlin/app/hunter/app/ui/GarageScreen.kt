@@ -23,7 +23,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -54,7 +58,7 @@ import app.hunter.model.Fuelup
 import kotlin.math.max
 
 @Composable
-fun GarageScreen(vm: HunterViewModel) {
+fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
     val odo by vm.odometerKm.collectAsStateWithLifecycle()
     val attention by vm.attention.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(0) }
@@ -64,7 +68,10 @@ fun GarageScreen(vm: HunterViewModel) {
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Garagem", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Garagem", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+            IconButton(onClick = onOpenProfile) { Icon(Icons.Default.AccountCircle, contentDescription = "Perfil e conta") }
+        }
 
         HCard {
             Text("Hodômetro da moto", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -67,6 +67,11 @@ interface SyncDao {
     @Query("UPDATE tombstones SET dirty = 0 WHERE kind = :kind AND gid = :gid AND deletedAtMs = :ver")
     suspend fun cleanTombstone(kind: String, gid: String, ver: Long)
 
+    // --- primeira abertura
+    /** Quantas linhas de dados do usuário existem (para reconhecer uma instalação anterior). */
+    @Query("SELECT (SELECT COUNT(*) FROM trips) + (SELECT COUNT(*) FROM fuelups) + (SELECT COUNT(*) FROM maintenance_items) + (SELECT COUNT(*) FROM places)")
+    suspend fun localRowCount(): Int
+
     // --- sair da conta
     @Query(
         "SELECT (SELECT COUNT(*) FROM fuelups WHERE dirty = 1) + (SELECT COUNT(*) FROM maintenance_items WHERE dirty = 1) + " +

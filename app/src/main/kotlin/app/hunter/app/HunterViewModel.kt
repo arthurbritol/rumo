@@ -100,6 +100,15 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = hunter.maintenanceDao
     private val places = hunter.placeDao
     private val prefs = app.getSharedPreferences("app", 0)
+    private val account get() = hunter.account
+
+    /** Pede uma sincronização (agrupada e fora da thread da interface); sem conta não faz nada. */
+    private fun syncSoon() = account.scheduler.requestSync()
+
+    /** O perfil sincronizado pode mudar `voice` (primeira sincronização, outro aparelho): aplica na hora. */
+    private val voiceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+        if (key == ProfilePrefs.VOICE) NavStatus.setVoice(p.getBoolean(ProfilePrefs.VOICE, true))
+    }
 
     val recording = TrackingStatus.state
     val pod = PodStatus.state
@@ -133,6 +142,12 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     // Voltou a internet com uma rota falhada na tela: tenta de novo sozinho.
                     if (!was) viewModelScope.launch { if (_preview.value?.error != null) retryRoutes() }
                     if (!was) checkUpdate()
+                    if (!was) {
+                        // Voltou a internet: sincroniza já e também agenda um pedido (um sinal de conexão que chega
+                        // durante uma sincronização em andamento é descartado pelo agendador).
+                        account.scheduler.syncOnConnectivity()
+                        syncSoon()
+                    }
                 }
 
                 override fun onLost(network: android.net.Network) { _online.value = false }
@@ -251,6 +266,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             if (e.favorite) places.unfavorite(e) else places.update(e.copy(favorite = true))
         }
+        syncSoon()
     }
 
     private suspend fun rememberPlace(p: Place) {
@@ -414,6 +430,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         NavStatus.setVoice(on)
         prefs.edit().putBoolean("voice", on).apply()
         ProfilePrefs.markDirty(prefs)
+        syncSoon()
     }
 
     /** Toque longo no mapa: usa o endereço mais próximo como destino. */
@@ -426,6 +443,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         NavStatus.setVoice(prefs.getBoolean("voice", true))
+        prefs.registerOnSharedPreferenceChangeListener(voiceListener)
         PodStatus.restore(app)
         watchConnection()
         checkUpdate()
@@ -468,34 +486,44 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         dao.insertFuelup(FuelupEntity(dateMs = System.currentTimeMillis(), odometerKm = odometerKm, liters = liters, totalCost = totalCost, fullTank = full))
         // Abastecer em hodômetro maior que o calculado é um bom sinal de que o painel mudou: ajusta o deslocamento.
         if (odometerKm > this@HunterViewModel.odometerKm.value) setOdometer(odometerKm)
+        syncSoon()
     }
 
-    fun deleteFuelup(id: Long) = viewModelScope.launch { dao.deleteFuelup(id) }
+    fun deleteFuelup(id: Long) = viewModelScope.launch { dao.deleteFuelup(id); syncSoon() }
 
     fun setOdometer(panelKm: Double) = viewModelScope.launch {
         val cur = dao.getOdometer() ?: OdometerEntity()
         dao.putOdometer(cur.copy(offsetKm = Odometer.offsetFor(panelKm, tripsDistanceM.value)))
+        syncSoon()
     }
 
     fun setTank(liters: Double) = viewModelScope.launch {
         val cur = dao.getOdometer() ?: OdometerEntity()
         dao.putOdometer(cur.copy(tankLiters = liters))
+        syncSoon()
     }
 
     fun addMaintenanceItem(name: String, km: Int?, days: Int?) = viewModelScope.launch {
         dao.insertItem(MaintenanceItemEntity(name = name, intervalKm = km, intervalDays = days))
+        syncSoon()
     }
 
     fun markDone(item: MaintenanceItem) = viewModelScope.launch {
         // Parte da linha existente: refazer a entidade do zero trocaria o gid (id global) do item.
         val cur = dao.getItem(item.id) ?: return@launch
         dao.updateItem(cur.copy(lastDoneKm = odometerKm.value, lastDoneAtMs = System.currentTimeMillis()))
+        syncSoon()
     }
 
-    fun deleteItem(id: Long) = viewModelScope.launch { dao.deleteItem(id) }
+    fun deleteItem(id: Long) = viewModelScope.launch { dao.deleteItem(id); syncSoon() }
 
     private fun order(s: DueState) = when (s) {
         DueState.OVERDUE -> 0; DueState.SOON -> 1; DueState.UNKNOWN -> 2; DueState.OK -> 3
+    }
+
+    override fun onCleared() {
+        prefs.unregisterOnSharedPreferenceChangeListener(voiceListener)
+        super.onCleared()
     }
 
     companion object {
