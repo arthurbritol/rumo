@@ -10,6 +10,7 @@ import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -35,15 +36,16 @@ class FirestoreRemoteStore(
 
     override suspend fun fetchAll(): RemoteSnapshot {
         val docs = Kind.entries.flatMap { kind ->
-            col(kind).get().await().documents.map { mapToDoc(kind, it.id, it.data.orEmpty()) }
+            col(kind).get(Source.SERVER).await().documents.map { mapToDoc(kind, it.id, it.data.orEmpty()) }
         }
-        val odo = odometerRef.get().await().data?.let(::mapToOdometer)
-        val profile = user.get().await().data?.let(::mapToProfile)
+        val odo = odometerRef.get(Source.SERVER).await().data?.let(::mapToOdometer)
+        val profile = user.get(Source.SERVER).await().data?.let(::mapToProfile)
         return RemoteSnapshot(docs, odo, profile)
     }
 
     override suspend fun push(docs: List<SyncDoc>) {
-        // Converte tudo antes de gravar, para um registro inválido não deixar envio pela metade.
+        // Converte tudo antes de gravar: um registro inválido (IllegalArgumentException) propaga
+        // sem alteração e não deixa envio pela metade; quem chama reporta pelo onError do agendador.
         val prepared = docs.map { it to docToMap(it) }
         for (chunk in batches(prepared)) {
             val batch = db.batch()
@@ -65,12 +67,12 @@ class FirestoreRemoteStore(
     }
 
     override suspend fun deletionPending(): Boolean =
-        markerRef.get().await().getBoolean("pending") ?: false
+        markerRef.get(Source.SERVER).await().getBoolean("pending") ?: false
 
     override suspend fun deleteAllUserData() {
         for (kind in Kind.entries) {
             while (true) {
-                val page = col(kind).limit(DELETE_PAGE_SIZE.toLong()).get().await().documents
+                val page = col(kind).limit(DELETE_PAGE_SIZE.toLong()).get(Source.SERVER).await().documents
                 if (page.isEmpty()) break
                 val batch = db.batch()
                 page.forEach { batch.delete(it.reference) }

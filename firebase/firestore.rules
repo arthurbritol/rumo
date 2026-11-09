@@ -24,7 +24,7 @@ service cloud.firestore {
             || (d.displayNameLower is string && d.displayNameLower == d.displayName.lower()))
         && textoOpcional(d, 'brand', 60)
         && textoOpcional(d, 'model', 60)
-        && textoOpcional(d, 'voice', 60)
+        && (!('voice' in d) || d.voice == null || d.voice is bool)
         && (!('year' in d) || d.year == null
             || (d.year is int && d.year >= 1950 && d.year <= 2100))
         && d.updatedAtMs is number;

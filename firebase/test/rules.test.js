@@ -40,7 +40,7 @@ const perfilValido = () => ({
   brand: 'Honda',
   model: 'CB 500X',
   year: 2022,
-  voice: 'padrao',
+  voice: true,
   updatedAtMs: 1000,
 });
 
@@ -127,6 +127,13 @@ test('displayNameLower deve ser o displayName em minúsculas', async () => {
   await assertFails(
     db(DONO).doc(`usuarios/${DONO}`).set({ ...perfilValido(), displayNameLower: 'outro' }),
   );
+});
+
+test('voice do perfil: booleano ou nulo; texto é recusado', async () => {
+  const ref = db(DONO).doc(`usuarios/${DONO}`);
+  await assertSucceeds(ref.set({ ...perfilValido(), voice: false }));
+  await assertSucceeds(ref.set({ ...perfilValido(), voice: null }));
+  await assertFails(ref.set({ ...perfilValido(), voice: 'true' }));
 });
 
 test('ano do perfil: inteiro entre 1950 e 2100', async () => {

@@ -48,6 +48,7 @@ class FirestoreMappingTest {
         assertEquals("arthur lúcio", m["displayNameLower"])
         assertFalse(m.containsKey("year"))
         assertEquals(99L, m["updatedAtMs"])
+        assertEquals(false, m["voice"])
         assertEquals(setOf("displayName", "displayNameLower", "brand", "model", "voice", "updatedAtMs"), m.keys)
     }
 
@@ -59,6 +60,14 @@ class FirestoreMappingTest {
         assertNull(p.brand)
         assertEquals(p, mapToProfile(profileToMap(p, 1L)))
         assertNull(mapToProfile(mapOf("updatedAtMs" to 1L)))
+    }
+
+    @Test
+    fun vozAceitaBooleanoETextoLegado() {
+        val base = mapOf("displayName" to "A")
+        assertEquals(false, mapToProfile(base + ("voice" to false))!!.voice)
+        assertEquals(false, mapToProfile(base + ("voice" to "false"))!!.voice)
+        assertEquals(true, mapToProfile(base + ("voice" to true))!!.voice)
     }
 
     @Test

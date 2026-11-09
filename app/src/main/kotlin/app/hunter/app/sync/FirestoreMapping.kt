@@ -56,7 +56,7 @@ fun mapToOdometer(data: Map<String, Any?>): OdometerDoc? {
 
 /**
  * Mapa do perfil conforme as regras: displayNameLower derivado, ano omitido quando nulo.
- * As regras exigem que `voice` seja texto, então o booleano vai como "true"/"false".
+ * `voice` vai como booleano (as regras aceitam bool ou nulo).
  */
 fun profileToMap(p: UserProfile, nowMs: Long): Map<String, Any?> = buildMap {
     put("displayName", p.displayName)
@@ -64,11 +64,11 @@ fun profileToMap(p: UserProfile, nowMs: Long): Map<String, Any?> = buildMap {
     put("brand", p.brand)
     put("model", p.model)
     if (p.year != null) put("year", p.year)
-    put("voice", p.voice.toString())
+    put("voice", p.voice)
     put(UPDATED_AT, nowMs)
 }
 
-/** Inverso de [profileToMap]; `voice` ausente vale verdadeiro. */
+/** Inverso de [profileToMap]; `voice` ausente vale verdadeiro; aceita booleano ou texto legado. */
 fun mapToProfile(data: Map<String, Any?>): UserProfile? {
     val name = data["displayName"] as? String ?: return null
     return UserProfile(
