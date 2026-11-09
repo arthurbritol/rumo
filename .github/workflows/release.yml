@@ -80,18 +80,11 @@ jobs:
           {
             echo "## O que mudou $SINCE"
             echo
-            # Cada commit vira um item; o corpo do commit entra recuado. Ignora trailers e commits de merge.
-            git log $RANGE --no-merges --pretty=format:'%s%n%b%x00' \
-              | awk -v RS='\0' '
-                  {
-                    n = split($0, l, "\n"); subj = l[1]; gsub(/^[ \t\n]+/, "", subj)
-                    if (subj == "") next
-                    print "- **" subj "**"
-                    for (i = 2; i <= n; i++) {
-                      if (l[i] ~ /^[ \t]*$/ || l[i] ~ /^Co-Authored-By:/) continue
-                      sub(/^[ \t]*-[ \t]*/, "", l[i]); print "  - " l[i]
-                    }
-                  }'
+            # Cada commit vira um item; o corpo do commit entra como subitens. Ignora trailers e merges.
+            for c in $(git rev-list --no-merges $RANGE); do
+              echo "- **$(git log -1 --format=%s "$c")**"
+              git log -1 --format=%b "$c" | grep -v '^Co-Authored-By:' | sed '/^[[:space:]]*$/d; s/^[[:space:]]*-[[:space:]]*//; s/^/  - /'
+            done
             echo
             echo "---"
             echo "Versão ${{ steps.ver.outputs.name }} · build ${GITHUB_RUN_NUMBER} · commit \`${GITHUB_SHA::7}\`"
