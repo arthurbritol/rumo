@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -113,7 +114,8 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.fillMaxWidth().height(340.dp)) {
             val p = points
-            if (p != null && p.size >= 2) {
+            val placeholder = tripMapPlaceholder(p?.size)
+            if (p != null && placeholder == null) {
                 HunterMap(
                     modifier = Modifier.fillMaxSize(),
                     trail = p,
@@ -123,7 +125,7 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
                 )
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (p == null) "Carregando…" else "Sem pontos suficientes para o mapa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(placeholder.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
                 }
             }
             IconButton(onClick = onBack, modifier = Modifier.padding(8.dp).align(Alignment.TopStart)) {
