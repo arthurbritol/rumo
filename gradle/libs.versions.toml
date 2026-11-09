@@ -1,7 +1,7 @@
 [versions]
-agp = "8.13.2"
-kotlin = "2.2.20"
-ksp = "2.2.20-2.0.4"
+agp = "9.5.1"
+kotlin = "2.4.21"
+ksp = "2.3.13"
 room = "2.8.5"
 composeBom = "2025.10.00"
 activityCompose = "1.11.0"
@@ -25,8 +25,8 @@ androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
-kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.9.0" }
-androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version = "2.10.0" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.12.0" }
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version = "2.12.0" }
 maplibre ={ module = "org.maplibre.gl:android-sdk", version = "13.7.1" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 junit = { module = "junit:junit", version.ref = "junit" }
