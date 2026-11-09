@@ -9,3 +9,6 @@ captures/
 .cxx/
 # referência somente leitura (repositório próprio, Apache-2.0)
 ref/
+
+# Mockups do brainstorming
+.superpowers/
