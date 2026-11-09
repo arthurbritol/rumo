@@ -3,9 +3,21 @@ updates:
   - package-ecosystem: gradle
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    # Um único PR por mês com tudo que for seguro atualizar.
+    groups:
+      dependencias:
+        patterns: ["*"]
+    ignore:
+      # Estas três exigem o Android Gradle Plugin 9.1+ (e compileSdk 37). Atualizar junto, numa migração própria.
+      - dependency-name: "com.android.tools.build:gradle"
+      - dependency-name: "androidx.compose:compose-bom"
+      - dependency-name: "androidx.core:core-ktx"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
