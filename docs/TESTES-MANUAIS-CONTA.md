@@ -12,6 +12,13 @@ Preparação:
 
 Convenções: "nuvem" = Firestore; "visitante" = sem conta.
 
+## 0. Build com o `google-services.json` (rodar PRIMEIRO, logo depois de adicionar o arquivo)
+
+Nenhum build com o arquivo foi verificado durante o desenvolvimento.
+- [ ] `./gradlew.bat test :app:assembleRelease` passa com `app/google-services.json` no lugar (o plugin do Google Services é aplicado só nesse caso).
+- [ ] O APK instala e abre; o login mostra "Continuar com Google" habilitado (não "Login indisponível").
+- [ ] Depois do commit do arquivo, a release gerada pelo GitHub Actions também tem o login habilitado.
+
 ## 1. Instalar do zero (instalação nova)
 
 - [ ] Desinstale o Rumo. Instale o APK novo. Abra: aparecem as 4 telas de apresentação, com "Pular" em cada uma.
@@ -36,6 +43,8 @@ Convenções: "nuvem" = Firestore; "visitante" = sem conta.
 - [ ] "Esqueci a senha": chega o e-mail de redefinição e a nova senha funciona.
 - [ ] Senha errada mostra "E-mail ou senha incorretos".
 - [ ] Entrar com Google usando um e-mail que já tem conta de e-mail/senha pede a senha e vincula (uma conta só).
+- [ ] Mesmo caso, mas com a conta de e-mail/senha **sem e-mail confirmado**: com a configuração padrão do Firebase (uma conta por e-mail), o Google é um provedor confiável e pode **substituir** a conta não confirmada em vez de dar "e-mail em uso" (a senha deixa de valer). Anote o que acontece (pede a senha? entra direto? os dados da conta de e-mail continuam no mesmo uid no console?).
+- [ ] Nome com caracteres especiais: crie contas com nomes "Ágata", "ÉRICA", "İzmir", "João" e um com emoji. Em todos, o perfil aparece no console (`usuarios/{uid}` com `displayName`); `displayNameLower` só existe quando a minúscula muda apenas letras sem acento (ex.: "joão" sim; "Ágata" sem o campo). Nenhum erro "permission denied" em `Rumo/sync`.
 
 ## 4. Usar como visitante e depois criar a conta
 

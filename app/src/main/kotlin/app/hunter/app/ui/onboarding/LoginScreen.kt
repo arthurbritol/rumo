@@ -285,7 +285,7 @@ fun LoginScreen(
         Spacer(Modifier.height(4.dp))
         TextButton(onClick = onSkip, enabled = !busy, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Pular") }
         Text(
-            "Rotas e viagens ficam só no seu celular.",
+            "Rotas e viagens ficam só no seu celular. Sem conta, desinstalar o app apaga tudo.",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )

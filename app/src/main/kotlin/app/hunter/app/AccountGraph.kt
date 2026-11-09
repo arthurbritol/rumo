@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
+import com.google.firebase.firestore.MemoryCacheSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,13 +50,25 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     private val local = RoomLocalStore(database, prefs)
     private fun currentUid(): String? = (gateway.state.value as? AuthState.SignedIn)?.uid
 
+    /**
+     * Firestore com cache só em memória: os documentos da conta não ficam no disco depois de sair. Custo: escritas
+     * feitas offline não sobrevivem a matar o app — sem problema, porque o Room é a fonte da verdade e reenvia as
+     * linhas sujas na próxima sincronização (e as leituras já são sempre do servidor). Configurado uma vez, antes
+     * do primeiro uso (só é criado quando a primeira sincronização precisa dele).
+     */
+    private val firestore: FirebaseFirestore by lazy {
+        FirebaseFirestore.getInstance().apply {
+            firestoreSettings = FirebaseFirestoreSettings.Builder()
+                .setLocalCacheSettings(MemoryCacheSettings.newBuilder().build())
+                .build()
+        }
+    }
+
     /** Trava única do motor: agendador, primeira sincronização, sair e apagar conta. */
     private val gate = SyncGate(::currentUid)
     private val engine = SyncEngine(
         local,
-        PerUserRemoteStore(::currentUid, { gate.pinnedUid }) { uid ->
-            FirestoreRemoteStore(FirebaseFirestore.getInstance(), uid)
-        },
+        PerUserRemoteStore(::currentUid, { gate.pinnedUid }) { uid -> FirestoreRemoteStore(firestore, uid) },
     )
     val repo = AuthRepository(gateway, engine, flag, gate, onSynced = ::afterSync)
 

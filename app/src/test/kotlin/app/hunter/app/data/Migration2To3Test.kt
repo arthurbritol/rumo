@@ -15,8 +15,11 @@ import kotlin.test.assertTrue
 /** Roda o SQL real de [Migration2To3] sobre o esquema v2 exportado, com dados parecidos com os de um usuário. */
 class Migration2To3Test {
 
-    private fun v2Connection(): Connection {
-        val json = Json.parseToJsonElement(File("schemas/app.hunter.app.data.AppDatabase/2.json").readText()).jsonObject
+    private fun v2Connection(): Connection = schemaConnection(2)
+
+    /** Banco em memória criado exatamente pelo esquema exportado do Room ([version].json). */
+    private fun schemaConnection(version: Int): Connection {
+        val json = Json.parseToJsonElement(File("schemas/app.hunter.app.data.AppDatabase/$version.json").readText()).jsonObject
         val c = DriverManager.getConnection("jdbc:sqlite::memory:")
         val db = json["database"]!!.jsonObject
         c.createStatement().use { st ->
@@ -109,6 +112,36 @@ class Migration2To3Test {
             assertEquals(0, count(c, "tombstones"))
             c.exec("INSERT INTO tombstones (kind, gid, deletedAtMs, dirty) VALUES ('FUELUP', 'abc', 1, 1)")
         }
+    }
+
+    /**
+     * Rede de segurança do que o Room valida ao abrir o banco migrado: por tabela, colunas (nome, tipo, NOT NULL,
+     * DEFAULT, posição na chave primária), índices (nome, único, colunas) e chaves estrangeiras do banco v2
+     * migrado devem ser iguais às de um banco v3 novo criado pelo 3.json.
+     */
+    @Test fun `esquema migrado e igual ao esquema v3 exportado`() {
+        fun describe(c: Connection): Map<String, List<String>> {
+            val tables = c.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name") { it.getString(1) }
+            return tables.associateWith { t ->
+                val cols = c.query("PRAGMA table_info(`$t`)") {
+                    "col ${it.getString("name")} ${it.getString("type")} nn=${it.getInt("notnull")} def=${it.getString("dflt_value")} pk=${it.getInt("pk")}"
+                }.sorted()
+                val idx = c.query("PRAGMA index_list(`$t`)") { it.getString("name") to it.getInt("unique") }
+                    .filter { !it.first.startsWith("sqlite_autoindex") }
+                    .map { (name, unique) ->
+                        val on = c.query("PRAGMA index_info(`$name`)") { it.getString("name") }.joinToString(",")
+                        "idx $name unique=$unique ($on)"
+                    }.sorted()
+                val fks = c.query("PRAGMA foreign_key_list(`$t`)") {
+                    "fk ${it.getString("from")}->${it.getString("table")}.${it.getString("to")} del=${it.getString("on_delete")}"
+                }.sorted()
+                cols + idx + fks
+            }
+        }
+        val migrated = v2Connection().use { c -> seed(c); migrate(c); describe(c) }
+        val fresh = schemaConnection(3).use { describe(it) }
+        assertEquals(fresh.keys, migrated.keys)
+        for (t in fresh.keys) assertEquals(fresh[t], migrated[t], "tabela $t")
     }
 
     @Test fun `migrar um banco vazio tambem funciona`() {
