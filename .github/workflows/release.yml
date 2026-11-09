@@ -17,7 +17,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew test :app:assembleRelease --console=plain
       - name: Renomear APK
         run: cp app/build/outputs/apk/release/app-release.apk "Rumo-${GITHUB_REF_NAME}.apk"
