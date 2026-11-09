@@ -1,5 +1,7 @@
 # Atribuição
 
+Rumo — Copyright 2026 Arthur Brito Lucio. Licenciado sob Apache-2.0 (veja LICENSE).
+
 ## WazeTripper (Apache-2.0)
 
 O módulo `pod-protocol` é uma reimplementação em Kotlin do protocolo BLE do Tripper Pod, baseada em
@@ -27,3 +29,8 @@ Projeto pessoal, independente, **sem afiliação** com Royal Enfield / Eicher Mo
 O protocolo foi observado apenas no Pod da **Meteor 350**. A compatibilidade com o Pod da **Hunter 350** é
 esperada, mas **não verificada**. Os testes de `pod-protocol` garantem que os
 bytes gerados batem com as capturas documentadas, não que o Pod da Hunter os aceite.
+
+## Serviços e dados de terceiros
+
+- Dados de mapa © contribuidores do OpenStreetMap (ODbL); tiles e estilos do OpenFreeMap; renderização com MapLibre.
+- Rotas: Valhalla. Busca: Photon (Komoot). Postos: Overpass API.

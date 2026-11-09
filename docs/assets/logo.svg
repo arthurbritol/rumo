@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="256" height="256" role="img" aria-label="Rumo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1B1F24"/><stop offset="1" stop-color="#07090B"/></linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFB347"/><stop offset="1" stop-color="#FF6A00"/></linearGradient>
+  </defs>
+  <rect width="108" height="108" rx="24" fill="url(#bg)"/>
+  <circle cx="54" cy="54" r="34" fill="none" stroke="#FF7A1A" stroke-opacity=".43" stroke-width="2.5"/>
+  <path d="M54 25 77 82 54 69 31 82Z" fill="url(#arrow)"/>
+  <path d="M54 25 77 82 54 69Z" fill="#000" fill-opacity=".27"/>
+</svg>
