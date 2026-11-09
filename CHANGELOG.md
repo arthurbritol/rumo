@@ -2,6 +2,22 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.4.0]
+
+### Adicionado
+- Conta opcional (Firebase): entrar com Google ou e-mail e senha (com confirmação de e-mail e "esqueci a senha"). O app continua funcionando sem conta.
+- Sincronização com a conta: perfil, moto, hodômetro, abastecimentos, manutenção, locais favoritos, resumo das viagens e a preferência de voz. Funciona sem internet (edita offline e sincroniza ao reconectar); a edição mais recente vence e nada é duplicado.
+- Quem usava sem conta e cria uma conta mantém os dados (mesclados, sem duplicar). Reinstalar e entrar recupera tudo, exceto o trajeto completo das viagens, que fica só no aparelho (a viagem volta no histórico, sem mapa).
+- Apresentação na primeira abertura (4 telas, com "Pular"), login, permissões uma a uma (sem localização em segundo plano) e cadastro da moto, completo ou curto. "Rever apresentação" fica no perfil.
+- Perfil (ícone no topo da Garagem): sair da conta (bloqueado enquanto houver algo sem enviar), apagar meus dados e minha conta (digitar APAGAR, com retomada se for interrompido) e avisos para visitante e e-mail não confirmado.
+- Módulo `sync-core` (JVM puro) com o motor de sincronização, a mesclagem e o fluxo de apresentação, mais regras do Firestore com testes de emulador.
+
+### Alterado
+- Banco do app na versão 3 (migração automática, sem perder dados): id global, data de alteração e marca de pendente nos registros.
+- Quem já usava o app não vê a apresentação nem login forçado: entra direto no mapa e recebe um aviso discreto para criar conta.
+- Ao voltar a internet o app sincroniza sozinho.
+- Sem `google-services.json` no build o login fica desabilitado e o app funciona como antes.
+
 ## [0.3.0]
 
 ### Adicionado

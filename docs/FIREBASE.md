@@ -20,6 +20,21 @@ O app compila e roda sem Firebase: sem `app/google-services.json` o plugin do Go
 
 Para rodar os testes das regras localmente: dentro de `firebase/`, `npm ci` e `npx firebase-tools emulators:exec --only firestore --project demo-rumo "npm test"` (precisa de JDK 21+).
 
+8. Faça o teste final descrito em [Como testar](#como-testar).
+
+## Como testar
+
+Depois do passo 8, com o `google-services.json` no lugar:
+
+1. Gere o APK (`./gradlew.bat :app:assembleRelease`) e instale no celular (`adb install -r app/build/outputs/apk/release/app-release.apk`). Use a mesma chave `rumo` cujas impressões digitais foram cadastradas; com outra chave o login Google falha.
+2. Abra o app, escolha **Continuar com Google** (ou crie uma conta com e-mail) e confira no console, em Authentication > Usuários, que o usuário apareceu.
+3. Cadastre a moto, registre um abastecimento e aguarde alguns segundos. No console, em Firestore Database, abra `usuarios/{uid}`: devem existir o perfil e as subcoleções (`abastecimentos`, `config/hodometro`).
+4. Em Garagem > ícone de perfil, apague a conta e confira que `usuarios/{uid}` e o usuário sumiram do console.
+5. Se o login Google falhar com "Nenhuma conta disponível" ou erro de desenvolvedor, falta a impressão digital SHA-1/SHA-256 da chave que assinou o APK (passo 3) ou o `google-services.json` é anterior a ela: baixe-o de novo.
+6. Se a gravação no Firestore for recusada ("permission denied" no `adb logcat`, etiqueta `Rumo/sync`), as regras não foram publicadas (passo 7).
+
+O roteiro completo, para fazer no aparelho com calma, está em [TESTES-MANUAIS-CONTA.md](TESTES-MANUAIS-CONTA.md).
+
 Aviso: a conta de e-mail com o mesmo endereço do Google é vinculada (entrar com Google e com e-mail/senha usando o mesmo endereço resulta na mesma conta).
 
 ## Versões escolhidas

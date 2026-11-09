@@ -14,7 +14,8 @@
 
 App Android para a **Royal Enfield Hunter 350**: mapa com busca de destino, rotas pensadas para moto, navegação
 curva a curva com voz, gravação de viagens, controle de abastecimento e manutenção, mapas offline e envio da
-navegação ao **Tripper Pod** por Bluetooth. Tudo fica no celular, sem backend e sem conta. Não modifica o Waze.
+navegação ao **Tripper Pod** por Bluetooth. Funciona sem conta (tudo no celular); com conta opcional, seus
+dados ficam guardados na nuvem. Não modifica o Waze.
 
 ## Recursos
 
@@ -39,6 +40,16 @@ navegação ao **Tripper Pod** por Bluetooth. Tudo fica no celular, sem backend 
 - Na pré-visualização, o app estima o combustível restante (último tanque cheio + consumo) e, se a rota não cabe
   na autonomia (com 15% de folga), sugere onde abastecer, lista postos perto desse ponto e recalcula a rota
   passando pelo escolhido.
+
+**Conta e sincronização (opcional)**
+- Entrar com Google ou e-mail e senha. Sem conta o app funciona igual, mas desinstalar apaga tudo.
+- Com conta, ficam salvos na nuvem: perfil, moto, hodômetro, abastecimentos, manutenção, locais favoritos, resumo
+  das viagens e a preferência de voz. Edite offline: sincroniza quando a internet volta. Reinstalar e entrar
+  recupera tudo, menos o trajeto completo (mapa) das viagens, que fica só no aparelho.
+- Sair e apagar a conta (dados da nuvem inclusos) ficam no perfil, pelo ícone no topo da Garagem.
+- Precisa de um projeto Firebase próprio: veja [docs/FIREBASE.md](docs/FIREBASE.md). Sem o
+  `app/google-services.json` o app compila e roda normalmente, só sem login.
+- Roteiro de teste no aparelho: [docs/TESTES-MANUAIS-CONTA.md](docs/TESTES-MANUAIS-CONTA.md).
 
 **Tripper Pod**
 - Conexão Bluetooth, PIN no primeiro uso, reconexão automática e bússola.
@@ -68,8 +79,8 @@ Requer JDK 17+ (o JBR do Android Studio serve) e o Android SDK 36.
 
 O Gradle 8.14 não roda no JDK 25: se o `java` do PATH for o 25, defina `JAVA_HOME` para um JDK 17–21.
 
-Mais de 130 testes cobrem o protocolo do Pod (vetores reais), o motor de navegação (com respostas reais das
-APIs), as estatísticas de viagem, combustível, manutenção e lembretes. O CI roda tudo a cada push.
+Mais de 400 testes cobrem o protocolo do Pod (vetores reais), o motor de navegação (com respostas reais das
+APIs), as estatísticas de viagem, combustível, manutenção, lembretes e a sincronização (mesclagem, motor, conta). O CI roda tudo a cada push.
 
 ## Versões e releases
 
@@ -78,7 +89,7 @@ Cada push na `main` que altera o app publica uma release nova: `0.3.1`, `0.3.2`,
 
 ## Arquitetura
 
-Módulos JVM puros (`core-model`, `pod-protocol`, `navigation`) concentram a lógica e são testáveis sem aparelho;
+Módulos JVM puros (`core-model`, `pod-protocol`, `navigation`, `sync-core`) concentram a lógica e são testáveis sem aparelho;
 o Android entra em `pod-ble`, `trips`, `maintenance` e `app`. Detalhes, diagrama e decisões em
 [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
