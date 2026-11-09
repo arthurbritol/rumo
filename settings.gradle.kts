@@ -29,3 +29,5 @@ include(":pod-ble")
 include(":navigation")
 include(":trips")
 include(":maintenance")
+
+include(":sync-core")
