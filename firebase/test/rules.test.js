@@ -186,3 +186,62 @@ test('config desconhecido é negado', async () => {
   await assertFails(d.doc(`usuarios/${DONO}/config/qualquer`).set({ a: 1 }));
   await assertFails(d.doc(`usuarios/${DONO}/config/qualquer`).get());
 });
+
+const TODOS_CAMINHOS = () => [
+  `usuarios/${DONO}`,
+  ...SUBCOLECOES.map((sub) => `usuarios/${DONO}/${sub}/g1`),
+  `usuarios/${DONO}/config/hodometro`,
+  `usuarios/${DONO}/config/exclusao`,
+];
+
+async function semear() {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const a = ctx.firestore();
+    await a.doc(`usuarios/${DONO}`).set(perfilValido());
+    for (const sub of SUBCOLECOES) await a.doc(`usuarios/${DONO}/${sub}/g1`).set(docSync());
+    await a
+      .doc(`usuarios/${DONO}/config/hodometro`)
+      .set({ offsetKm: 1, tankLiters: 1, updatedAtMs: 1 });
+    await a.doc(`usuarios/${DONO}/config/exclusao`).set({ pending: true });
+  });
+}
+
+test('outro usuário e visitante não conseguem apagar nada', async () => {
+  await semear();
+  for (const ctx of [db(OUTRO), visitante()]) {
+    for (const caminho of TODOS_CAMINHOS()) {
+      await assertFails(ctx.doc(caminho).delete());
+    }
+  }
+});
+
+test('dono apaga todos os caminhos usados na exclusão de conta', async () => {
+  await semear();
+  const d = db(DONO);
+  for (const caminho of TODOS_CAMINHOS()) {
+    await assertSucceeds(d.doc(caminho).delete());
+  }
+});
+
+test('dono lista uma subcoleção', async () => {
+  await semear();
+  for (const sub of SUBCOLECOES) {
+    await assertSucceeds(db(DONO).collection(`usuarios/${DONO}/${sub}`).get());
+  }
+});
+
+test('update ou merge que adiciona campo desconhecido ao perfil é negado', async () => {
+  await semear();
+  const ref = db(DONO).doc(`usuarios/${DONO}`);
+  await assertFails(ref.update({ extra: 1 }));
+  await assertFails(ref.set({ extra: 1 }, { merge: true }));
+  await assertSucceeds(ref.update({ brand: 'Yamaha' }));
+});
+
+test('update que faz documento de sincronização passar de 20 campos é negado', async () => {
+  const o = { updatedAtMs: 1, deleted: false };
+  for (let i = 0; i < 18; i++) o[`c${i}`] = i;
+  const ref = db(DONO).doc(`usuarios/${DONO}/viagens/g9`);
+  await assertSucceeds(ref.set(o));
+  await assertFails(ref.update({ novo: 1 }));
+});
