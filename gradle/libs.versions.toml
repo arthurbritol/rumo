@@ -6,7 +6,7 @@ room = "2.8.1"
 composeBom = "2025.10.00"
 activityCompose = "1.11.0"
 lifecycle = "2.9.4"
-coreKtx = "1.17.0"
+coreKtx = "1.19.1"
 coroutines = "1.10.2"
 junit = "4.13.2"
 
