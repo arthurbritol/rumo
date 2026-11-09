@@ -23,15 +23,15 @@
 
 ## Revisão: o que o spec implica e nenhum teste de tarefa cobre sozinho
 
-1. **Primeiro login sem internet:** a tela mostra erro claro em pouco tempo e a pessoa segue como visitante (teste na Tarefa 8).
-2. **Relógio errado do celular:** um `updatedAtMs` no futuro faria um registro vencer para sempre; limitar a `agora + 1 dia` ao aplicar (Tarefa 3).
-3. **Viagem restaurada sem trajeto:** a tela de detalhe da viagem não pode quebrar com zero pontos (Tarefa 6).
-4. **Exclusão da conta interrompida ou com login antigo demais:** retoma sozinha; se o Firebase pedir nova autenticação, a pessoa a refaz sem perder o estado (Tarefas 4 e 5).
-5. **Permissão negada para sempre:** "Agora não" e "negar e não perguntar de novo" não travam o fluxo e levam às configurações quando o recurso for usado (Tarefa 10).
+1. **Primeiro login sem internet:** a tela mostra erro claro em pouco tempo e a pessoa segue como visitante (teste na Task 8).
+2. **Relógio errado do celular:** um `updatedAtMs` no futuro faria um registro vencer para sempre; limitar a `agora + 1 dia` ao aplicar (Task 3).
+3. **Viagem restaurada sem trajeto:** a tela de detalhe da viagem não pode quebrar com zero pontos (Task 6).
+4. **Exclusão da conta interrompida ou com login antigo demais:** retoma sozinha; se o Firebase pedir nova autenticação, a pessoa a refaz sem perder o estado (Tasks 4 e 5).
+5. **Permissão negada para sempre:** "Agora não" e "negar e não perguntar de novo" não travam o fluxo e levam às configurações quando o recurso for usado (Task 10).
 
 ---
 
-### Tarefa 1: Firebase compila no projeto (e o app segue funcionando sem a configuração)
+### Task 1: Firebase compila no projeto (e o app segue funcionando sem a configuração)
 
 **Arquivos:**
 - Modificar: `gradle/libs.versions.toml`, `build.gradle.kts` (raiz), `app/build.gradle.kts`, `settings.gradle.kts`
@@ -44,14 +44,14 @@
 - [ ] **Passo 1:** Acrescentar ao catálogo: plugin `com.google.gms.google-services` (4.4.4 ou a mais nova compatível), `firebase-bom`, `firebase-auth`, `firebase-firestore`, `androidx.credentials:credentials` e `credentials-play-services-auth`, `googleid`. Começar por `firebase-bom` 34.x e `credentials` 1.6.0 (estável) e subir só se compilar.
 - [ ] **Passo 2:** Aplicar o plugin do Google Services em `app/build.gradle.kts` **somente se** `app/google-services.json` existir, e adicionar as dependências.
 - [ ] **Passo 3:** Escrever `AccountConfig.isAvailable` (usa `FirebaseApp.getApps(context).isNotEmpty()`).
-- [ ] **Passo 4:** Escrever `docs/FIREBASE.md` com o passo a passo do dono: criar o projeto Firebase, registrar o app `app.hunter.companion`, cadastrar o SHA-1 e o SHA-256 da chave `rumo` (comando `keytool -list -v -keystore C:\Users\arthur.lucio\.rumo\rumo-release.keystore -alias rumo`), ativar Google e E-mail/senha, criar o Firestore em modo produção, baixar `google-services.json` para `app/`, publicar as regras (Tarefa 5). Incluir o aviso: "a conta de e-mail com o mesmo endereço do Google é vinculada".
+- [ ] **Passo 4:** Escrever `docs/FIREBASE.md` com o passo a passo do dono: criar o projeto Firebase, registrar o app `app.hunter.companion`, cadastrar o SHA-1 e o SHA-256 da chave `rumo` (comando `keytool -list -v -keystore C:\Users\arthur.lucio\.rumo\rumo-release.keystore -alias rumo`), ativar Google e E-mail/senha, criar o Firestore em modo produção, baixar `google-services.json` para `app/`, publicar as regras (Task 5). Incluir o aviso: "a conta de e-mail com o mesmo endereço do Google é vinculada".
 - [ ] **Passo 5:** Rodar `./gradlew.bat test :app:assembleRelease --console=plain -q` sem o `google-services.json`.
   Esperado: compila e passa, e `AccountConfig.isAvailable` fica falso. Se o BoM ou o plugin não compilar com AGP 8.13.2/Kotlin 2.2.20, baixar a versão até compilar e anotar a escolhida em `docs/FIREBASE.md`.
 - [ ] **Passo 6:** Commit `Firebase: dependências e guia de configuração`.
 
 ---
 
-### Tarefa 2: Módulo `sync-core` com o modelo de documento e o catálogo de motos
+### Task 2: Módulo `sync-core` com o modelo de documento e o catálogo de motos
 
 **Arquivos:**
 - Modificar: `settings.gradle.kts` (incluir `:sync-core`)
@@ -73,14 +73,14 @@
 
 ---
 
-### Tarefa 3: Mesclagem sem duplicar
+### Task 3: Mesclagem sem duplicar
 
 **Arquivos:**
 - Criar: `sync-core/src/main/kotlin/app/hunter/sync/Merge.kt`
 - Testar: `sync-core/src/test/kotlin/app/hunter/sync/MergeTest.kt`
 
 **Interfaces:**
-- Consome: `SyncDoc`, `Kind`, `OdometerDoc` (Tarefa 2).
+- Consome: `SyncDoc`, `Kind`, `OdometerDoc` (Task 2).
 - Produz:
   - `fun dedupKey(d: SyncDoc): String?` (nulo para registros apagados). Chaves: abastecimento = `dateMs|odometerKm|liters|totalCost`; manutenção = `name|intervalKm|intervalDays`; local = `lat(4 casas)|lon(4 casas)|name`; viagem = `startedAtMs|distanceM` arredondado ao metro.
   - `data class MergePlan(val applyLocal: List<SyncDoc>, val pushRemote: List<SyncDoc>)`
@@ -92,14 +92,14 @@
 
 ---
 
-### Tarefa 4: Motor de sincronização, sair e apagar conta
+### Task 4: Motor de sincronização, sair e apagar conta
 
 **Arquivos:**
 - Criar: `sync-core/src/main/kotlin/app/hunter/sync/SyncEngine.kt`, `Stores.kt`
 - Testar: `sync-core/src/test/kotlin/app/hunter/sync/SyncEngineTest.kt` (com `FakeLocalStore` e `FakeRemoteStore` no próprio teste)
 
 **Interfaces:**
-- Consome: `merge`, `mergeOdometer`, tipos da Tarefa 2.
+- Consome: `merge`, `mergeOdometer`, tipos da Task 2.
 - Produz:
   ```kotlin
   interface LocalStore {
@@ -138,14 +138,14 @@
 
 ---
 
-### Tarefa 5: Regras do Firestore e estrutura de dados
+### Task 5: Regras do Firestore e estrutura de dados
 
 **Arquivos:**
 - Criar: `firebase/firestore.rules`, `firebase/firestore.indexes.json`, `firebase/test/rules.test.js`, `firebase/package.json`
 - Modificar: `firebase/firebase.json`, `.github/workflows/ci.yml` (job opcional com Node 20: `npm ci` e `npx firebase emulators:exec --only firestore "npm test"` dentro de `firebase/`)
 
 **Interfaces:**
-- Produz o caminho dos dados: `usuarios/{uid}` (perfil: `displayName`, `displayNameLower`, `brand`, `model`, `year`, `voice`, `deletionPending`, `updatedAtMs`) e subcoleções `abastecimentos`, `manutencao`, `locais`, `viagens` (documentos com `gid` como id, `updatedAtMs`, `deleted` e os campos da Tarefa 3), mais `usuarios/{uid}/config/hodometro`.
+- Produz o caminho dos dados: `usuarios/{uid}` (perfil: `displayName`, `displayNameLower`, `brand`, `model`, `year`, `voice`, `deletionPending`, `updatedAtMs`) e subcoleções `abastecimentos`, `manutencao`, `locais`, `viagens` (documentos com `gid` como id, `updatedAtMs`, `deleted` e os campos da Task 3), mais `usuarios/{uid}/config/hodometro`.
 
 - [ ] **Passo 1:** Testes (`rules-unit-testing`): `dono lê e escreve o próprio perfil e subcoleções`; `outro usuário não lê nem escreve`; `visitante (sem login) não acessa nada`; `campo desconhecido no perfil é recusado`; `displayName vazio ou maior que 60 caracteres é recusado`; `documento de subcoleção maior que o limite de campos é recusado`; `deletionPending só aceita booleano`.
 - [ ] **Passo 2:** Rodar contra o emulador e ver falhar. **Passo 3:** Escrever as regras. **Passo 4:** Ver passar. Commit `Firestore: regras e testes`.
@@ -153,7 +153,7 @@
 
 ---
 
-### Tarefa 6: Room v3 (id global, data de alteração, lápides) e adaptador `LocalStore`
+### Task 6: Room v3 (id global, data de alteração, lápides) e adaptador `LocalStore`
 
 **Arquivos:**
 - Modificar: `maintenance/.../MaintenanceEntities.kt`, `maintenance/.../MaintenanceDao.kt`, `trips/.../TripEntities.kt`, `trips/.../TripDao.kt`, `app/.../data/PlaceEntity.kt` (e `PlaceDao`), `app/.../data/AppDatabase.kt` (versão 3, `MIGRATION_2_3`, entidade `TombstoneEntity`, preferência do perfil), `HunterApp.kt`
@@ -161,34 +161,34 @@
 - Testar: `app/src/test/.../Migration2To3Test.kt`, `app/src/test/.../RoomLocalStoreMappingTest.kt`
 
 **Interfaces:**
-- Consome: `LocalStore`, `SyncDoc`, `OdometerDoc`, `UserProfile` (Tarefas 2 e 4).
+- Consome: `LocalStore`, `SyncDoc`, `OdometerDoc`, `UserProfile` (Tasks 2 e 4).
 - Produz: as quatro entidades sincronizáveis ganham `gid: String` (UUID), `updatedAtMs: Long` e `dirty: Boolean`; `OdometerEntity` ganha `updatedAtMs` e `dirty`; tabela `tombstones(kind, gid, deletedAtMs, dirty)`. Toda alteração e remoção feita pela interface (ViewModel/DAO) preenche `updatedAtMs = agora`, `dirty = true`, e exclusões gravam lápide. `class RoomLocalStore(db: AppDatabase, prefs: SharedPreferences) : LocalStore`.
 
 - [ ] **Passo 1:** Escrever `Migration2To3Test` na JVM com `sqlite-jdbc` em memória: cria o esquema v2 a partir de `app/schemas/.../2.json`, insere abastecimentos, itens, locais, viagens, pontos e hodômetro, aplica os comandos de `Migration2To3` e confere: nenhum registro perdido; `gid` não vazio e único por linha; `dirty = 1`; pontos de trajeto intactos. Rodar e ver falhar.
-- [ ] **Passo 2:** Escrever `RoomLocalStoreMappingTest` para o mapeamento entidade ↔ `SyncDoc` (campos exatos das chaves da Tarefa 3; só locais favoritos sincronizam, recentes não; a preferência `voice` vai no perfil e as demais preferências do aparelho (`bottomMode`, `mac`, `update_*`, `seeded`) não; viagem em andamento, `endedAtMs == null`, não sincroniza; viagem recebida da nuvem vira `TripEntity` sem pontos).
+- [ ] **Passo 2:** Escrever `RoomLocalStoreMappingTest` para o mapeamento entidade ↔ `SyncDoc` (campos exatos das chaves da Task 3; só locais favoritos sincronizam, recentes não; a preferência `voice` vai no perfil e as demais preferências do aparelho (`bottomMode`, `mac`, `update_*`, `seeded`) não; viagem em andamento, `endedAtMs == null`, não sincroniza; viagem recebida da nuvem vira `TripEntity` sem pontos).
 - [ ] **Passo 3:** Implementar entidades, migração e `RoomLocalStore`. O build precisa gerar `app/schemas/.../3.json`; conferir que o KSP não reclama.
 - [ ] **Passo 4:** A tela de detalhe da viagem mostra "O trajeto desta viagem só existe no aparelho em que ela foi gravada" quando há zero pontos, sem quebrar (cobre a Revisão 3). Teste de lógica da mensagem em arquivo de teste do módulo `app`.
 - [ ] **Passo 5:** `./gradlew.bat test :app:assembleRelease --console=plain -q` passa. Commit `Room v3: id global, lápides e adaptador de sincronização`.
 
 ---
 
-### Tarefa 7: Adaptador `RemoteStore` do Firestore e agendamento da sincronização
+### Task 7: Adaptador `RemoteStore` do Firestore e agendamento da sincronização
 
 **Arquivos:**
 - Criar: `app/.../sync/FirestoreRemoteStore.kt`, `app/.../sync/SyncScheduler.kt`
 - Testar: `app/src/test/.../SyncSchedulerTest.kt` (lógica de atraso/lote em Kotlin puro)
 
 **Interfaces:**
-- Consome: `RemoteStore` (Tarefa 4) e o caminho de dados (Tarefa 5).
+- Consome: `RemoteStore` (Task 4) e o caminho de dados (Task 5).
 - Produz: `class FirestoreRemoteStore(db: FirebaseFirestore, uid: String) : RemoteStore` (escritas em lote de até 400 documentos; `deleteAllUserData` apaga as subcoleções em páginas e por fim o documento do usuário). `class SyncScheduler(engine: SyncEngine, scope: CoroutineScope, debounceMs: Long = 5_000)` com `fun requestSync()` e `fun syncOnConnectivity()`.
 
 - [ ] **Passo 1:** `SyncSchedulerTest`: várias chamadas seguidas viram uma sincronização; erro de rede mantém tudo sujo e tenta de novo quando a conexão volta; não sincroniza sem usuário logado.
 - [ ] **Passo 2:** Ver falhar, implementar, ver passar.
-- [ ] **Passo 3:** Implementar `FirestoreRemoteStore` seguindo as chaves da Tarefa 5 (sem teste na JVM; coberto pelo roteiro manual da Tarefa 13 e pelas regras da Tarefa 5). Commit `Sincronização com o Firestore`.
+- [ ] **Passo 3:** Implementar `FirestoreRemoteStore` seguindo as chaves da Task 5 (sem teste na JVM; coberto pelo roteiro manual da Task 13 e pelas regras da Task 5). Commit `Sincronização com o Firestore`.
 
 ---
 
-### Tarefa 8: `AuthRepository` e estado de login
+### Task 8: `AuthRepository` e estado de login
 
 **Arquivos:**
 - Criar: `app/.../account/AuthGateway.kt` (interface), `FirebaseAuthGateway.kt`, `AuthRepository.kt`, `AccountViewModel.kt`
@@ -208,7 +208,7 @@
 
 ---
 
-### Tarefa 9: Fluxo da primeira abertura e tela de apresentação
+### Task 9: Fluxo da primeira abertura e tela de apresentação
 
 **Arquivos:**
 - Criar: `sync-core/.../OnboardingFlow.kt`, `app/.../ui/onboarding/OnboardingScreen.kt`, `app/.../ui/onboarding/IntroPages.kt`
@@ -223,14 +223,14 @@
 
 ---
 
-### Tarefa 10: Tela de login e tela de permissões
+### Task 10: Tela de login e tela de permissões
 
 **Arquivos:**
 - Criar: `app/.../ui/onboarding/LoginScreen.kt`, `PermissionsScreen.kt`, `PermissionPlan.kt`
 - Testar: `app/src/test/.../PermissionPlanTest.kt`
 
 **Interfaces:**
-- Consome: `AccountViewModel`, `AuthResult` (Tarefa 8); `rememberPermissionAction` de `Components.kt`.
+- Consome: `AccountViewModel`, `AuthResult` (Task 8); `rememberPermissionAction` de `Components.kt`.
 - Produz: `object PermissionPlan { fun steps(sdk: Int): List<PermStep> }` com `data class PermStep(val id: String, val permissions: List<String>, val title: String, val reason: String)`: localização precisa/aproximada; Bluetooth (`BLUETOOTH_SCAN` e `BLUETOOTH_CONNECT` só do Android 12 em diante); notificações (`POST_NOTIFICATIONS` só do Android 13 em diante). Nunca inclui localização em segundo plano.
 
 - [ ] **Passo 1:** `PermissionPlanTest`: `Android 8 pede só localização`; `Android 12 inclui Bluetooth`; `Android 13 inclui notificações`; `nenhuma etapa contém ACCESS_BACKGROUND_LOCATION`.
@@ -240,7 +240,7 @@
 
 ---
 
-### Tarefa 11: Cadastro da moto (completo e curto)
+### Task 11: Cadastro da moto (completo e curto)
 
 **Arquivos:**
 - Criar: `app/.../ui/onboarding/BikeSetupScreen.kt`, `BikeForm.kt`
@@ -256,7 +256,7 @@
 
 ---
 
-### Tarefa 12: Perfil, sair e apagar conta
+### Task 12: Perfil, sair e apagar conta
 
 **Arquivos:**
 - Criar: `app/.../ui/ProfileScreen.kt`
@@ -273,7 +273,7 @@
 
 ---
 
-### Tarefa 13: Ligar tudo, documentação e roteiro de teste manual
+### Task 13: Ligar tudo, documentação e roteiro de teste manual
 
 **Arquivos:**
 - Modificar: `app/.../MainActivity.kt` (rotear pela `OnboardingFlow` antes do `HunterRoot`), `app/.../HunterViewModel.kt` (disparar `requestSync()` após alterações e ao terminar viagem), `README.md`, `CHANGELOG.md`, `docs/ARQUITETURA.md`, `version.txt` (para `0.4`, pois muda o app inteiro)
@@ -289,7 +289,7 @@
 
 ## Verificação do plano contra o spec
 
-| Requisito do spec | Tarefa |
+| Requisito do spec | Task |
 |---|---|
 | Quatro telas de apresentação, "Pular", só na primeira vez, revisável | 9, 12 |
 | Login Google e e-mail/senha, esqueci a senha, confirmação | 8, 10 |
