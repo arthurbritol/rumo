@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.lang.ref.WeakReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -44,8 +45,15 @@ private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont 
  * folha de contas: a tela define [activity] ao ficar visível e a limpa ao sair.
  */
 class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
-    @Volatile
-    var activity: Activity? = null
+    private var activityRef: WeakReference<Activity>? = null
+
+    /** Referência fraca: a tela define ao ficar visível; não segura a Activity depois de destruída. */
+    var activity: Activity?
+        get() = activityRef?.get()
+        set(value) { activityRef = value?.let { WeakReference(it) } }
+
+    override val providerIsPassword: Boolean
+        get() = auth?.currentUser?.providerData?.any { it.providerId == EmailAuthProvider.PROVIDER_ID } == true
 
     private val auth: FirebaseAuth? = try {
         FirebaseAuth.getInstance()
@@ -66,7 +74,7 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
 
     override suspend fun signInGoogle(): AuthResult {
         val a = auth ?: return unavailable()
-        val act = activity ?: return AuthResult.Error(AuthError.OTHER, "Não foi possível abrir o login do Google agora.")
+        val act = activity ?: return AuthResult.Error(AuthError.UNAVAILABLE, "Abra o login pela tela do app.")
         val id = appContext.resources.getIdentifier("default_web_client_id", "string", appContext.packageName)
         if (id == 0) return unavailable()
         val option = GetGoogleIdOption.Builder()
@@ -125,7 +133,14 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
         return guarded {
             val user = a.createUserWithEmailAndPassword(email.trim(), password).await().user
                 ?: return@guarded AuthResult.Error(AuthError.OTHER, "Não foi possível criar a conta.")
-            user.updateProfile(userProfileChangeRequest { displayName = name.trim() }).await()
+            // Conta criada: falha ao gravar o nome ou ao enviar a verificação não falha o cadastro.
+            try {
+                user.updateProfile(userProfileChangeRequest { displayName = name.trim() }).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // o nome cai no prefixo do e-mail; o usuário pode editar depois
+            }
             _state.value = a.currentUser.toState()
             AuthResult.Ok
         }

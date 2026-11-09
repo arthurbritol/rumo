@@ -10,6 +10,8 @@ import app.hunter.sync.SyncEngine
 import app.hunter.sync.UserProfile
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
@@ -42,6 +44,8 @@ private class FakeRemote(val ev: Events) : RemoteStore {
     var fetchError: Throwable? = null
     var hang = false
     var pending = false
+    var cloudHasData = true
+    var deleteError: Throwable? = null
     override suspend fun fetchAll(): RemoteSnapshot {
         fetches++
         if (hang) awaitCancellation()
@@ -53,7 +57,10 @@ private class FakeRemote(val ev: Events) : RemoteStore {
     override suspend fun pushProfile(p: UserProfile) {}
     override suspend fun markDeletionPending() { pending = true; ev.list += "pendente" }
     override suspend fun deletionPending() = pending
-    override suspend fun deleteAllUserData() { ev.list += "dados"; pending = false }
+    override suspend fun deleteAllUserData() {
+        deleteError?.let { throw it }
+        ev.list += "dados"; cloudHasData = false; pending = false
+    }
 }
 
 private class FakeAuthGateway(val ev: Events) : AuthGateway {
@@ -70,11 +77,14 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
     val linked = mutableListOf<Pair<String, String>>()
     var signOuts = 0
     var deleteCalls = 0
+    override var providerIsPassword = false
+    var signUpResult: AuthResult = AuthResult.Ok
+    var onDelete: (suspend () -> Unit)? = null
 
     override suspend fun signInGoogle() = googleResult
     override suspend fun signUpEmail(name: String, email: String, password: String): AuthResult {
         signedUpName = name
-        return AuthResult.Ok
+        return signUpResult
     }
     override suspend fun signInEmail(email: String, password: String) = signInResult
     override suspend fun linkGoogleToEmail(email: String, password: String): AuthResult {
@@ -86,6 +96,7 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
     override suspend fun reauthenticate(password: String?): AuthResult { reauthCalls += password; return reauthResult }
     override suspend fun deleteAuthUser(): AuthResult {
         deleteCalls++
+        onDelete?.invoke()
         ev.list += "usuario"
         return deleteResults.removeFirstOrNull() ?: AuthResult.Ok
     }
@@ -171,40 +182,118 @@ class AuthRepositoryTest {
         assertEquals(1, gateway.signOuts)
     }
 
-    @Test
-    fun `apagar conta pede reautenticacao quando o Firebase exige e continua depois`() = runTest {
-        gateway.deleteResults += AuthResult.Error(AuthError.NEEDS_RECENT_LOGIN, "x")
-        assertEquals(AuthResult.Ok, repo.deleteAccount("senha"))
-        assertEquals(listOf<String?>("senha"), gateway.reauthCalls)
-        assertEquals(2, gateway.deleteCalls)
+    private fun err(k: AuthError) = AuthResult.Error(k, "x")
 
-        // reautenticação falha: devolve o erro dela
-        gateway.deleteResults += AuthResult.Error(AuthError.NEEDS_RECENT_LOGIN, "x")
-        gateway.reauthResult = AuthResult.Error(AuthError.WRONG_CREDENTIALS, "senha errada")
+    @Test
+    fun `apagar conta - reautentica antes de tocar na nuvem e falha sem apagar nada`() = runTest {
+        gateway.providerIsPassword = true
+        gateway.reauthResult = err(AuthError.WRONG_CREDENTIALS)
         val r = repo.deleteAccount("errada")
         assertEquals(AuthError.WRONG_CREDENTIALS, (r as AuthResult.Error).kind)
+        assertTrue(remote.cloudHasData)
+        assertFalse(remote.pending)
+        assertEquals(0, gateway.deleteCalls)
+        assertTrue(ev.list.isEmpty())
     }
 
     @Test
-    fun `apagar conta - ordem e marcar pendente, apagar dados, apagar o usuario`() = runTest {
-        assertEquals(AuthResult.Ok, repo.deleteAccount(null))
-        assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
+    fun `apagar conta - usuario de senha sem senha da WRONG_CREDENTIALS sem abrir o Google`() = runTest {
+        gateway.providerIsPassword = true
+        val r = repo.deleteAccount(null)
+        assertEquals(AuthError.WRONG_CREDENTIALS, (r as AuthResult.Error).kind)
         assertTrue(gateway.reauthCalls.isEmpty())
+        assertTrue(remote.cloudHasData)
     }
 
     @Test
-    fun `retomar exclusao pendente apaga o usuario e segue como visitante`() = runTest {
+    fun `apagar conta - usuario Google reautentica pelo Google e Google cancelado nao apaga nada`() = runTest {
+        gateway.reauthResult = err(AuthError.CANCELLED)
+        val r = repo.deleteAccount("ignorada")
+        assertEquals(AuthError.CANCELLED, (r as AuthResult.Error).kind)
+        assertEquals(listOf<String?>(null), gateway.reauthCalls)
+        assertTrue(remote.cloudHasData)
+        assertFalse(remote.pending)
+    }
+
+    @Test
+    fun `apagar conta - ordem e reautenticar, marcar pendente, apagar dados, apagar o usuario`() = runTest {
+        gateway.providerIsPassword = true
+        assertEquals(AuthResult.Ok, repo.deleteAccount("senha"))
+        assertEquals(listOf<String?>("senha"), gateway.reauthCalls)
+        assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
+        assertFalse(remote.cloudHasData)
+        assertFalse(remote.pending)
+    }
+
+    @Test
+    fun `apagar conta - falha ao apagar o usuario deixa nuvem vazia e marca pendente`() = runTest {
+        gateway.deleteResults += err(AuthError.NETWORK)
+        val r = repo.deleteAccount(null)
+        assertEquals(AuthError.NETWORK, (r as AuthResult.Error).kind)
+        assertTrue(r.message.contains("automaticamente"))
+        assertFalse(remote.cloudHasData)
+        assertTrue(remote.pending)
+        assertEquals(0, gateway.signOuts)
+    }
+
+    @Test
+    fun `apagar conta - falha ao apagar os dados devolve NETWORK sem chamar o gateway`() = runTest {
+        remote.deleteError = IOException("sem rede")
+        val r = repo.deleteAccount(null)
+        assertEquals(AuthError.NETWORK, (r as AuthResult.Error).kind)
+        assertEquals(0, gateway.deleteCalls)
+    }
+
+    @Test
+    fun `apagar conta - cancelar o chamador no meio nao interrompe a sequencia`() = runTest {
+        val job = launch { repo.deleteAccount(null) }
+        gateway.onDelete = { job.cancel(); yield() }
+        job.join()
+        assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
+        assertFalse(remote.pending)
+    }
+
+    @Test
+    fun `retomar sem exclusao pendente nao faz nada`() = runTest {
         assertFalse(repo.resumeDeletionIfNeeded())
         assertEquals(0, gateway.deleteCalls)
+    }
 
+    @Test
+    fun `retomar exclusao pendente apaga dados e usuario e segue como visitante`() = runTest {
         remote.pending = true
         assertTrue(repo.resumeDeletionIfNeeded())
-        assertEquals(listOf("dados", "usuario"), ev.list)
+        assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
+        assertFalse(remote.pending)
+        assertEquals(0, gateway.signOuts)
+    }
 
+    @Test
+    fun `retomar com falha de rede continua logado e mantem a marca`() = runTest {
         remote.pending = true
-        gateway.deleteResults += AuthResult.Error(AuthError.NEEDS_RECENT_LOGIN, "x")
+        gateway.deleteResults += err(AuthError.NETWORK)
+        repo.resumeDeletionIfNeeded()
+        assertEquals(0, gateway.signOuts)
+        assertTrue(remote.pending)
+        assertFalse(remote.cloudHasData)
+    }
+
+    @Test
+    fun `retomar com login recente exigido sai localmente e mantem a marca`() = runTest {
+        remote.pending = true
+        gateway.deleteResults += err(AuthError.NEEDS_RECENT_LOGIN)
         assertTrue(repo.resumeDeletionIfNeeded())
         assertEquals(1, gateway.signOuts)
+        assertTrue(remote.pending)
+    }
+
+    @Test
+    fun `cadastro com falha nao envia verificacao nem sincroniza`() = runTest {
+        gateway.signUpResult = err(AuthError.WEAK_PASSWORD)
+        val r = repo.signUpEmail("Ana", "a@b.c", "1")
+        assertEquals(AuthError.WEAK_PASSWORD, (r as AuthResult.Error).kind)
+        assertEquals(0, gateway.verificationSent)
+        assertEquals(0, remote.fetches)
     }
 
     @Test

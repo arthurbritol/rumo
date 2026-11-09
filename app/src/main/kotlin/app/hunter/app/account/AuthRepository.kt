@@ -2,6 +2,8 @@ package app.hunter.app.account
 
 import app.hunter.sync.SyncEngine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -36,54 +38,85 @@ class AuthRepository(
     suspend fun sendVerification(): AuthResult = gateway.sendVerification()
 
     /** Só sai se não houver nada pendente de envio; limpa o aparelho e então encerra a sessão. */
-    suspend fun signOut(): AuthResult {
-        if (!engine.canSignOut()) return blocked()
+    suspend fun signOut(): AuthResult = withContext(NonCancellable) {
+        if (!engine.canSignOut()) return@withContext blocked()
         try {
             engine.signOutWipe()
         } catch (e: IllegalStateException) {
-            return blocked() // uma edição chegou entre a checagem e a limpeza
+            return@withContext blocked() // uma edição chegou entre a checagem e a limpeza
         }
         gateway.signOut()
-        return AuthResult.Ok
+        AuthResult.Ok
     }
 
     /**
-     * Ordem: marca exclusão pendente e apaga os dados da nuvem, depois apaga o usuário (pedindo
-     * reautenticação uma vez se o Firebase exigir). Os dados locais ficam, como de visitante.
+     * Ordem: 1) reautentica com a nuvem intacta (senha para quem entra com e-mail, Google para os
+     * outros); se falhar, nada é tocado. 2) marca exclusão pendente e apaga os dados da nuvem.
+     * 3) apaga o usuário; se falhar, marca pendente de novo para a próxima abertura concluir.
+     * Os dados locais ficam, como de visitante. Depois da reautenticação a sequência não é cancelável.
      */
     suspend fun deleteAccount(password: String?): AuthResult {
-        try {
-            engine.deleteAccountData()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            return AuthResult.Error(AuthError.NETWORK, "Não foi possível apagar os dados da conta. Verifique a internet e tente de novo.")
+        val reauth = if (gateway.providerIsPassword) {
+            if (password.isNullOrEmpty()) {
+                AuthResult.Error(AuthError.WRONG_CREDENTIALS, "Informe sua senha para apagar a conta.")
+            } else {
+                gateway.reauthenticate(password)
+            }
+        } else {
+            gateway.reauthenticate(null)
         }
-        var r = gateway.deleteAuthUser()
-        if (r is AuthResult.Error && r.kind == AuthError.NEEDS_RECENT_LOGIN) {
-            val re = gateway.reauthenticate(password)
-            if (re is AuthResult.Error) return re
-            r = gateway.deleteAuthUser()
+        if (reauth is AuthResult.Error) return reauth
+        return withContext(NonCancellable) {
+            try {
+                engine.deleteAccountData()
+            } catch (e: Exception) {
+                return@withContext AuthResult.Error(
+                    AuthError.NETWORK,
+                    "Não foi possível apagar os dados da conta. Verifique a internet e tente de novo.",
+                )
+            }
+            val r = gateway.deleteAuthUser()
+            if (r is AuthResult.Error) {
+                remarkPending()
+                return@withContext AuthResult.Error(
+                    r.kind,
+                    "Seus dados foram apagados, mas não foi possível encerrar a conta agora. " +
+                        "A exclusão será concluída automaticamente; tente de novo mais tarde.",
+                )
+            }
+            AuthResult.Ok
         }
-        return r
     }
 
     /**
-     * Conclui uma exclusão interrompida (dados da nuvem e usuário). Retorna true se havia uma.
-     * Se o Firebase exigir login recente, encerra a sessão local e segue como visitante, sem laço.
+     * Conclui uma exclusão interrompida (dados da nuvem de novo, que é idempotente, e o usuário).
+     * Retorna true quando a exclusão terminou ou a sessão local foi encerrada para o usuário
+     * terminá-la entrando de novo (login recente exigido). Qualquer outra falha mantém a marca e a
+     * sessão e retorna false. Sem laço.
      */
-    suspend fun resumeDeletionIfNeeded(): Boolean {
-        val resumed = try {
-            engine.resumePendingDeletion()
-        } catch (e: CancellationException) {
-            throw e
+    suspend fun resumeDeletionIfNeeded(): Boolean = withContext(NonCancellable) {
+        try {
+            if (!engine.isDeletionPending()) return@withContext false
+            engine.deleteAccountData()
         } catch (e: Exception) {
-            return false
+            return@withContext false
         }
-        if (!resumed) return false
         val r = gateway.deleteAuthUser()
-        if (r is AuthResult.Error) gateway.signOut()
-        return true
+        if (r is AuthResult.Ok) return@withContext true
+        remarkPending()
+        if (r is AuthResult.Error && r.kind == AuthError.NEEDS_RECENT_LOGIN) {
+            gateway.signOut()
+            return@withContext true
+        }
+        false
+    }
+
+    private suspend fun remarkPending() {
+        try {
+            engine.markDeletionPending()
+        } catch (e: Exception) {
+            // sem rede: a marca já foi gravada por deleteAccountData e só é limpa ao final dele
+        }
     }
 
     private suspend fun AuthResult.thenSync(): AuthResult {

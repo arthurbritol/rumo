@@ -32,5 +32,8 @@ interface AuthGateway {
     suspend fun reauthenticate(password: String?): AuthResult
     suspend fun deleteAuthUser(): AuthResult
     fun signOut()
+
+    /** Verdadeiro quando o usuário atual entra com e-mail/senha (reautenticação pede a senha, não o Google). */
+    val providerIsPassword: Boolean
     val state: StateFlow<AuthState>
 }
