@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pod_channel">Conexão com o Pod</string>
+    <string name="pod_title">Tripper Pod</string>
+    <string name="pod_disconnect">Desconectar</string>
+</resources>

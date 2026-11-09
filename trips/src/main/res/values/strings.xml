@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tracking_channel">Gravação de pedal</string>
+    <string name="tracking_title">Gravando pedal</string>
+    <string name="tracking_waiting_gps">Aguardando sinal de GPS…</string>
+    <string name="tracking_stop">Parar</string>
+</resources>
