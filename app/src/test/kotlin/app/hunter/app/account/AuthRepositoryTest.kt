@@ -23,6 +23,13 @@ import kotlin.test.assertTrue
 
 private class Events { val list = mutableListOf<String>() }
 
+private class FakeFlag : PendingDeletionFlag {
+    var value = false
+    override fun isSet() = value
+    override fun set() { value = true }
+    override fun clear() { value = false }
+}
+
 private class FakeLocal : LocalStore {
     var dirtyDocs = emptyList<SyncDoc>()
     var cleared = false
@@ -46,6 +53,8 @@ private class FakeRemote(val ev: Events) : RemoteStore {
     var pending = false
     var cloudHasData = true
     var deleteError: Throwable? = null
+    var markError: Throwable? = null
+    var hangDelete = false
     override suspend fun fetchAll(): RemoteSnapshot {
         fetches++
         if (hang) awaitCancellation()
@@ -55,16 +64,17 @@ private class FakeRemote(val ev: Events) : RemoteStore {
     override suspend fun push(docs: List<SyncDoc>) {}
     override suspend fun pushOdometer(o: OdometerDoc) {}
     override suspend fun pushProfile(p: UserProfile) {}
-    override suspend fun markDeletionPending() { pending = true; ev.list += "pendente" }
+    override suspend fun markDeletionPending() { markError?.let { throw it }; pending = true; ev.list += "pendente" }
     override suspend fun deletionPending() = pending
     override suspend fun deleteAllUserData() {
+        if (hangDelete) awaitCancellation()
         deleteError?.let { throw it }
         ev.list += "dados"; cloudHasData = false; pending = false
     }
 }
 
 private class FakeAuthGateway(val ev: Events) : AuthGateway {
-    override val state = MutableStateFlow<AuthState>(AuthState.Guest)
+    override val state = MutableStateFlow<AuthState>(AuthState.SignedIn("u", "Ana", "a@b.c", true))
     var signInResult: AuthResult = AuthResult.Ok
     var googleResult: AuthResult = AuthResult.Ok
     var linkResult: AuthResult = AuthResult.Ok
@@ -86,7 +96,10 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
         signedUpName = name
         return signUpResult
     }
-    override suspend fun signInEmail(email: String, password: String) = signInResult
+    override suspend fun signInEmail(email: String, password: String): AuthResult {
+        if (signInResult is AuthResult.Ok) state.value = AuthState.SignedIn("u", "Ana", email, true)
+        return signInResult
+    }
     override suspend fun linkGoogleToEmail(email: String, password: String): AuthResult {
         linked += email to password
         return linkResult
@@ -100,7 +113,7 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
         ev.list += "usuario"
         return deleteResults.removeFirstOrNull() ?: AuthResult.Ok
     }
-    override fun signOut() { signOuts++; ev.list += "sair" }
+    override fun signOut() { signOuts++; state.value = AuthState.Guest; ev.list += "sair" }
 }
 
 class AuthRepositoryTest {
@@ -108,7 +121,8 @@ class AuthRepositoryTest {
     private val local = FakeLocal()
     private val remote = FakeRemote(ev)
     private val gateway = FakeAuthGateway(ev)
-    private val repo = AuthRepository(gateway, SyncEngine(local, remote) { 1L })
+    private val flag = FakeFlag()
+    private val repo = AuthRepository(gateway, SyncEngine(local, remote) { 1L }, flag)
     private val sujo = SyncDoc(Kind.FUELUP, "a", 1, false, emptyMap())
 
     @Test
@@ -223,6 +237,7 @@ class AuthRepositoryTest {
         assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
         assertFalse(remote.cloudHasData)
         assertFalse(remote.pending)
+        assertFalse(flag.value)
     }
 
     @Test
@@ -233,7 +248,56 @@ class AuthRepositoryTest {
         assertTrue(r.message.contains("automaticamente"))
         assertFalse(remote.cloudHasData)
         assertTrue(remote.pending)
+        assertTrue(flag.value)
         assertEquals(0, gateway.signOuts)
+    }
+
+    @Test
+    fun `apagar conta - falha ao apagar o usuario e ao regravar a marca - a bandeira local conclui no proximo inicio`() = runTest {
+        gateway.deleteResults += err(AuthError.NETWORK)
+        gateway.onDelete = { remote.markError = IOException("sem rede") }
+        assertIs<AuthResult.Error>(repo.deleteAccount(null))
+        assertFalse(remote.pending)
+        assertFalse(remote.cloudHasData)
+        assertTrue(flag.value)
+        assertEquals(0, gateway.signOuts)
+
+        remote.markError = null
+        gateway.onDelete = null
+        assertTrue(repo.resumeDeletionIfNeeded())
+        assertFalse(flag.value)
+        assertFalse(remote.pending)
+        assertEquals(listOf("pendente", "dados", "usuario", "pendente", "dados", "usuario"), ev.list)
+    }
+
+    @Test
+    fun `apagar conta - sem resposta da rede volta com erro em 30 s, bandeira ligada e continua logado`() = runTest {
+        remote.hangDelete = true
+        val r = repo.deleteAccount(null)
+        assertEquals(AuthError.NETWORK, (r as AuthResult.Error).kind)
+        assertEquals(30_000L, currentTime)
+        assertTrue(flag.value)
+        assertEquals(0, gateway.deleteCalls)
+        assertIs<AuthState.SignedIn>(gateway.state.value)
+
+        remote.hangDelete = false
+        gateway.onDelete = { awaitCancellation() }
+        val t0 = currentTime
+        assertIs<AuthResult.Error>(repo.deleteAccount(null))
+        assertEquals(30_000L, currentTime - t0)
+        assertTrue(flag.value)
+        assertIs<AuthState.SignedIn>(gateway.state.value)
+    }
+
+    @Test
+    fun `entrar com a bandeira ligada conclui a exclusao antes de sincronizar`() = runTest {
+        flag.value = true
+        gateway.state.value = AuthState.Guest
+        val r = repo.signInEmail("a@b.c", "123456")
+        assertIs<AuthResult.Error>(r)
+        assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
+        assertEquals(0, remote.fetches)
+        assertFalse(flag.value)
     }
 
     @Test
@@ -242,6 +306,7 @@ class AuthRepositoryTest {
         val r = repo.deleteAccount(null)
         assertEquals(AuthError.NETWORK, (r as AuthResult.Error).kind)
         assertEquals(0, gateway.deleteCalls)
+        assertTrue(flag.value)
     }
 
     @Test
@@ -262,9 +327,11 @@ class AuthRepositoryTest {
     @Test
     fun `retomar exclusao pendente apaga dados e usuario e segue como visitante`() = runTest {
         remote.pending = true
+        flag.value = true
         assertTrue(repo.resumeDeletionIfNeeded())
         assertEquals(listOf("pendente", "dados", "usuario"), ev.list)
         assertFalse(remote.pending)
+        assertFalse(flag.value)
         assertEquals(0, gateway.signOuts)
     }
 
@@ -272,9 +339,11 @@ class AuthRepositoryTest {
     fun `retomar com falha de rede continua logado e mantem a marca`() = runTest {
         remote.pending = true
         gateway.deleteResults += err(AuthError.NETWORK)
-        repo.resumeDeletionIfNeeded()
+        flag.value = true
+        assertFalse(repo.resumeDeletionIfNeeded())
         assertEquals(0, gateway.signOuts)
-        assertTrue(remote.pending)
+        assertTrue(flag.value)
+        assertIs<AuthState.SignedIn>(gateway.state.value)
         assertFalse(remote.cloudHasData)
     }
 
@@ -282,9 +351,10 @@ class AuthRepositoryTest {
     fun `retomar com login recente exigido sai localmente e mantem a marca`() = runTest {
         remote.pending = true
         gateway.deleteResults += err(AuthError.NEEDS_RECENT_LOGIN)
+        flag.value = true
         assertTrue(repo.resumeDeletionIfNeeded())
         assertEquals(1, gateway.signOuts)
-        assertTrue(remote.pending)
+        assertTrue(flag.value)
     }
 
     @Test

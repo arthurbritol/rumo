@@ -45,6 +45,7 @@ private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont 
  * folha de contas: a tela define [activity] ao ficar visível e a limpa ao sair.
  */
 class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
+    @Volatile
     private var activityRef: WeakReference<Activity>? = null
 
     /** Referência fraca: a tela define ao ficar visível; não segura a Activity depois de destruída. */
