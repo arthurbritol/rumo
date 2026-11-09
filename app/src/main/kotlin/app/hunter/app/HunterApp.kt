@@ -13,7 +13,7 @@ class HunterApp : Application(), TripsGraph {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(this, AppDatabase::class.java, "hunter.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
     }
     val placeDao: PlaceDao by lazy { database.placeDao() }

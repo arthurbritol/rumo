@@ -20,15 +20,16 @@ import app.hunter.trips.data.TripEntity
     entities = [
         TripEntity::class, TrackPointEntity::class,
         FuelupEntity::class, MaintenanceItemEntity::class, OdometerEntity::class,
-        PlaceEntity::class,
+        PlaceEntity::class, TombstoneEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun tripDao(): TripDao
     abstract fun maintenanceDao(): MaintenanceDao
     abstract fun placeDao(): PlaceDao
+    abstract fun syncDao(): SyncDao
 
     companion object {
         /** v1 → v2: nome da viagem e destinos salvos. Preserva tudo que já foi gravado. */
@@ -41,6 +42,13 @@ abstract class AppDatabase : RoomDatabase() {
                         "lat REAL NOT NULL, lon REAL NOT NULL, favorite INTEGER NOT NULL, " +
                         "lastUsedMs INTEGER NOT NULL, useCount INTEGER NOT NULL)",
                 )
+            }
+        }
+
+        /** v2 → v3: id global, data de alteração, marca de "sujo" e lápides para a sincronização com a nuvem. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Migration2To3.statements.forEach { db.execSQL(it) }
             }
         }
     }

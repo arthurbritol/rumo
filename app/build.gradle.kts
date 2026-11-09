@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(project(":trips"))
     implementation(project(":maintenance"))
+    implementation(project(":sync-core"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -100,4 +101,13 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    testImplementation(kotlin("test"))
+    testImplementation(libs.kotlinx.serialization.json)
+    // Só para Migration2To3Test (JVM puro): SQLite real em memória para exercitar o SQL da migração.
+    testImplementation(libs.sqlite.jdbc)
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnit()
 }

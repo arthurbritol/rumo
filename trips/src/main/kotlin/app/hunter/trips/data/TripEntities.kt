@@ -8,8 +8,9 @@ import androidx.room.PrimaryKey
 import app.hunter.model.TrackPoint
 import app.hunter.model.TripStats
 import app.hunter.model.TripSummary
+import java.util.UUID
 
-@Entity(tableName = "trips")
+@Entity(tableName = "trips", indices = [Index("gid", unique = true)])
 data class TripEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val startedAtMs: Long,
@@ -24,7 +25,14 @@ data class TripEntity(
     val elevationGainM: Double = 0.0,
     val elevationLossM: Double = 0.0,
     val title: String? = null,
+    /** Id global (igual em todos os aparelhos); o [id] acima é só local. */
+    @ColumnInfo(defaultValue = "''") val gid: String = UUID.randomUUID().toString(),
+    @ColumnInfo(defaultValue = "0") val updatedAtMs: Long = System.currentTimeMillis(),
+    /** true = alteração ainda não enviada à nuvem. */
+    @ColumnInfo(defaultValue = "1") val dirty: Boolean = true,
 ) {
+    fun touch() = copy(updatedAtMs = System.currentTimeMillis(), dirty = true)
+
     fun stats() = TripStats(
         distanceM, elapsedMs, movingTimeMs, stoppedTimeMs, stopCount, maxSpeedMps, elevationGainM, elevationLossM,
     )
