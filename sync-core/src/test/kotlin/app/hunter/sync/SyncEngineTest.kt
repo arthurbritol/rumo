@@ -26,13 +26,23 @@ class FakeLocalStore : LocalStore {
     override suspend fun all() = docs.values.toList()
     override suspend fun dirty() = dirtyKeys.mapNotNull { docs[it] }
     override suspend fun apply(docs: List<SyncDoc>) = docs.forEach { put(it, false); dirtyKeys -= it.kind to it.gid }
-    override suspend fun markClean(docs: List<SyncDoc>) { docs.forEach { dirtyKeys -= it.kind to it.gid } }
+    /** Como o contrato: só limpa se a versão (updatedAtMs) da linha ainda é a do doc passado. */
+    override suspend fun markClean(docs: List<SyncDoc>) {
+        docs.forEach { if (this.docs[it.kind to it.gid]?.updatedAtMs == it.updatedAtMs) dirtyKeys -= it.kind to it.gid }
+    }
     override suspend fun odometer() = odo
     override suspend fun applyOdometer(o: OdometerDoc) { odo = o; odoDirty = false }
     override suspend fun profile() = prof
     override suspend fun applyProfile(p: UserProfile) { prof = p; profDirty = false }
-    override suspend fun hasDirtyOdometerOrProfile() = odoDirty || profDirty
-    override suspend fun clearAll() { docs.clear(); dirtyKeys.clear(); odo = null; prof = null; cleared = true }
+    var afterDirtyCheck: (() -> Unit)? = null
+    override suspend fun hasDirtyOdometerOrProfile(): Boolean {
+        val r = odoDirty || profDirty
+        afterDirtyCheck?.let { afterDirtyCheck = null; it() }
+        return r
+    }
+    override suspend fun clearAll() {
+        check(dirtyKeys.isEmpty() && !odoDirty && !profDirty) { "há linha suja" }
+        docs.clear(); dirtyKeys.clear(); odo = null; prof = null; cleared = true }
 }
 
 class FakeRemoteStore : RemoteStore {
@@ -50,12 +60,18 @@ class FakeRemoteStore : RemoteStore {
         return RemoteSnapshot(docs.values.toList(), odo, prof)
     }
 
+    var pushError: IOException? = null
+    var pushOdoError: IOException? = null
+    var onPush: (() -> Unit)? = null
+
     override suspend fun push(docs: List<SyncDoc>) {
+        pushError?.let { throw it }
+        onPush?.invoke()
         docs.forEach { this.docs[it.kind to it.gid] = it }
         pushed += docs
     }
 
-    override suspend fun pushOdometer(o: OdometerDoc) { odo = o }
+    override suspend fun pushOdometer(o: OdometerDoc) { pushOdoError?.let { throw it }; odo = o }
     override suspend fun pushProfile(p: UserProfile) { prof = p }
     override suspend fun markDeletionPending() { pending = true; events += "pending" }
     override suspend fun deletionPending() = pending
@@ -225,5 +241,75 @@ class SyncEngineTest {
         assertEquals(1, local.dirty().size)
         assertNull(local.profile())
         assertTrue(remote.pushed.isEmpty())
+    }
+
+    @Test
+    fun `syncNow não sobrescreve edição remota mais nova com edição local mais antiga`() = runTest {
+        local.put(fuel("d", at = 100, liters = 11.0), dirty = true)
+        remote.docs[Kind.FUELUP to "d"] = fuel("d", at = 200, liters = 12.0)
+        engine.syncNow()
+        assertTrue(remote.pushed.isEmpty())
+        assertEquals(fuel("d", at = 200, liters = 12.0), remote.docs[Kind.FUELUP to "d"])
+        assertEquals(listOf(fuel("d", at = 200, liters = 12.0)), local.all())
+        assertTrue(local.dirty().isEmpty())
+    }
+
+    @Test
+    fun `sync com exclusão pendente conclui a exclusão e não sobe nada`() = runTest {
+        local.put(fuel("a"), dirty = true)
+        remote.docs[Kind.FUELUP to "x"] = fuel("x")
+        remote.pending = true
+        engine.syncNow()
+        assertTrue(remote.docs.isEmpty() && remote.pushed.isEmpty())
+        assertFalse(remote.pending)
+        remote.pending = true
+        engine.firstSync()
+        assertTrue(remote.docs.isEmpty() && remote.pushed.isEmpty())
+        assertFalse(remote.pending)
+        assertEquals(1, local.dirty().size)
+    }
+
+    @Test
+    fun `signOutWipe propaga a falha se uma edição chegou depois de canSignOut`() = runTest {
+        local.put(fuel("a"), dirty = false)
+        local.afterDirtyCheck = { local.put(fuel("a", at = 500), dirty = true) }
+        assertFailsWith<IllegalStateException> { engine.signOutWipe() }
+        assertFalse(local.cleared)
+        assertEquals(listOf(fuel("a", at = 500)), local.all())
+    }
+
+    @Test
+    fun `edição concorrente durante o syncNow continua suja`() = runTest {
+        local.put(fuel("d", at = 100), dirty = true)
+        remote.onPush = { local.put(fuel("d", at = 200, liters = 99.0), dirty = true) }
+        engine.syncNow()
+        assertEquals(listOf(fuel("d", at = 200, liters = 99.0)), local.dirty())
+    }
+
+    @Test
+    fun `falha no push deixa o local intacto e a nova tentativa converge`() = runTest {
+        local.put(fuel("a"), dirty = true)
+        remote.docs[Kind.FUELUP to "r"] = fuel("r", date = 3)
+        remote.pushError = IOException("sem rede")
+        assertFailsWith<IOException> { engine.syncNow() }
+        assertEquals(listOf(fuel("a")), local.all())
+        assertEquals(1, local.dirty().size)
+        remote.pushError = null
+        engine.syncNow()
+        assertTrue(local.dirty().isEmpty())
+        assertEquals(setOf("a", "r"), local.all().map { it.gid }.toSet())
+        assertEquals(setOf("a", "r"), remote.docs.keys.map { it.second }.toSet())
+    }
+
+    @Test
+    fun `falha no pushOdometer deixa o local intacto e a nova tentativa converge`() = runTest {
+        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        remote.pushOdoError = IOException("sem rede")
+        assertFailsWith<IOException> { engine.syncNow() }
+        assertTrue(local.hasDirtyOdometerOrProfile())
+        remote.pushOdoError = null
+        engine.syncNow()
+        assertFalse(local.hasDirtyOdometerOrProfile())
+        assertEquals(OdometerDoc(1.0, 2.0, 100), remote.odo)
     }
 }

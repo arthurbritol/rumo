@@ -8,9 +8,15 @@ interface LocalStore {
     /** Registros com alterações ainda não enviadas. */
     suspend fun dirty(): List<SyncDoc>
 
-    /** Cria/atualiza/apaga por gid e marca como sincronizado. */
+    /**
+     * Cria/atualiza/apaga por gid e marca como sincronizado. Deve ser uma única transação.
+     */
     suspend fun apply(docs: List<SyncDoc>)
 
+    /**
+     * Limpa o indicador de sujo por versão: só para a linha cujo updatedAtMs ainda é igual ao do
+     * doc passado. Uma edição feita durante a sincronização (updatedAtMs diferente) continua suja.
+     */
     suspend fun markClean(docs: List<SyncDoc>)
     suspend fun odometer(): OdometerDoc?
 
@@ -22,7 +28,11 @@ interface LocalStore {
     suspend fun applyProfile(p: UserProfile)
     suspend fun hasDirtyOdometerOrProfile(): Boolean
 
-    /** Apaga tudo do aparelho (sair da conta). */
+    /**
+     * Apaga tudo do aparelho (sair da conta). A implementação deve ser uma única transação que
+     * lança [IllegalStateException], sem apagar nada, se existir qualquer linha suja (registro,
+     * hodômetro ou perfil) naquele instante; o motor trata essa exceção como "não pode sair".
+     */
     suspend fun clearAll()
 }
 

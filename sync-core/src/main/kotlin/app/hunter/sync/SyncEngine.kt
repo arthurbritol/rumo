@@ -18,20 +18,22 @@ class SyncEngine(
         reconcile()
     }
 
-    /** Sincronização periódica: sobe o que está sujo e depois baixa/mescla o remoto. */
+    /**
+     * Sincronização periódica: baixa, mescla (último a escrever vence) e sobe só os vencedores
+     * locais. Não envia o sujo antes de comparar, para não sobrescrever uma edição remota mais nova.
+     */
     suspend fun syncNow() {
-        val dirty = local.dirty()
-        if (dirty.isNotEmpty()) {
-            remote.push(dirty)
-            local.markClean(dirty)
-        }
         reconcile()
     }
 
     /** Verdadeiro quando não há registro, hodômetro ou perfil pendente de envio. */
     suspend fun canSignOut(): Boolean = local.dirty().isEmpty() && !local.hasDirtyOdometerOrProfile()
 
-    /** Limpa o aparelho sem tocar na conta. Exige [canSignOut]; senão lança [IllegalStateException]. */
+    /**
+     * Limpa o aparelho sem tocar na conta. Exige [canSignOut]; senão lança [IllegalStateException].
+     * Se uma edição chegar entre a checagem e a limpeza, [LocalStore.clearAll] lança
+     * [IllegalStateException], que propaga como "não pode sair" sem apagar nada.
+     */
     suspend fun signOutWipe() {
         check(canSignOut()) { "Há alterações não sincronizadas; sincronize antes de sair." }
         local.clearAll()
@@ -54,12 +56,16 @@ class SyncEngine(
      * Baixa o remoto, mescla e aplica. Todo o envio ao remoto acontece antes de qualquer escrita
      * local, então uma falha de rede deixa o local intacto.
      *
+     * Se houver exclusão de conta pendente (aqui ou em outro aparelho), conclui a exclusão e
+     * aborta sem enviar nada, para não ressuscitar os dados.
+     *
      * Perfil (sem timestamp): só local sobe; só remoto é aplicado; nos dois, o remoto vence, a menos
      * que [LocalStore.hasDirtyOdometerOrProfile] indique alteração local pendente, caso em que o
      * local sobe (aproximação conservadora: perde-se menos dado, ao custo de um hodômetro sujo
      * também proteger o perfil local).
      */
     private suspend fun reconcile() {
+        if (resumePendingDeletion()) return
         val now = clock()
         val snap = remote.fetchAll()
         val dirtyBefore = local.dirty()
