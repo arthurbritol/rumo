@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hunter.app.data.PlaceEntity
+import app.hunter.app.sync.ProfilePrefs
 import app.hunter.maintenance.Odometer
 import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceItemEntity
@@ -248,7 +249,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         if (e == null) {
             places.insert(PlaceEntity(name = p.name, subtitle = p.subtitle, lat = p.lat, lon = p.lon, favorite = true, lastUsedMs = System.currentTimeMillis(), useCount = 0))
         } else {
-            places.update(e.copy(favorite = !e.favorite))
+            if (e.favorite) places.unfavorite(e) else places.update(e.copy(favorite = true))
         }
     }
 
@@ -256,7 +257,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         val e = places.find(p.lat, p.lon)
         val now = System.currentTimeMillis()
         if (e == null) places.insert(PlaceEntity(name = p.name, subtitle = p.subtitle, lat = p.lat, lon = p.lon, favorite = false, lastUsedMs = now, useCount = 1))
-        else places.update(e.copy(lastUsedMs = now, useCount = e.useCount + 1))
+        else places.updateLocalOnly(e.copy(lastUsedMs = now, useCount = e.useCount + 1))
     }
 
     private fun same(a: Place, b: Place) = kotlin.math.abs(a.lat - b.lat) < 0.0001 && kotlin.math.abs(a.lon - b.lon) < 0.0001
@@ -412,6 +413,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         val on = !NavStatus.voice.value
         NavStatus.setVoice(on)
         prefs.edit().putBoolean("voice", on).apply()
+        ProfilePrefs.markDirty(prefs)
     }
 
     /** Toque longo no mapa: usa o endereço mais próximo como destino. */
@@ -485,9 +487,9 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun markDone(item: MaintenanceItem) = viewModelScope.launch {
-        dao.updateItem(
-            MaintenanceItemEntity(item.id, item.name, item.intervalKm, item.intervalDays, odometerKm.value, System.currentTimeMillis()),
-        )
+        // Parte da linha existente: refazer a entidade do zero trocaria o gid (id global) do item.
+        val cur = dao.getItem(item.id) ?: return@launch
+        dao.updateItem(cur.copy(lastDoneKm = odometerKm.value, lastDoneAtMs = System.currentTimeMillis()))
     }
 
     fun deleteItem(id: Long) = viewModelScope.launch { dao.deleteItem(id) }
