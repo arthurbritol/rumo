@@ -39,7 +39,9 @@ class BikeForm(val short: Boolean) {
     fun validate(currentYear: Int = Year.now().value): List<FormError> = buildList {
         if (!short) {
             if (brand.isBlank()) add(FormError(FormField.BRAND, "Escolha a marca."))
+            else if (brand.trim().length > MAX_TEXT) add(FormError(FormField.BRAND, "A marca deve ter no máximo $MAX_TEXT caracteres."))
             if (model.isBlank()) add(FormError(FormField.MODEL, "Informe o modelo."))
+            else if (model.trim().length > MAX_TEXT) add(FormError(FormField.MODEL, "O modelo deve ter no máximo $MAX_TEXT caracteres."))
             if (year.isNotBlank()) {
                 val y = year.trim().toIntOrNull()
                 if (y == null || y < MIN_YEAR || y > currentYear) {
@@ -76,6 +78,9 @@ class BikeForm(val short: Boolean) {
 
     companion object {
         const val MIN_YEAR = 1950
+
+        /** Limite de marca, modelo e nome (o mesmo das regras do Firestore). */
+        const val MAX_TEXT = 60
         const val DEFAULT_TANK_L = 13.0
         private const val MAX_TANK_L = 60.0
         private const val MAX_KM = 2_000_000.0

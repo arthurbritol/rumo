@@ -53,6 +53,45 @@ class FirestoreMappingTest {
     }
 
     @Test
+    fun perfilNuncaPassaDosLimitesDasRegras() {
+        val longo = "á".repeat(70)
+        val m = profileToMap(UserProfile("  $longo  ", "b".repeat(61), " ${"m".repeat(80)} ", 1800), 1L)
+        assertEquals(60, (m["displayName"] as String).length)
+        assertEquals(m["displayName"], m["displayNameLower"])
+        assertEquals(60, (m["brand"] as String).length)
+        assertEquals("m".repeat(60), m["model"])
+        assertFalse(m.containsKey("year")) // fora de 1950..2100: omitido em vez de recusado
+        // nome vazio vira "Motociclista"; marca/modelo em branco viram nulos
+        val vazio = profileToMap(UserProfile("   ", " ", "", 2020), 1L)
+        assertEquals("Motociclista", vazio["displayName"])
+        assertNull(vazio["brand"])
+        assertNull(vazio["model"])
+        assertEquals(2020, vazio["year"])
+    }
+
+    @Test
+    fun perfilNaoCortaEmojiAoMeio() {
+        val nome = "a".repeat(59) + "🏍" // 59 letras + moto (2 unidades UTF-16)
+        val m = profileToMap(UserProfile(nome, null, null, null), 1L)
+        val n = m["displayName"] as String
+        assertEquals("a".repeat(59), n)
+        assertFalse(Character.isHighSurrogate(n.last()))
+    }
+
+    @Test
+    fun maiusculaNaoAsciiOmiteDisplayNameLower() {
+        // O lower() das regras não converte "Á" (conferido no emulador) e "İ" vira 2 caracteres no Java:
+        // nesses casos o campo (opcional) é omitido para o perfil não ser recusado.
+        for (nome in listOf("İzmir", "Ágata", "ÉRICA")) {
+            val m = profileToMap(UserProfile(nome, null, null, null), 1L)
+            assertFalse(m.containsKey("displayNameLower"), nome)
+            assertEquals(nome, m["displayName"])
+        }
+        // minúsculas acentuadas e maiúsculas ASCII continuam com o campo
+        assertEquals("joão ávila", profileToMap(UserProfile("JOãO áVILA", null, null, null), 1L)["displayNameLower"])
+    }
+
+    @Test
     fun perfilVoltaDoMapaComAnoLongEVozPadrao() {
         val p = mapToProfile(mapOf("displayName" to "A", "year" to 2020L, "updatedAtMs" to 1L))!!
         assertEquals(2020, p.year)

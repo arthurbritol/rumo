@@ -115,9 +115,11 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
 
     override suspend fun odometer(): OdometerDoc? = maintenance.getOdometer()?.toDoc()
 
-    override suspend fun applyOdometer(o: OdometerDoc) = db.withTransaction {
+    override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) = db.withTransaction {
         val cur = maintenance.getOdometer()
-        if (cur == null || shouldApply(cur.updatedAtMs, o.updatedAtMs)) maintenance.putOdometerRaw(odometerFromDoc(o))
+        if (cur == null || shouldApply(cur.updatedAtMs, o.updatedAtMs)) {
+            maintenance.putOdometerRaw(odometerFromDoc(o).copy(dirty = dirty))
+        }
     }
 
     override suspend fun profile(): UserProfile? = ProfilePrefs.read(prefs)

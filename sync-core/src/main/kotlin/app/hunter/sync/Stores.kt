@@ -20,8 +20,11 @@ interface LocalStore {
     suspend fun markClean(docs: List<SyncDoc>)
     suspend fun odometer(): OdometerDoc?
 
-    /** Grava o hodômetro e o marca como sincronizado. */
-    suspend fun applyOdometer(o: OdometerDoc)
+    /**
+     * Grava o hodômetro (se a linha local não for mais nova que [o]). [dirty] falso: marca como sincronizado;
+     * verdadeiro: fica pendente de envio (usado quando o motor ajustou o hodômetro mas não conseguiu enviá-lo).
+     */
+    suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean = false)
     suspend fun profile(): UserProfile?
 
     /** Grava o perfil e o marca como sincronizado. */

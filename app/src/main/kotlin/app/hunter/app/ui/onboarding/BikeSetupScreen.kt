@@ -92,7 +92,7 @@ fun BikeSetupScreen(
             if (form.brand.isNotEmpty()) {
                 if (models.isEmpty() || customModel) {
                     OutlinedTextField(
-                        form.model, { form.selectBike(form.brand, it); changed() },
+                        form.model, { form.selectBike(form.brand, it.take(BikeForm.MAX_TEXT)); changed() },
                         label = { Text("Modelo") }, singleLine = true, isError = errorOf(FormField.MODEL) != null,
                         supportingText = errorOf(FormField.MODEL)?.let { { Text(it) } },
                         modifier = Modifier.fillMaxWidth(),

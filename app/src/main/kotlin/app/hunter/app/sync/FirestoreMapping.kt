@@ -4,6 +4,7 @@ import app.hunter.sync.Kind
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.SyncDoc
 import app.hunter.sync.UserProfile
+import java.util.Locale
 
 /** Documentos por lote de escrita (o limite do Firestore é 500 operações). */
 const val BATCH_SIZE = 400
@@ -54,16 +55,35 @@ fun mapToOdometer(data: Map<String, Any?>): OdometerDoc? {
     return OdometerDoc(offset.toDouble(), tank.toDouble(), at.toLong())
 }
 
+/** Limite de texto das regras (displayName, brand, model). */
+const val MAX_PROFILE_TEXT = 60
+private const val DEFAULT_NAME = "Motociclista"
+
+/** Apara e limita a [max] unidades UTF-16 sem partir um par substituto (emoji) ao meio. */
+fun clampText(s: String, max: Int = MAX_PROFILE_TEXT): String {
+    val t = s.trim()
+    if (t.length <= max) return t
+    val cut = if (Character.isHighSurrogate(t[max - 1])) max - 1 else max
+    return t.substring(0, cut).trim()
+}
+
 /**
- * Mapa do perfil conforme as regras: displayNameLower derivado, ano omitido quando nulo.
+ * Mapa do perfil que NUNCA viola as regras (um perfil recusado falharia a cada sincronização): nome aparado e
+ * limitado a 1..60 ("Motociclista" se vazio), marca/modelo limitados a 60 (em branco viram nulos), ano omitido
+ * se nulo ou fora de 1950..2100. `displayNameLower` é `lowercase(Locale.ROOT)` e só vai quando a minúscula muda
+ * apenas letras ASCII: o `lower()` das regras (conferido no emulador) não converte maiúsculas acentuadas ("Á"),
+ * então para "Ágata" ou "İzmir" o campo (opcional nas regras) é omitido em vez de o perfil ser recusado.
  * `voice` vai como booleano (as regras aceitam bool ou nulo).
  */
 fun profileToMap(p: UserProfile, nowMs: Long): Map<String, Any?> = buildMap {
-    put("displayName", p.displayName)
-    put("displayNameLower", p.displayName.lowercase())
-    put("brand", p.brand)
-    put("model", p.model)
-    if (p.year != null) put("year", p.year)
+    val name = clampText(p.displayName).ifEmpty { DEFAULT_NAME }
+    put("displayName", name)
+    val lower = name.lowercase(Locale.ROOT)
+    val asciiLower = String(CharArray(name.length) { i -> name[i].let { c -> if (c in 'A'..'Z') c + 32 else c } })
+    if (lower == asciiLower) put("displayNameLower", lower)
+    put("brand", p.brand?.let(::clampText)?.ifEmpty { null })
+    put("model", p.model?.let(::clampText)?.ifEmpty { null })
+    if (p.year != null && p.year in 1950..2100) put("year", p.year)
     put("voice", p.voice)
     put(UPDATED_AT, nowMs)
 }

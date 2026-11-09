@@ -34,6 +34,18 @@ class BikeFormTest {
         assertEquals("Minha custom 500", f.toProfile("Ana").model)
     }
 
+    @Test fun `marca e modelo acima de 60 caracteres são recusados`() {
+        val f = BikeForm(short = false)
+        f.selectBike("Outra", "m".repeat(61))
+        f.odometerKm = "10"
+        assertEquals(setOf(FormField.MODEL), fields(f))
+        assertTrue(f.validate(2026).single().message.contains("60"))
+        f.selectBike("b".repeat(61), "m".repeat(60))
+        assertEquals(setOf(FormField.BRAND), fields(f))
+        f.selectBike("b".repeat(60), "  " + "m".repeat(60) + "  ") // espaços nas pontas não contam
+        assertTrue(f.validate(2026).isEmpty())
+    }
+
     @Test fun `km negativo ou vazio é recusado`() {
         val f = BikeForm(short = true)
         f.odometerKm = "-5"

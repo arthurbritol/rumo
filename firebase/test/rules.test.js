@@ -123,6 +123,22 @@ test('displayName vazio ou maior que 60 caracteres é recusado', async () => {
   );
 });
 
+// O app (profileToMap) corta em 60 caracteres e só envia displayNameLower quando a minúscula muda apenas
+// letras ASCII: no emulador, lower() das regras NÃO converte maiúsculas acentuadas ("ÁGUA" -> "água" é recusado).
+test('limite de 60 conta caracteres (acentos), como o app corta', async () => {
+  const ref = db(DONO).doc(`usuarios/${DONO}`);
+  await assertSucceeds(ref.set({ displayName: 'Á'.repeat(60), model: 'ç'.repeat(60), updatedAtMs: 1 }));
+  await assertFails(ref.set({ displayName: 'Á'.repeat(61), updatedAtMs: 1 }));
+  await assertFails(ref.set({ ...perfilValido(), model: 'ç'.repeat(61) }));
+});
+
+test('perfil sem displayNameLower e minúscula com acento não maiúsculo são aceitos', async () => {
+  const ref = db(DONO).doc(`usuarios/${DONO}`);
+  await assertSucceeds(ref.set({ displayName: 'ÁGUA', updatedAtMs: 1 }));
+  await assertSucceeds(ref.set({ displayName: 'İzmir', updatedAtMs: 1 }));
+  await assertSucceeds(ref.set({ displayName: 'João Ávila'.replace('Á', 'á'), displayNameLower: 'joão ávila', updatedAtMs: 1 }));
+});
+
 test('displayNameLower deve ser o displayName em minúsculas', async () => {
   await assertFails(
     db(DONO).doc(`usuarios/${DONO}`).set({ ...perfilValido(), displayNameLower: 'outro' }),

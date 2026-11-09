@@ -31,7 +31,7 @@ class FakeLocalStore : LocalStore {
         docs.forEach { if (this.docs[it.kind to it.gid]?.updatedAtMs == it.updatedAtMs) dirtyKeys -= it.kind to it.gid }
     }
     override suspend fun odometer() = odo
-    override suspend fun applyOdometer(o: OdometerDoc) { odo = o; odoDirty = false }
+    override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) { odo = o; odoDirty = dirty }
     override suspend fun profile() = prof
     override suspend fun applyProfile(p: UserProfile) { prof = p; profDirty = false }
     var afterDirtyCheck: (() -> Unit)? = null
@@ -72,7 +72,8 @@ class FakeRemoteStore : RemoteStore {
     }
 
     override suspend fun pushOdometer(o: OdometerDoc) { pushOdoError?.let { throw it }; odo = o }
-    override suspend fun pushProfile(p: UserProfile) { prof = p }
+    var pushProfileError: IOException? = null
+    override suspend fun pushProfile(p: UserProfile) { pushProfileError?.let { throw it }; prof = p }
     override suspend fun markDeletionPending() { pending = true; events += "pending" }
     override suspend fun deletionPending() = pending
     override suspend fun deleteAllUserData() {
@@ -327,6 +328,36 @@ class SyncEngineTest {
         engine.syncNow()
         assertFalse(local.hasDirtyOdometerOrProfile())
         assertEquals(OdometerDoc(1.0, 2.0, 100), remote.odo)
+    }
+
+    @Test
+    fun `perfil recusado pelo remoto não impede aplicar e limpar os registros, e o erro chega ao fim`() = runTest {
+        local.put(fuel("a", date = 1), dirty = true)
+        remote.docs[Kind.FUELUP to "r"] = fuel("r", date = 2)
+        local.prof = perfil; local.profDirty = true
+        remote.pushProfileError = IOException("recusado pelas regras")
+        assertFailsWith<IOException> { engine.syncNow() }
+        assertEquals(setOf("a", "r"), local.all().map { it.gid }.toSet()) // o remoto foi aplicado
+        assertTrue(local.dirty().isEmpty()) // o que subiu foi marcado limpo
+        assertEquals(setOf("a", "r"), remote.docs.keys.map { it.second }.toSet())
+        assertTrue(local.profDirty) // o perfil continua pendente
+        remote.pushProfileError = null
+        engine.syncNow()
+        assertEquals(perfil, remote.prof)
+        assertFalse(local.hasDirtyOdometerOrProfile())
+    }
+
+    @Test
+    fun `hodômetro recusado pelo remoto não impede o perfil nem os registros`() = runTest {
+        local.put(fuel("a"), dirty = true)
+        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        local.prof = perfil; local.profDirty = true
+        remote.pushOdoError = IOException("sem rede")
+        assertFailsWith<IOException> { engine.syncNow() }
+        assertTrue(local.dirty().isEmpty())
+        assertEquals(perfil, remote.prof)
+        assertFalse(local.profDirty)
+        assertTrue(local.odoDirty)
     }
 
     @Test

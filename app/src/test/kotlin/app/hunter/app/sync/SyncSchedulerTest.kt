@@ -33,7 +33,7 @@ class SyncSchedulerTest {
         override suspend fun apply(docs: List<SyncDoc>) {}
         override suspend fun markClean(docs: List<SyncDoc>) { dirtyDocs = dirtyDocs - docs.toSet() }
         override suspend fun odometer(): OdometerDoc? = null
-        override suspend fun applyOdometer(o: OdometerDoc) {}
+        override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) {}
         override suspend fun profile(): UserProfile? = null
         override suspend fun applyProfile(p: UserProfile) {}
         override suspend fun hasDirtyOdometerOrProfile() = false
