@@ -71,6 +71,11 @@ O Gradle 8.14 não roda no JDK 25: se o `java` do PATH for o 25, defina `JAVA_HO
 Mais de 130 testes cobrem o protocolo do Pod (vetores reais), o motor de navegação (com respostas reais das
 APIs), as estatísticas de viagem, combustível, manutenção e lembretes. O CI roda tudo a cada push.
 
+## Versões e releases
+
+Cada push na `main` que altera o app publica uma release nova: `0.3.1`, `0.3.2`, `0.3.3`… O número do meio vem de
+[`version.txt`](version.txt). Para uma mudança grande, edite esse arquivo (`0.4`) e a contagem recomeça em `0.4.1`.
+
 ## Arquitetura
 
 Módulos JVM puros (`core-model`, `pod-protocol`, `navigation`) concentram a lógica e são testáveis sem aparelho;

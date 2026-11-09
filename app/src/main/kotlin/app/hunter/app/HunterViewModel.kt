@@ -154,7 +154,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val found = try { app.hunter.nav.UpdateChecker().check(updater.installedCode()) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return@launch }
             prefs.edit().putLong("update_checked_at", now).apply()
-            if (found != null && (force || found.build != prefs.getInt("update_skip_build", -1))) _update.value = UpdateUi(found)
+            if (found != null && (force || found.versionCode != prefs.getInt("update_skip_build", -1))) _update.value = UpdateUi(found)
         }
     }
 
@@ -162,7 +162,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissUpdate() {
         val u = _update.value ?: return
         if (u.downloading) return
-        prefs.edit().putInt("update_skip_build", u.update.build).apply()
+        prefs.edit().putInt("update_skip_build", u.update.versionCode).apply()
         _update.value = null
     }
 

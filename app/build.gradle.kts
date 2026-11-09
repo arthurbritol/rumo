@@ -15,9 +15,10 @@ android {
         applicationId = "app.hunter.companion"
         minSdk = 26
         targetSdk = 36
-        // No CI o código vem do número da execução (100 + run), para cada release ser uma atualização válida.
+        // No CI, versão e código vêm do release.yml (série de version.txt + contador: 0.3.1 → 301); local é série.0.
         versionCode = (project.findProperty("rumo.versionCode") as String?)?.toIntOrNull() ?: 99
-        versionName = "0.3.0"
+        versionName = (project.findProperty("rumo.versionName") as String?)
+            ?: (rootProject.file("version.txt").readText().trim() + ".0")
         // O MapLibre traz bibliotecas nativas por arquitetura; celulares atuais são arm64.
         ndk { abiFilters += listOf("arm64-v8a") }
     }

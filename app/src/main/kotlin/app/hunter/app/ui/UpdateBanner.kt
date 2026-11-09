@@ -19,7 +19,7 @@ fun UpdateBanner(ui: UpdateUi, onInstall: () -> Unit, onDismiss: () -> Unit, mod
     FloatingCard(modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         Text("Nova versão disponível", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
-            "Rumo ${ui.update.versionName} (build ${ui.update.build})" + sizeLabel(ui.update.sizeBytes),
+            "Rumo ${ui.update.versionName}" + sizeLabel(ui.update.sizeBytes),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

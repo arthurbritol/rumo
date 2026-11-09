@@ -17,6 +17,7 @@ on:
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
+      - "version.txt"
   workflow_dispatch:
 
 permissions:
@@ -44,12 +45,18 @@ jobs:
 
       - name: Versão
         id: ver
+        # version.txt guarda a série (ex.: 0.3). Cada release nova sobe o último número (0.3.1, 0.3.2…); para uma
+        # mudança grande, edite version.txt (0.4) e a contagem recomeça em 0.4.1.
         run: |
-          NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          CODE=$((100 + GITHUB_RUN_NUMBER))
+          SERIES=$(tr -d '[:space:]' < version.txt)
+          LAST=$(git tag -l "v${SERIES}.*" | grep -E "^v${SERIES//./\.}\.[0-9]+$" | sed -E 's/.*\.//' | sort -n | tail -1)
+          PATCH=$(( ${LAST:-0} + 1 ))
+          NAME="${SERIES}.${PATCH}"
+          MAJOR=${SERIES%%.*}; MINOR=${SERIES#*.}
+          CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "tag=v${NAME}-b${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Testes
         run: ./gradlew test --console=plain
@@ -71,7 +78,7 @@ jobs:
           fi
 
       - name: APK de release
-        run: ./gradlew :app:assembleRelease -Prumo.versionCode=${{ steps.ver.outputs.code }} --console=plain
+        run: ./gradlew :app:assembleRelease -Prumo.versionCode=${{ steps.ver.outputs.code }} -Prumo.versionName=${{ steps.ver.outputs.name }} --console=plain
 
       - name: Notas da release
         run: |
@@ -87,7 +94,7 @@ jobs:
             done
             echo
             echo "---"
-            echo "Versão ${{ steps.ver.outputs.name }} · build ${GITHUB_RUN_NUMBER} · commit \`${GITHUB_SHA::7}\`"
+            echo "Versão ${{ steps.ver.outputs.name }} · commit \`${GITHUB_SHA::7}\`"
             echo
             if [ "${{ steps.sign.outputs.fixed }}" != "true" ]; then
               echo "> Aviso: esta build usa uma chave de assinatura temporária. Se o celular recusar a atualização, desinstale o Rumo antes (os dados do app serão apagados)."
@@ -104,6 +111,6 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "Rumo-${{ steps.ver.outputs.tag }}.apk"
           gh release create "${{ steps.ver.outputs.tag }}" "Rumo-${{ steps.ver.outputs.tag }}.apk" \
             --target "$GITHUB_SHA" \
-            --title "Rumo ${{ steps.ver.outputs.name }} (build ${GITHUB_RUN_NUMBER})" \
+            --title "Rumo ${{ steps.ver.outputs.name }}" \
             --notes-file notes.md \
             --latest
