@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Só o dono (uid da conta == uid do caminho) acessa os próprios dados.
+    function dono(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Texto opcional com limite de tamanho (null é aceito: campo "apagado").
+    function textoOpcional(d, campo, max) {
+      return !(campo in d) || d[campo] == null
+        || (d[campo] is string && d[campo].size() <= max);
+    }
+
+    function perfilValido(d) {
+      return d.keys().hasOnly([
+          'displayName', 'displayNameLower', 'brand', 'model', 'year', 'voice', 'updatedAtMs'
+        ])
+        && d.keys().hasAll(['displayName', 'updatedAtMs'])
+        && d.displayName is string
+        && d.displayName.size() >= 1 && d.displayName.size() <= 60
+        && (!('displayNameLower' in d)
+            || (d.displayNameLower is string && d.displayNameLower == d.displayName.lower()))
+        && textoOpcional(d, 'brand', 60)
+        && textoOpcional(d, 'model', 60)
+        && textoOpcional(d, 'voice', 60)
+        && (!('year' in d) || d.year == null
+            || (d.year is int && d.year >= 1950 && d.year <= 2100))
+        && d.updatedAtMs is number;
+    }
+
+    // Documento sincronizável: updatedAtMs e deleted obrigatórios; demais
+    // campos livres, porém limitados a 20 chaves no total.
+    function docSyncValido(d) {
+      return d.keys().hasAll(['updatedAtMs', 'deleted'])
+        && d.updatedAtMs is number
+        && d.deleted is bool
+        && d.keys().size() <= 20;
+    }
+
+    match /usuarios/{uid} {
+      allow read, delete: if dono(uid);
+      allow create, update: if dono(uid) && perfilValido(request.resource.data);
+
+      match /abastecimentos/{gid} {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid) && docSyncValido(request.resource.data);
+      }
+      match /manutencao/{gid} {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid) && docSyncValido(request.resource.data);
+      }
+      match /locais/{gid} {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid) && docSyncValido(request.resource.data);
+      }
+      match /viagens/{gid} {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid) && docSyncValido(request.resource.data);
+      }
+
+      match /config/hodometro {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid)
+          && request.resource.data.keys().hasOnly(['offsetKm', 'tankLiters', 'updatedAtMs'])
+          && request.resource.data.keys().hasAll(['offsetKm', 'tankLiters', 'updatedAtMs'])
+          && request.resource.data.offsetKm is number
+          && request.resource.data.tankLiters is number
+          && request.resource.data.updatedAtMs is number;
+      }
+
+      // Marcador de exclusão de conta pendente (fora do perfil, para que
+      // apagar o perfil nunca remova o marcador antes dos dados).
+      match /config/exclusao {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid)
+          && request.resource.data.keys().hasOnly(['pending'])
+          && request.resource.data.pending is bool;
+      }
+    }
+
+    // Qualquer outro caminho (inclusive outros documentos em config/): negado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

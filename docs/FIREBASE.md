@@ -16,7 +16,9 @@ O app compila e roda sem Firebase: sem `app/google-services.json` o plugin do Go
 4. Em Authentication > Método de login, ative **Google** e **E-mail/senha**.
 5. Em Firestore Database, crie o banco em **modo de produção**.
 6. Baixe o `google-services.json` e coloque em `app/google-services.json` (o arquivo não deve ser inventado nem copiado de outro projeto).
-7. Publique as regras do Firestore (criadas na Task 5) com a Firebase CLI: copie `firebase/.firebaserc.example` para `firebase/.firebaserc`, ajuste o ID do projeto e rode `firebase deploy --only firestore:rules` dentro de `firebase/`.
+7. Publique as regras do Firestore (`firebase/firestore.rules`) com a Firebase CLI: copie `firebase/.firebaserc.example` para `firebase/.firebaserc`, ajuste o ID do projeto e rode `firebase deploy --only firestore:rules` dentro de `firebase/`. O marcador de exclusão de conta pendente fica no documento `usuarios/{uid}/config/exclusao` (campo booleano `pending`), e não no perfil.
+
+Para rodar os testes das regras localmente: dentro de `firebase/`, `npm ci` e `npx firebase-tools emulators:exec --only firestore --project demo-rumo "npm test"` (precisa de JDK 21+).
 
 Aviso: a conta de e-mail com o mesmo endereço do Google é vinculada (entrar com Google e com e-mail/senha usando o mesmo endereço resulta na mesma conta).
 

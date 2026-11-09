@@ -12,3 +12,6 @@ ref/
 
 # Mockups do brainstorming
 .superpowers/
+
+firebase/node_modules/
+firebase/*-debug.log
