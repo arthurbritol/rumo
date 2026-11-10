@@ -33,7 +33,7 @@ class SocialPublisherTest {
         trips: List<TripSlice> = emptyList(),
         cost: Double? = null,
         searchable: Boolean = true,
-    ) = SocialPublisher(store, "me", { profile }, { trips }, { cost }, { searchable }, zone, { now })
+    ) = SocialPublisher(store, "me", { profile }, { trips }, { cost }, { searchable }, { zone }, { now })
 
     private fun fuelup(id: Long, odo: Double, liters: Double, cost: Double, full: Boolean = true) =
         Fuelup(id, now, odo, liters, cost, full)
@@ -143,5 +143,87 @@ class SocialPublisherTest {
     fun `falha do store propaga para quem chamou`() = runTest {
         store.failure = IOException("sem rede")
         assertFailsWith<IOException> { publisher().publishAll() }
+    }
+
+    @Test
+    fun `segunda publicação sem mudança não escreve nada`() = runTest {
+        store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me"), now + 1000)
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 150.0, null))
+        val p = publisher(cost = 0.2, searchable = false)
+        p.publishAll()
+        val rolesCalls = store.rolesCalls
+        p.publishAll()
+        assertEquals(1, store.profileWrites)
+        assertEquals(1, store.activityWrites)
+        assertEquals(1, store.figureCalls.size)
+        assertEquals(rolesCalls, store.rolesCalls) // custo igual: nem consulta os rolês
+        assertEquals(listOf("me"), store.removedFromSearch) // apagou a busca uma vez só
+    }
+
+    @Test
+    fun `force regrava tudo e mudança de perfil ou de custo é publicada`() = runTest {
+        var current = profile
+        var cost: Double? = null
+        store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me"), now + 1000)
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 150.0, null))
+        val p = SocialPublisher(store, "me", { current }, { emptyList() }, { cost }, { true }, { zone }, { now })
+        p.publishAll()
+        p.publishAll(force = true)
+        assertEquals(2, store.profileWrites)
+        assertEquals(2, store.activityWrites)
+        current = profile.copy(model = "CB 300")
+        cost = 0.3
+        p.publishAll()
+        assertEquals(3, store.profileWrites)
+        assertEquals("CB 300", store.profiles.getValue("me").model)
+        assertEquals(0.3, store.figureCalls.last().costPerKm)
+    }
+
+    @Test
+    fun `busca só liga na transição e desliga apagando uma vez`() = runTest {
+        var on = true
+        val p = SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, { on }, { zone }, { now })
+        p.publishAll()
+        assertTrue("me" in store.searchIndex)
+        on = false
+        p.publishAll()
+        p.publishAll()
+        assertEquals(listOf("me"), store.removedFromSearch)
+        assertFalse("me" in store.searchIndex)
+    }
+
+    @Test
+    fun `quem nunca respondeu a pergunta não entra na busca`() = runTest {
+        val prefs = object : SearchPrefs {
+            override fun asked() = false
+            override fun searchable() = true
+            override fun set(searchable: Boolean) {}
+        }
+        val p = SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, prefs::appearsInSearch, { zone }, { now })
+        p.publishAll()
+        assertTrue(store.searchIndex.isEmpty())
+        assertFalse(store.profiles.getValue("me").searchable)
+        assertTrue("me" in store.activities) // perfil público e atividade seguem para os amigos
+    }
+
+    @Test
+    fun `falha no perfil não impede atividade e custo, e a falha é relançada`() = runTest {
+        store.profileFailure = IOException("perfil recusado")
+        store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me"), now + 1000)
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 150.0, null))
+        assertFailsWith<IOException> { publisher(cost = 0.2).publishAll() }
+        assertTrue("me" in store.activities)
+        assertEquals(listOf(FigureCall("r1", "me", 150.0, 0.2)), store.figureCalls)
+    }
+
+    @Test
+    fun `falha num rolê não impede os outros e é relançada`() = runTest {
+        for (id in listOf("a", "b")) {
+            store.rolesById[id] = Role(id, id, "me", listOf("me"), now + 1000)
+            store.membersByRole[id] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 1.0, null))
+        }
+        store.memberFailureRoles += "a"
+        assertFailsWith<IOException> { publisher(cost = 0.2).publishAll() }
+        assertEquals(listOf("b"), store.figureCalls.map { it.roleId })
     }
 }

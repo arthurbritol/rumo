@@ -50,7 +50,7 @@ class SocialViewModelTest {
         val publishCalls = mutableListOf<Boolean>()
         override fun session(uid: String): SocialSession {
             sessionCalls++
-            val publisher = SocialPublisher(store, uid, { null }, { emptyList() }, { null }, { true }, zone) { now }
+            val publisher = SocialPublisher(store, uid, { null }, { emptyList() }, { null }, { true }, { zone }) { now }
             return SocialSession(uid, store, SocialEngine(store, uid, clock = { now }, idGen = { "role-x" }), publisher)
         }
         override fun publishSoon(force: Boolean) { publishCalls += force }
@@ -59,7 +59,7 @@ class SocialViewModelTest {
     private val backend = FakeBackend()
 
     private fun TestScope.vm(b: SocialBackend = backend) =
-        SocialViewModel(b, backgroundScope, clock = { now }, zone = zone)
+        SocialViewModel(b, backgroundScope, clock = { now }, zone = { zone })
 
     private fun friend(uid: String, name: String, km: Double? = null) =
         Friend(PublicProfile(uid, name, "Honda", "CG 160", null, true), km?.let { Activity(thisWeek, it) })
@@ -262,5 +262,86 @@ class SocialViewModelTest {
         vm.cancelInvite("ana")
         runCurrent()
         assertTrue(vm.state.value.invitesSent.isEmpty())
+    }
+
+    @Test
+    fun `estado ACCEPTED do rolê é lido uma vez só e snapshots repetidos não releem`() = runTest {
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        store.membersByRole["r2"] = mutableListOf(Member("me", "Eu", MemberState.INVITED, null, null))
+        val r1 = Role("r1", "A", "me", listOf("me"), now + 1000)
+        val r2 = Role("r2", "B", "ana", listOf("ana", "me"), now + 1000)
+        store.rolesFlow.value = listOf(r1, r2)
+        val vm = vm()
+        runCurrent()
+        assertEquals(listOf("r1", "r2"), store.memberCalls)
+        store.rolesFlow.value = listOf(r1, r2.copy(participants = listOf("ana", "me", "bia")))
+        runCurrent()
+        assertEquals(listOf("r1", "r2", "r2"), store.memberCalls) // r1 aceito: não relê; r2 pendente: relê
+        assertTrue(vm.state.value.roles.first { it.id == "r2" }.pending)
+    }
+
+    @Test
+    fun `falha ao ler o estado de um rolê não derruba a lista`() = runTest {
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        store.memberFailureRoles += "r2"
+        store.rolesFlow.value = listOf(
+            Role("r1", "A", "me", listOf("me"), now + 1000),
+            Role("r2", "B", "ana", listOf("ana", "me"), now + 1000),
+        )
+        val vm = vm()
+        runCurrent()
+        assertEquals(listOf("r1", "r2"), vm.state.value.roles.map { it.id })
+        assertFalse(vm.state.value.offline)
+    }
+
+    @Test
+    fun `quem não tem nome público não é consultado de novo a cada snapshot`() = runTest {
+        store.invitesFlow.value = listOf(Invite("zed", "me", 1))
+        val vm = vm()
+        runCurrent()
+        assertEquals("Alguém", vm.state.value.invitesReceived.single().name)
+        store.invitesFlow.value = listOf(Invite("zed", "me", 1), Invite("bia", "me", 2))
+        runCurrent()
+        vm.refresh()
+        runCurrent()
+        assertEquals(1, store.searchEntryCalls.count { it == "zed" })
+    }
+
+    @Test
+    fun `orçamento de convite pendente é recusado localmente sem virar offline`() = runTest {
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.INVITED, null, null))
+        val vm = vm()
+        runCurrent()
+        vm.setBudget("r1", 100.0)
+        runCurrent()
+        assertTrue(store.figureCalls.isEmpty())
+        assertEquals(BUDGET_NOT_ACCEPTED_MESSAGE, vm.state.value.message)
+        assertFalse(vm.state.value.offline)
+    }
+
+    @Test
+    fun `orçamento de rolê vencido é recusado`() = runTest {
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        store.rolesFlow.value = listOf(Role("r1", "A", "me", listOf("me"), now - 1))
+        val vm = vm()
+        runCurrent()
+        vm.setBudget("r1", 100.0)
+        runCurrent()
+        assertTrue(store.figureCalls.isEmpty())
+        assertEquals(refusalMessage(Refusal.ROLE_EXPIRED), vm.state.value.message)
+    }
+
+    @Test
+    fun `onForeground recalcula a semana e publica sem forçar`() = runTest {
+        var cur = now
+        store.friendsFlow.value = listOf(friend("ana", "Ana", 12.34))
+        val vm = SocialViewModel(backend, backgroundScope, clock = { cur }, zone = { zone })
+        runCurrent()
+        assertEquals("12,3 km", vm.state.value.friends.single().weekKmLabel)
+        cur += 7L * 24 * 3600 * 1000
+        vm.onForeground()
+        assertEquals("0 km", vm.state.value.friends.single().weekKmLabel)
+        assertEquals(false, backend.publishCalls.last())
+        assertEquals(2, backend.publishCalls.size)
     }
 }

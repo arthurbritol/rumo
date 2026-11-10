@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.hunter.social.Friend
+import app.hunter.social.Invite
 import app.hunter.social.Member
 import app.hunter.social.MemberState
+import app.hunter.social.Refusal
 import app.hunter.social.Role
 import app.hunter.social.SearchHit
 import app.hunter.social.SearchKey
@@ -58,6 +60,7 @@ data class SocialUi(
 
 const val OFFLINE_MESSAGE = "Sem conexão. Mostrando o que já foi carregado."
 const val ACTION_FAILED_MESSAGE = "Não deu para concluir agora. Confira a internet e tente de novo."
+const val BUDGET_NOT_ACCEPTED_MESSAGE = "Aceite o convite do rolê antes de informar o orçamento."
 const val INVALID_BUDGET_MESSAGE = "Informe um valor válido para o orçamento."
 
 /**
@@ -71,7 +74,8 @@ class SocialViewModel(
     private val backend: SocialBackend,
     scope: CoroutineScope? = null,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val zone: ZoneId = ZoneId.systemDefault(),
+    /** Lido a cada cálculo (o fuso pode mudar com o app aberto). */
+    private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     private val retryDelaysMs: List<Long> = listOf(2_000L, 5_000L, 15_000L),
     private val searchDebounceMs: Long = 300L,
 ) : ViewModel() {
@@ -92,8 +96,15 @@ class SocialViewModel(
 
     private val names = mutableMapOf<String, String>()
     private var friendNames: Map<String, String> = emptyMap()
+    private var rawFriends: List<Friend> = emptyList()
     private var rawRoles: List<Role> = emptyList()
     private var roleStates: Map<String, MemberState?> = emptyMap()
+
+    /** Quem não tem nome público (não pesquisável): não pergunta de novo a cada snapshot. */
+    private val noName = mutableSetOf<String>()
+
+    /** Remetentes dos convites já tratados (evita reler bloqueios a cada snapshot igual). */
+    private var lastInviteUids: Set<String>? = null
 
     init {
         this.scope.launch { backend.uid.collectLatest { onUid(it) } }
@@ -105,7 +116,10 @@ class SocialViewModel(
         failing.clear()
         actionFailed = false
         names.clear()
+        noName.clear()
+        lastInviteUids = null
         friendNames = emptyMap()
+        rawFriends = emptyList()
         rawRoles = emptyList()
         roleStates = emptyMap()
         searchJob?.cancel()
@@ -122,7 +136,7 @@ class SocialViewModel(
         backend.publishSoon() // abrir a aba publica perfil e atividade (respeitando o intervalo mínimo)
         coroutineScope {
             launch { observe("amigos", { s.store.observeFriends(s.uid) }) { onFriends(it) } }
-            launch { observe("convites", { s.store.observeInvitesReceived(s.uid) }) { onInvites(s) } }
+            launch { observe("convites", { s.store.observeInvitesReceived(s.uid) }) { onInvites(s, it) } }
             launch { observe("roles", { s.store.observeRoles(s.uid) }) { onRoles(s, it) } }
             launch { loadSent(s) }
             awaitCancellation()
@@ -174,20 +188,54 @@ class SocialViewModel(
     }
 
     private fun onFriends(friends: List<Friend>) {
+        rawFriends = friends
         friendNames = friends.associate { it.profile.uid to it.profile.displayName }
-        _state.update { it.copy(friends = friendRows(friends, clock(), zone)) }
+        rebuildFriends()
         rebuildRoles()
     }
 
-    private suspend fun onInvites(s: SocialSession) {
+    private fun rebuildFriends() = _state.update { it.copy(friends = friendRows(rawFriends, clock(), zone())) }
+
+    /** Volta do app para a frente: recalcula a semana na tela (ela pode ter virado) e publica respeitando o intervalo. */
+    fun onForeground() {
+        if (session == null) return
+        rebuildFriends()
+        rebuildRoles()
+        backend.publishSoon()
+    }
+
+    private suspend fun onInvites(s: SocialSession, emitted: List<Invite>) {
+        val emittedUids = emitted.map { it.fromUid }.toSet()
+        if (emittedUids == lastInviteUids) return // mesmo conjunto de remetentes: nada novo para ler
         val visible = s.engine.visibleInvites() // também recusa os de bloqueados
         val uids = visible.map { it.fromUid }
         resolveNames(s, uids)
         _state.update { it.copy(invitesReceived = inviteRows(uids, nameMap())) }
+        lastInviteUids = emittedUids
     }
 
+    /**
+     * Meu estado em cada rolê. Quem já aceitou não volta a ser convidado, então só leio o estado de quem ainda não
+     * está no mapa como aceito. Falha ao ler um rolê (sem rede, permissão) não derruba os outros: fica o último
+     * estado conhecido.
+     */
     private suspend fun onRoles(s: SocialSession, roles: List<Role>) {
-        roleStates = roles.associate { it.id to s.store.member(it.id, s.uid)?.state }
+        val states = HashMap<String, MemberState?>()
+        for (r in roles) {
+            val known = roleStates[r.id]
+            states[r.id] = if (known == MemberState.ACCEPTED) {
+                known
+            } else {
+                try {
+                    s.store.member(r.id, s.uid)?.state
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    known
+                }
+            }
+        }
+        roleStates = states
         rawRoles = roles
         rebuildRoles()
     }
@@ -202,9 +250,10 @@ class SocialViewModel(
     /** Nomes que ainda não conheço, pela entrada de busca (quem não aparece na busca fica sem nome). */
     private suspend fun resolveNames(s: SocialSession, uids: List<String>) {
         for (uid in uids) {
-            if (uid in friendNames || uid in names) continue
+            if (uid in friendNames || uid in names || uid in noName) continue
             try {
-                s.store.searchEntry(uid)?.let { names[uid] = it.displayName }
+                val hit = s.store.searchEntry(uid)
+                if (hit != null) names[uid] = hit.displayName else noName += uid
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -311,8 +360,14 @@ class SocialViewModel(
             return
         }
         act { s ->
+            val role = rawRoles.firstOrNull { it.id == roleId }
+            if (role != null && role.expiresAtMs <= clock()) return@act SocialResult.Refused(Refusal.ROLE_EXPIRED)
             val me = s.store.member(roleId, s.uid)
-            if (me != null) s.store.setMemberFigures(roleId, s.uid, budget, me.costPerKm)
+            if (me == null || me.state != MemberState.ACCEPTED) {
+                _state.update { it.copy(message = BUDGET_NOT_ACCEPTED_MESSAGE) }
+            } else {
+                s.store.setMemberFigures(roleId, s.uid, budget, me.costPerKm)
+            }
             null
         }
     }
@@ -336,7 +391,7 @@ class SocialViewModel(
             try {
                 val result = block(s)
                 actionFailed = false
-                _state.update { it.copy(message = (result as? SocialResult.Refused)?.let { r -> refusalMessage(r.reason) }) }
+                if (result is SocialResult.Refused) _state.update { it.copy(message = refusalMessage(result.reason)) }
                 syncOffline()
                 loadSent(s)
             } catch (e: CancellationException) {

@@ -10,6 +10,7 @@ import app.hunter.social.Role
 import app.hunter.social.SearchHit
 import app.hunter.social.SearchKey
 import app.hunter.social.SocialStore
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -42,6 +43,15 @@ class FakeSocialStore : SocialStore {
     val sentList = mutableListOf<Invite>()
     val blockedUids = mutableSetOf<String>()
     val searchData = mutableListOf<SearchHit>()
+    var profileWrites = 0
+    var activityWrites = 0
+    var rolesCalls = 0
+    val memberCalls = mutableListOf<String>()
+    val searchEntryCalls = mutableListOf<String>()
+    /** Falha só em [publishProfile] (para testar que as outras etapas seguem). */
+    var profileFailure: Exception? = null
+    /** Roles cuja leitura do próprio membro falha. */
+    val memberFailureRoles = mutableSetOf<String>()
     var observeFriendsStarts = 0
     var searchCalls = 0
     /** Falhas restantes de [observeFriends] antes de funcionar (para testar a nova tentativa). */
@@ -49,17 +59,19 @@ class FakeSocialStore : SocialStore {
 
     override suspend fun publishProfile(p: PublicProfile) {
         check()
+        profileFailure?.let { throw it }
+        profileWrites++
         profiles[p.uid] = p
         if (p.searchable) searchIndex += p.uid else searchIndex -= p.uid
     }
     override suspend fun removeFromSearch(uid: String) { check(); searchIndex -= uid; removedFromSearch += uid }
-    override suspend fun publishActivity(uid: String, a: Activity) { check(); activities[uid] = a }
+    override suspend fun publishActivity(uid: String, a: Activity) { check(); activityWrites++; activities[uid] = a }
     override suspend fun search(prefixLower: String, limit: Int): List<SearchHit> {
         check()
         searchCalls++
         return searchData.filter { SearchKey.normalize(it.displayName).startsWith(prefixLower) }.take(limit)
     }
-    override suspend fun searchEntry(uid: String): SearchHit? { check(); return searchData.firstOrNull { it.uid == uid } }
+    override suspend fun searchEntry(uid: String): SearchHit? { check(); searchEntryCalls += uid; return searchData.firstOrNull { it.uid == uid } }
     override suspend fun sendInvite(from: String, to: String) { check(); sentInvites += from to to; sentList += Invite(from, to, 0L) }
     override suspend fun cancelInvite(from: String, to: String) { check(); sentList.removeAll { it.fromUid == from && it.toUid == to } }
     override suspend fun acceptInvite(from: String, to: String) {
@@ -117,8 +129,12 @@ class FakeSocialStore : SocialStore {
         check()
         figureCalls += FigureCall(roleId, uid, budget, costPerKm)
     }
-    override suspend fun roles(uid: String): List<Role> { check(); return rolesById.values.filter { uid in it.participants } }
+    override suspend fun roles(uid: String): List<Role> { check(); rolesCalls++; return rolesById.values.filter { uid in it.participants } }
     override suspend fun members(roleId: String): List<Member> { check(); return membersByRole[roleId].orEmpty().toList() }
-    override suspend fun member(roleId: String, uid: String): Member? { check(); return membersByRole[roleId]?.firstOrNull { it.uid == uid } }
+    override suspend fun member(roleId: String, uid: String): Member? {
+        check()
+        memberCalls += roleId
+        if (roleId in memberFailureRoles) throw IOException("sem rede")
+        return membersByRole[roleId]?.firstOrNull { it.uid == uid } }
     override suspend fun deleteAllSocial(uid: String) { check() }
 }

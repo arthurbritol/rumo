@@ -151,7 +151,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
         readProfile = { ProfilePrefs.read(prefs) },
         readTrips = { finishedSlices(database.syncDao().finishedTrips()) },
         readCostPerKm = { FuelMath.summarize(database.syncDao().fuelups().map { it.toModel() }).avgCostPerKm },
-        searchPrefs = SearchPref(prefs),
+        searchPrefs = SearchPref(prefs, ::signedUid),
         scope = scope,
     )
 

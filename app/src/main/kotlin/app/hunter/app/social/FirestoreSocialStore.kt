@@ -110,7 +110,7 @@ class FirestoreSocialStore(
 
     /** `get` de `busca/{uid}` (qualquer conta lê; documento ausente = pessoa fora da busca). */
     override suspend fun searchEntry(uid: String): SearchHit? {
-        val d = ref("busca/$uid").get(Source.SERVER).await()
+        val d = ref("busca/$uid").get().await() // padrão: servidor, com o cache como reserva sem rede
         return if (d.exists()) mapToSearchHit(uid, d.map()) else null
     }
 
@@ -340,7 +340,7 @@ class FirestoreSocialStore(
 
     /** `get` do próprio documento de membro (as regras o permitem ao dono, convidado ou aceito). */
     override suspend fun member(roleId: String, uid: String): Member? {
-        val d = ref("roles/$roleId/membros/$uid").get(Source.SERVER).await()
+        val d = ref("roles/$roleId/membros/$uid").get().await() // padrão: servidor, com o cache como reserva sem rede
         return if (d.exists()) mapToMember(uid, d.map()) else null
     }
 

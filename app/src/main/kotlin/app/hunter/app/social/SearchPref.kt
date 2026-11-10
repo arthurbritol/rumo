@@ -14,21 +14,28 @@ interface SearchPrefs {
     fun set(searchable: Boolean)
 }
 
-/** [SearchPrefs] nas preferências do app ("app"). */
-class SearchPref(private val prefs: SharedPreferences) : SearchPrefs {
-    override fun asked(): Boolean = prefs.getBoolean(ASKED, false)
+/**
+ * [SearchPrefs] nas preferências do app ("app"), uma resposta por conta (chaves com o uid): outra conta no mesmo
+ * aparelho vê a pergunta de novo. Sem conta ([currentUid] nulo) conta como já perguntado e não pesquisável.
+ */
+class SearchPref(private val prefs: SharedPreferences, private val currentUid: () -> String?) : SearchPrefs {
+    override fun asked(): Boolean = currentUid()?.let { prefs.getBoolean(ASKED + it, false) } ?: true
 
-    override fun searchable(): Boolean = prefs.getBoolean(SEARCHABLE, true)
+    override fun searchable(): Boolean = currentUid()?.let { prefs.getBoolean(SEARCHABLE + it, true) } ?: false
 
     override fun set(searchable: Boolean) {
-        prefs.edit().putBoolean(SEARCHABLE, searchable).putBoolean(ASKED, true).commit()
+        val uid = currentUid() ?: return
+        prefs.edit().putBoolean(SEARCHABLE + uid, searchable).putBoolean(ASKED + uid, true).apply()
     }
 
     companion object {
-        const val ASKED = "social_search_asked"
-        const val SEARCHABLE = "social_searchable"
+        const val ASKED = "social_search_asked_"
+        const val SEARCHABLE = "social_searchable_"
     }
 }
+
+/** Só aparece na busca quem respondeu a pergunta e disse sim: quem nunca respondeu não vira pesquisável. */
+fun SearchPrefs.appearsInSearch(): Boolean = asked() && searchable()
 
 /** Quando perguntar "Quer aparecer na busca por nome?": uma vez só e só para quem está logado. */
 object SearchPrompt {
