@@ -329,9 +329,7 @@ private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
         feat.addStringProperty("name", f.name)
         feat.addStringProperty("timeAgo", f.timeAgoText)
         feat.addStringProperty("label", label)
-        if (f.bearing != null) {
-            feat.addNumberProperty("b", f.bearing.toDouble())
-        }
+        feat.addNumberProperty("b", (f.bearing ?: 0f).toDouble())
         feat
     }
     return FeatureCollection.fromFeatures(features)
@@ -339,6 +337,7 @@ private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
 
 private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addImage("me", meBitmap(density))
+    st.addImage("friend-bike", friendBikeBitmap(density))
     listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
@@ -370,17 +369,12 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
         ),
     )
     st.addLayer(
-        CircleLayer("friends-halo", SRC_FRIENDS).withProperties(
-            circleRadius(16f),
-            circleColor(if (dark) "#3300B4D8" else "#260284C7"),
-        ),
-    )
-    st.addLayer(
-        CircleLayer("friends-circle", SRC_FRIENDS).withProperties(
-            circleRadius(9f),
-            circleColor(if (dark) "#00E5FF" else "#0284C7"),
-            circleStrokeColor("#FFFFFF"),
-            circleStrokeWidth(2.5f),
+        SymbolLayer("friends-symbol", SRC_FRIENDS).withProperties(
+            iconImage("friend-bike"),
+            iconRotate(Expression.get("b")),
+            iconRotationAlignment("map"),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
         ),
     )
     st.addLayer(
@@ -391,7 +385,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
             textHaloWidth(2f),
             textAnchor("top"),
-            textOffset(arrayOf(0f, 1.1f)),
+            textOffset(arrayOf(0f, 1.6f)),
             textAllowOverlap(true),
             textIgnorePlacement(false),
         ),
@@ -402,6 +396,29 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             iconAllowOverlap(true), iconIgnorePlacement(true),
         ),
     )
+}
+
+/** Marcador de amigo na estrada: halo ciano/azul, anel branco e seta apontando para o norte (gira com o rumo). */
+private fun friendBikeBitmap(density: Float): Bitmap {
+    val size = (64 * density).toInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val cx = size / 2f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    paint.color = 0x4000B4D8.toInt()
+    c.drawCircle(cx, cx, size * 0.48f, paint)
+    paint.color = 0xFFFFFFFF.toInt()
+    c.drawCircle(cx, cx, size * 0.30f, paint)
+    paint.color = 0xFF00B4D8.toInt()
+    val arrow = Path().apply {
+        moveTo(cx, size * 0.22f)
+        lineTo(cx + size * 0.17f, size * 0.66f)
+        lineTo(cx, size * 0.54f)
+        lineTo(cx - size * 0.17f, size * 0.66f)
+        close()
+    }
+    c.drawPath(arrow, paint)
+    return bmp
 }
 
 /** Marcador do motociclista: halo laranja, anel branco e seta apontando para o norte (gira com o rumo). */
