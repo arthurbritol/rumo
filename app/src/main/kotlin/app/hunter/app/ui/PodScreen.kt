@@ -2,16 +2,20 @@ package app.hunter.app.ui
 
 import android.Manifest
 import android.os.Build
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -36,8 +42,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.HunterViewModel
+import app.hunter.app.R
 import app.hunter.nav.PodBottomMode
 import app.hunter.pod.CompassDirection
 import app.hunter.podble.PodPhase
@@ -69,125 +77,320 @@ fun PodScreen(vm: HunterViewModel) {
     val active = pod.phase != PodPhase.IDLE
 
     Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Tripper Pod", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp))
+        // Cabeçalho da tela
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 4.dp),
+        ) {
+            Text(
+                text = "Tripper Pod",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "Painel secundário turn-by-turn via Bluetooth",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
-        // ----- Estado -----
+        // 1. Cockpit do Pod (Card Principal de Conexão e Status)
         HCard {
-            val (label, color) = when (pod.phase) {
-                PodPhase.CONNECTED -> "Conectado" to Ok
-                PodPhase.AWAITING_PIN -> "Aguardando PIN" to Warn
-                PodPhase.SCANNING -> "Procurando…" to Warn
-                PodPhase.CONNECTING -> "Conectando…" to Warn
-                PodPhase.IDLE -> "Desconectado" to MaterialTheme.colorScheme.outline
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(14.dp).background(color, CircleShape))
-                Text(label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 10.dp).weight(1f))
-                pod.pairedName?.let { Pill("Pareado", MaterialTheme.colorScheme.secondary) }
-            }
-            pod.message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-
-        if (pod.phase == PodPhase.AWAITING_PIN) {
-            HCard {
-                Text("Digite o PIN que aparece na tela do Pod", style = MaterialTheme.typography.titleMedium)
-                OutlinedTextField(
-                    value = pin, onValueChange = { pin = it.filter(Char::isLetterOrDigit).take(6) },
-                    singleLine = true, label = { Text("PIN") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+            val (statusText, statusColor, isConnected) = when (pod.phase) {
+                PodPhase.CONNECTED -> Triple("Conectado", NovareSuccess, true)
+                PodPhase.AWAITING_PIN -> Triple("Aguardando PIN", NovareWarning, false)
+                PodPhase.SCANNING -> Triple("Procurando…", NovareWarning, false)
+                PodPhase.CONNECTING -> Triple("Conectando…", NovareWarning, false)
+                PodPhase.IDLE -> Triple(
+                    if (pod.pairedName != null) "Pareado (offline)" else "Desconectado",
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    false,
                 )
-                PrimaryButton("Confirmar", { PodService.submitPin(context, pin); pin = "" }, enabled = pin.isNotEmpty())
             }
-        }
 
-        // ----- O que o Pod está mostrando -----
-        if (pod.phase == PodPhase.CONNECTED) {
-            HCard {
-                Text("No mostrador agora", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                val prog = nav.progress
-                if (nav.active && prog != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(Modifier.size(84.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
-                            ManeuverGlyph(prog.upcoming.type, 58.dp, MaterialTheme.colorScheme.onPrimary)
-                        }
-                        Column {
-                            Text(fmtDist(prog.distanceToUpcomingM), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black)
-                            Text(
-                                when (pod.bottomMode) {
-                                    PodBottomMode.ARRIVAL_TIME -> "Chegada ${fmtArrival(prog.remainingS)}"
-                                    PodBottomMode.TIME_REMAINING -> "Faltam ${fmtEta(prog.remainingS)}"
-                                    PodBottomMode.TOTAL_DISTANCE -> "Faltam ${fmtDist(prog.remainingM)}"
-                                },
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                } else {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CompassArrow(pod.direction) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SquircleIcon(
+                    iconRes = R.drawable.fa_bluetooth,
+                    backgroundColor = if (isConnected) NovareInfo.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
+                    tintColor = if (isConnected) NovareInfo else MaterialTheme.colorScheme.onSurfaceVariant,
+                    contentDescription = "Bluetooth Pod",
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
                     Text(
-                        pod.direction?.let { "Bússola: ${it.name}" } ?: "Bússola — comece a andar (a direção vem do GPS e só atualiza acima de ~5 km/h).",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = "Royal Enfield Tripper",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = pod.pairedName?.let { "Dispositivo: $it" } ?: "Display auxiliar no guidão",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                StatusPill(text = statusText, active = isConnected)
+            }
+
+            pod.message?.let { msg ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                ) {
+                    Text(
+                        text = msg,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
 
-        // ----- Preferências do Pod -----
+        // 2. Entrada do PIN caso esteja pareando
+        if (pod.phase == PodPhase.AWAITING_PIN) {
+            HCard {
+                Text(
+                    text = "Pareamento Bluetooth",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "Digite o código PIN de 6 dígitos exibido no mostrador da moto.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { pin = it.filter(Char::isLetterOrDigit).take(6) },
+                    singleLine = true,
+                    label = { Text("PIN do Pod") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                RumoPrimaryButton(
+                    text = "Confirmar PIN",
+                    onClick = {
+                        PodService.submitPin(context, pin)
+                        pin = ""
+                    },
+                    enabled = pin.isNotEmpty(),
+                )
+            }
+        }
+
+        // 3. Cockpit visual: O que o Pod está mostrando agora
+        if (pod.phase == PodPhase.CONNECTED) {
+            HCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "NO MOSTRADOR AGORA",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.2.sp,
+                    )
+                    RumoBadge("Ao vivo", color = NovareSuccess)
+                }
+
+                val prog = nav.progress
+                if (nav.active && prog != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(84.dp)
+                                .background(NovareAccent, RoundedCornerShape(22.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            ManeuverGlyph(prog.upcoming.type, 56.dp, Color.White)
+                        }
+                        Column {
+                            Text(
+                                text = fmtDist(prog.distanceToUpcomingM),
+                                style = MaterialTheme.typography.displaySmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = when (pod.bottomMode) {
+                                    PodBottomMode.ARRIVAL_TIME -> "Chegada às ${fmtArrival(prog.remainingS)}"
+                                    PodBottomMode.TIME_REMAINING -> "Faltam ${fmtEta(prog.remainingS)}"
+                                    PodBottomMode.TOTAL_DISTANCE -> "Faltam ${fmtDist(prog.remainingM)}"
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CompassArrow(pod.direction)
+                    }
+                    Text(
+                        text = pod.direction?.let { "Bússola: Rumo ${it.name}" }
+                            ?: "Bússola — comece a andar (a direção vem do GPS e atualiza acima de ~5 km/h).",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        // 4. Preferências de Exibição do Pod
         SectionTitle("Linha inferior na navegação")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SelectChip("Chegada", pod.bottomMode == PodBottomMode.ARRIVAL_TIME, { PodService.setBottomMode(context, PodBottomMode.ARRIVAL_TIME) })
-            SelectChip("Tempo", pod.bottomMode == PodBottomMode.TIME_REMAINING, { PodService.setBottomMode(context, PodBottomMode.TIME_REMAINING) })
-            SelectChip("Distância", pod.bottomMode == PodBottomMode.TOTAL_DISTANCE, { PodService.setBottomMode(context, PodBottomMode.TOTAL_DISTANCE) })
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SelectChip(
+                text = "Hora de Chegada",
+                selected = pod.bottomMode == PodBottomMode.ARRIVAL_TIME,
+                onClick = { PodService.setBottomMode(context, PodBottomMode.ARRIVAL_TIME) },
+                modifier = Modifier.weight(1f),
+            )
+            SelectChip(
+                text = "Tempo Restante",
+                selected = pod.bottomMode == PodBottomMode.TIME_REMAINING,
+                onClick = { PodService.setBottomMode(context, PodBottomMode.TIME_REMAINING) },
+                modifier = Modifier.weight(1f),
+            )
+            SelectChip(
+                text = "Distância",
+                selected = pod.bottomMode == PodBottomMode.TOTAL_DISTANCE,
+                onClick = { PodService.setBottomMode(context, PodBottomMode.TOTAL_DISTANCE) },
+                modifier = Modifier.weight(1f),
+            )
         }
 
+        // 5. Botões de Ação Táteis
+        SectionTitle("Conexão")
         if (active) {
-            SecondaryButton("Desconectar", { PodService.disconnect(context) })
+            RumoSecondaryButton(
+                text = "Desconectar do Pod",
+                onClick = { PodService.disconnect(context) },
+            )
+            if (pod.phase == PodPhase.CONNECTED) {
+                RumoSecondaryButton(
+                    text = "Sincronizar relógio do Pod",
+                    onClick = { PodService.connect(context) },
+                    leadingIconRes = R.drawable.fa_gauge_high,
+                )
+            }
         } else {
-            PrimaryButton("Conectar ao Pod", connect)
-        }
-        if (pod.pairedName != null) {
-            TextButton(onClick = { PodService.forgetPairing(context) }) { Text("Esquecer pareamento", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            RumoPrimaryButton(
+                text = "Conectar ao Pod",
+                onClick = connect,
+                leadingIconRes = R.drawable.fa_bluetooth,
+            )
         }
 
+        if (pod.pairedName != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                TextButton(onClick = { PodService.forgetPairing(context) }) {
+                    Text(
+                        text = "Esquecer pareamento Bluetooth",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        // 6. Instruções e Ajuda
+        SectionTitle("Instruções")
         HCard {
-            Text("Como usar", style = MaterialTheme.typography.titleMedium)
             Text(
-                "1. Ligue a ignição: o Pod só anuncia por ~30 s.\n" +
-                    "2. Toque em Conectar. No primeiro uso, digite o PIN exibido no Pod.\n" +
-                    "3. Na aba Mapa, escolha um destino e inicie a navegação: o Pod mostra a manobra, a distância e a chegada. Sem rota, ele mostra a bússola.\n" +
-                    "O app reconecta sozinho se o link cair.",
+                text = "Como usar o Tripper Pod",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "1. Ligue a ignição da moto: o Pod anuncia Bluetooth por ~30 segundos.\n" +
+                    "2. Toque em Conectar ao Pod. No primeiro pareamento, digite o código PIN exibido no mostrador.\n" +
+                    "3. Na aba Mapa, selecione um destino e inicie a rota: o Pod passará a exibir cada manobra, distância e previsão de chegada. Sem rota ativa, ele mostra a bússola digital.\n\n" +
+                    "O aplicativo reconecta automaticamente se a conexão oscilar.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                "Atenção: o protocolo foi validado só no Pod da Meteor 350. Na Hunter 350 ainda não foi testado: " +
-                    "faça um teste com a moto parada antes de depender disso na estrada.",
-                style = MaterialTheme.typography.bodySmall, color = Warn,
-            )
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = NovareWarning.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, NovareWarning.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Atenção: o protocolo foi testado e validado no Pod da Meteor 350. Na Hunter 350, faça um teste parado antes de iniciar o rolê na estrada.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
         }
 
         HCard {
-            Text("Sobre", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Mapa: © OpenStreetMap contributors, OpenFreeMap, MapLibre. Rotas: Valhalla (servidor público do OSM). " +
-                    "Busca: Photon (Komoot). Protocolo do Pod: baseado no WazeTripper (Apache-2.0).",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "Protocolos e Créditos",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "Mapas e Rotas: OpenStreetMap, OpenFreeMap, MapLibre e Valhalla (servidor público OSM). " +
+                    "Busca: Photon (Komoot). Protocolo Bluetooth do Pod: baseado na especificação aberta WazeTripper (Apache-2.0).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Box(Modifier.height(24.dp))
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
 private fun CompassArrow(direction: CompassDirection?) {
-    val ring = MaterialTheme.colorScheme.outline
+    val ring = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
     val arrow = MaterialTheme.colorScheme.primary
     Canvas(Modifier.size(150.dp)) {
         val c = Offset(size.width / 2, size.height / 2)
-        drawCircle(ring, radius = size.minDimension / 2 - 4.dp.toPx(), style = Stroke(width = 3.dp.toPx()))
+        drawCircle(
+            color = ring,
+            radius = size.minDimension / 2 - 4.dp.toPx(),
+            style = Stroke(width = 3.dp.toPx()),
+        )
         if (direction == null) return@Canvas
         rotate(direction.ordinal * 45f, c) {
             val r = size.minDimension / 2 - 18.dp.toPx()

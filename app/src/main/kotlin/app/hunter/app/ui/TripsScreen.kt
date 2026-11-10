@@ -1,16 +1,20 @@
 package app.hunter.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -23,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,12 +39,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.HunterViewModel
+import app.hunter.app.R
 import app.hunter.model.TrackPoint
 import app.hunter.model.TripSummary
 import app.hunter.nav.LatLon
@@ -64,36 +74,191 @@ fun TripsScreen(vm: HunterViewModel) {
         return
     }
 
-    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Viagens", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 4.dp),
+        ) {
+            Text(
+                text = "Viagens",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "Histórico e telemetria de trajetos gravados",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         if (trips.isEmpty()) {
             HCard {
-                Text("Nenhuma viagem ainda", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SquircleIcon(
+                        iconRes = R.drawable.fa_route,
+                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
+                        tintColor = NovareAccent,
+                        contentDescription = "Trajeto",
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Nenhuma viagem ainda",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Grave seus trajetos pelo mapa",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Text(
-                    "Na aba Mapa, trace uma rota ou toque em \"Gravar viagem\". Tudo fica salvo aqui, com o traçado e as estatísticas.",
+                    text = "Na aba Mapa, trace uma rota ou toque em \"Gravar viagem\". Tudo fica salvo aqui, com o traçado completo no mapa e as estatísticas detalhadas de velocidade e altitude.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
         } else {
+            // Hero card com hodômetro total das viagens gravadas
             HCard {
-                Text("Total rodado", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(fmtKm(trips.sumOf { it.stats.distanceKm }, 0), style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "TOTAL RODADO",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.2.sp,
+                    )
+                    StatusPill(
+                        text = "${trips.size} ${if (trips.size == 1) "viagem" else "viagens"}",
+                        active = true,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Text(
+                        text = String.format(Locale.getDefault(), "%.0f", trips.sumOf { it.stats.distanceKm }),
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = " km",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
                 MetricRow(
-                    "Viagens" to "${trips.size}",
                     "Tempo em movimento" to fmtDuration(trips.sumOf { it.stats.movingTimeMs }),
-                    "Vel. máxima" to fmtKmh(trips.maxOf { it.stats.maxSpeedKmh }),
+                    "Velocidade máxima" to fmtKmh(trips.maxOf { it.stats.maxSpeedKmh }),
+                    "Distância média" to fmtKm(trips.map { it.stats.distanceKm }.average(), 1),
                 )
             }
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)) {
+
+            SectionTitle("Histórico de viagens")
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 24.dp),
+            ) {
                 items(trips, key = { it.id }) { t ->
                     HCard(onClick = { selected = t.id }) {
-                        Text(tripName(t), style = MaterialTheme.typography.titleMedium)
-                        Text(fmtDateTime(t.startedAtMs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                            Text(fmtKm(t.stats.distanceKm), style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SquircleIcon(
+                                iconRes = R.drawable.fa_route,
+                                backgroundColor = NovareAccent.copy(alpha = 0.15f),
+                                tintColor = NovareAccent,
+                                contentDescription = "Rota",
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = tripName(t),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = fmtDateTime(t.startedAtMs),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        // Métricas tabulares organizadas
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            Column {
+                                Text(
+                                    text = "DISTÂNCIA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    letterSpacing = 0.8.sp,
+                                )
+                                Text(
+                                    text = fmtKm(t.stats.distanceKm),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "DURAÇÃO",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    letterSpacing = 0.8.sp,
+                                )
+                                Text(
+                                    text = fmtDuration(t.stats.elapsedMs),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text(fmtDuration(t.stats.elapsedMs), style = MaterialTheme.typography.titleMedium)
-                                Text("média ${fmtKmh(t.stats.avgSpeedKmh)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = "VEL. MÉDIA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    letterSpacing = 0.8.sp,
+                                )
+                                Text(
+                                    text = fmtKmh(t.stats.avgSpeedKmh),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
                             }
                         }
                     }
@@ -111,8 +276,18 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
     LaunchedEffect(trip.id) { points = vm.points(trip.id) }
     val s = trip.stats
 
-    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.fillMaxWidth().height(340.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // Bloco do Mapa com botão de voltar sobreposto
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(340.dp),
+        ) {
             val p = points
             val placeholder = tripMapPlaceholder(p?.size)
             if (p != null && placeholder == null) {
@@ -125,34 +300,140 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
                 )
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(placeholder.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+                    Text(
+                        text = placeholder.orEmpty(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp),
+                    )
                 }
             }
-            IconButton(onClick = onBack, modifier = Modifier.padding(8.dp).align(Alignment.TopStart)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar")
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .padding(12.dp)
+                    .size(40.dp)
+                    .align(Alignment.TopStart),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Voltar",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
             }
         }
 
-        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tripName(trip), style = MaterialTheme.typography.headlineMedium)
-            Text(fmtDateTime(trip.startedAtMs), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Cor do traçado: azul = devagar, laranja = rápido.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SquircleIcon(
+                    iconRes = R.drawable.fa_route,
+                    backgroundColor = NovareAccent.copy(alpha = 0.15f),
+                    tintColor = NovareAccent,
+                    contentDescription = "Viagem",
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = tripName(trip),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = fmtDateTime(trip.startedAtMs),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
+            Text(
+                text = "Cor do traçado no mapa: azul = devagar, laranja = rápido.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // Cartão de métricas detalhadas
             HCard {
-                Text(fmtKm(s.distanceKm, 2), style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
-                MetricRow("Tempo total" to fmtDuration(s.elapsedMs), "Em movimento" to fmtDuration(s.movingTimeMs), "Paradas" to "${s.stopCount}")
-                MetricRow("Média" to fmtKmh(s.avgSpeedKmh), "Máxima" to fmtKmh(s.maxSpeedKmh), "Tempo parado" to fmtDuration(s.stoppedTimeMs))
-                MetricRow("Subida" to fmtM(s.elevationGainM), "Descida" to fmtM(s.elevationLossM), "" to "")
+                Text(
+                    text = "DISTÂNCIA PERCORRIDA",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.2.sp,
+                )
+                Text(
+                    text = fmtKm(s.distanceKm, 2),
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                MetricRow(
+                    "Tempo total" to fmtDuration(s.elapsedMs),
+                    "Em movimento" to fmtDuration(s.movingTimeMs),
+                    "Paradas" to "${s.stopCount}",
+                )
+                MetricRow(
+                    "Vel. média" to fmtKmh(s.avgSpeedKmh),
+                    "Vel. máxima" to fmtKmh(s.maxSpeedKmh),
+                    "Tempo parado" to fmtDuration(s.stoppedTimeMs),
+                )
+                MetricRow(
+                    "Ganho de altitude" to fmtM(s.elevationGainM),
+                    "Perda de altitude" to fmtM(s.elevationLossM),
+                    "" to "",
+                )
             }
 
+            // Altimetria gráfica
             points?.takeIf { pts -> pts.count { it.altitudeM != null } > 2 }?.let { pts ->
-                SectionTitle("Altimetria")
-                HCard { ElevationCanvas(pts, Modifier.fillMaxWidth().height(120.dp)) }
+                SectionTitle("Perfil de Altitude")
+                HCard {
+                    ElevationCanvas(pts, Modifier.fillMaxWidth().height(120.dp))
+                }
             }
 
-            SecondaryButton("Renomear", { renaming = true })
-            SecondaryButton("Excluir viagem", { confirmDelete = true }, color = Bad)
-            Box(Modifier.height(16.dp))
+            SectionTitle("Gerenciar Trajeto")
+            RumoSecondaryButton(
+                text = "Renomear viagem",
+                onClick = { renaming = true },
+                leadingIconRes = R.drawable.fa_wrench,
+            )
+            Surface(
+                onClick = { confirmDelete = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(RUMO_SECONDARY_BUTTON_HEIGHT_DP.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, NovareError.copy(alpha = 0.5f)),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "Excluir viagem",
+                        color = NovareError,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 
@@ -161,7 +442,11 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
             onDismissRequest = { confirmDelete = false },
             title = { Text("Excluir esta viagem?") },
             text = { Text("O traçado e a distância dela saem do histórico e do hodômetro calculado.") },
-            confirmButton = { TextButton(onClick = { vm.deleteTrip(trip.id); confirmDelete = false; onBack() }) { Text("Excluir", color = Bad) } },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteTrip(trip.id); confirmDelete = false; onBack() }) {
+                    Text("Excluir", color = NovareError, fontWeight = FontWeight.Bold)
+                }
+            },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } },
         )
     }
@@ -170,8 +455,20 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
         AlertDialog(
             onDismissRequest = { renaming = false },
             title = { Text("Nome da viagem") },
-            text = { OutlinedTextField(name, { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) },
-            confirmButton = { TextButton(onClick = { vm.renameTrip(trip.id, name.trim()); renaming = false }) { Text("Salvar") } },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.renameTrip(trip.id, name.trim()); renaming = false }) {
+                    Text("Salvar", color = NovareAccent, fontWeight = FontWeight.Bold)
+                }
+            },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancelar") } },
         )
     }
@@ -195,7 +492,14 @@ private fun ElevationCanvas(points: List<TrackPoint>, modifier: Modifier) {
         alts.forEachIndexed { i, a ->
             val x = size.width * i / (alts.size - 1)
             val y = size.height * 0.08f + size.height * 0.84f * (1 - ((a - lo) / (hi - lo)).toFloat())
-            if (i == 0) { path.moveTo(x, y); area.moveTo(x, size.height); area.lineTo(x, y) } else { path.lineTo(x, y); area.lineTo(x, y) }
+            if (i == 0) {
+                path.moveTo(x, y)
+                area.moveTo(x, size.height)
+                area.lineTo(x, y)
+            } else {
+                path.lineTo(x, y)
+                area.lineTo(x, y)
+            }
         }
         area.lineTo(size.width, size.height)
         area.close()
