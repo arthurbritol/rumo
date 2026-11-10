@@ -12,6 +12,7 @@ ref/
 
 # Mockups do brainstorming
 .superpowers/
+.vscode/
 
 firebase/node_modules/
 firebase/*-debug.log
