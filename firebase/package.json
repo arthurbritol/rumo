@@ -3,7 +3,7 @@
   "private": true,
   "description": "Regras do Firestore do Rumo e seus testes",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",
