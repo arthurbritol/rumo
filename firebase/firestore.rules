@@ -179,6 +179,16 @@ service cloud.firestore {
       return !(campo in d) || d[campo] == null || numeroOk(d[campo]);
     }
 
+    function localizacaoValida(d) {
+      return d.keys().hasOnly(['latitude', 'longitude', 'bearing', 'speedKmh', 'updatedAtMs'])
+        && d.keys().hasAll(['latitude', 'longitude', 'updatedAtMs'])
+        && d.latitude is number && d.latitude >= -90 && d.latitude <= 90
+        && d.longitude is number && d.longitude >= -180 && d.longitude <= 180
+        && (!('bearing' in d) || d.bearing == null || (d.bearing is number && d.bearing >= 0 && d.bearing <= 360))
+        && numeroOuNulo(d, 'speedKmh')
+        && epochMsOk(d.updatedAtMs);
+    }
+
     match /busca/{uid} {
       allow get: if logado();
       // Só consulta limitada (o cliente busca por prefixo de displayNameLower).
@@ -255,6 +265,34 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['quem'])
         && request.resource.data.quem == request.auth.uid
         && epochMsOpcional(request.resource.data, 'criadoEm');
+    }
+
+    // Permissões de compartilhamento de localização: id "de_para".
+    // Remetente concede apenas a quem já é amigo mútuo. Ambas as pontas podem ler e revogar/apagar.
+    match /permissoesLocalizacao/{id} {
+      allow create: if logado()
+        && request.resource.data.keys().hasAll(['de', 'para'])
+        && request.resource.data.keys().hasOnly(['de', 'para', 'criadoEm'])
+        && request.resource.data.de == request.auth.uid
+        && request.resource.data.de.size() <= 128
+        && request.resource.data.para is string
+        && request.resource.data.para.size() <= 128
+        && request.resource.data.de != request.resource.data.para
+        && amigos(request.resource.data.de, request.resource.data.para)
+        && id == request.resource.data.de + '_' + request.resource.data.para
+        && epochMsOpcional(request.resource.data, 'criadoEm');
+      allow read, delete: if logado()
+        && (request.auth.uid == resource.data.de || request.auth.uid == resource.data.para);
+    }
+
+    // Localização em tempo real da moto: apenas o dono grava se não estiver em exclusão;
+    // leitura restrita ao dono e a amigos com permissão ativa concedida.
+    match /localizacoes/{uid} {
+      allow read: if dono(uid)
+        || (logado() && amigos(uid, request.auth.uid)
+            && exists(/databases/$(database)/documents/permissoesLocalizacao/$(uid + '_' + request.auth.uid)));
+      allow create, update: if dono(uid) && semExclusao(uid) && localizacaoValida(request.resource.data);
+      allow delete: if dono(uid);
     }
 
     // Rolê. Criação: criador + até 9 convidados, todos amigos do criador:
