@@ -2,6 +2,28 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.6.0]
+
+### Adicionado
+- **Design System Novare**: paleta semântica completa com variantes Midnight Navy (modo escuro profundo em camadas com base azul-marinho `#0A0F1D`, superfícies `#131B2E`/`#1A243B` e acentos ciano e âmbar) e Clean Slate (modo claro contrastante e arejado com bordas tonais sutis).
+- **Tipografia e Geometria refinadas**: cantos squircle contínuos com `SquircleShape` (curvatura cúbica sem descontinuidade estilo iOS/OneUI) e elevações sutis via bordas tonais (`RumoCard`).
+- **Biblioteca de Ícones Nativos Font Awesome 6**: coleção vetorial nativa em Compose (`RumoIcons`) com mais de 40 glifos de alta legibilidade para navegação, telemetria, controles e ações (Solid, Regular e Brand).
+- **Componentes Base Unificados**:
+  - `RumoCard`: container com cantos squircle, preenchimento de superfície e borda tonal suave.
+  - `RumoSquircleIcon`: botão de ação e container de ícone com cantos contínuos e feedback de toque.
+  - `RumoButton`: botões de ação primária, secundária e perigosa com hierarquia visual clara e cantos suaves.
+  - `RumoMetricBadge`: pílula compacta de telemetria com fundo translúcido e ícones temáticos.
+  - `RumoBottomNavigation`: barra de navegação inferior flutuante com acabamento translúcido, pílula ativa e ícones Font Awesome.
+  - `RumoTopAppBar`: barra superior translúcida com ações contextuais e suporte a rolagem.
+
+### Alterado
+- **Navegação e Interface Global**: substituição de Material Icons padrão por glifos vetoriais Font Awesome 6 em todas as telas (`MapScreen`, `TripHistoryScreen`, `GarageScreen`, `FriendsScreen`, `RoleScreens`, `ProfileScreen`, `OnboardingScreen`, `OfflineMapsScreen`).
+- **Aba Mapa e HUD**: controles flutuantes com `RumoSquircleIcon` (camadas, busca, centralização, bússola), HUD de navegação com cantos squircle contínuos e badges de telemetria refinados.
+- **Garagem e Manutenção**: cartões de status e métricas de moto reestilizados com `RumoCard`, badges de alerta tonalizados e formulários modernizados.
+- **Histórico e Detalhes de Viagem**: cards de viagem modernizados com chips de data/duração, layout compacto e estatísticas com `RumoMetricBadge`.
+- **Social e Amigos**: cards de amigos e rolês em grupo com avatares em squircle, chips de status ("Na estrada") e botões de ação consistentes.
+- **Onboarding e Telas de Apoio**: apresentação inicial com ilustrações harmonizadas, tipografia equilibrada e transições elegantes.
+
 ## [0.5.2]
 
 ### Adicionado

@@ -34,7 +34,7 @@ flowchart TD
 | `trips` | Entidades Room, `TripRecorder`, `TrackingService` (serviço de localização em primeiro plano), `AndroidLocationSource` |
 | `maintenance` | Entidades e DAO de abastecimento, itens de manutenção e hodômetro |
 | `sync-core` | JVM puro: pacote `app.hunter.social` (amigos, rolê e localização compartilhada com `LiveLocation`, `LocationPermission`) e `SyncEngine` (baixa, mescla e sobe), `merge`/`mergeOdometer` (último a escrever vence, sem duplicar), `LocalStore`/`RemoteStore` (interfaces), `OnboardingFlow` (ordem da primeira abertura), `BikeCatalog` |
-| `app` | `AppDatabase` (Room v3), `HunterViewModel`, telas Compose, `HunterMap` (MapLibre e marcadores de amigos), `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`), social e localização compartilhada (`SocialGraph`, `LiveLocationPublisher`, `FirestoreSocialStore`) e telas de entrada e perfil |
+| `app` | `AppDatabase` (Room v3), `HunterViewModel`, telas Compose (Design System Novare e ícones Font Awesome), `HunterMap` (MapLibre e marcadores de amigos), `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`), social e localização compartilhada (`SocialGraph`, `LiveLocationPublisher`, `FirestoreSocialStore`) e telas de entrada e perfil |
 
 ## Decisões
 
@@ -163,6 +163,27 @@ O `LiveLocationPublisher` (no módulo `app`, gerenciado pelo `SocialGraph`) oper
 
 ### Exclusão de conta
 - No fluxo de exclusão de conta (`deleteAllUserData`), `FirestoreSocialStore.deleteAllSocial` apaga o documento `localizacoes/{uid}` e remove todas as concessões em `permissoesLocalizacao` onde o usuário é remetente (`de`) ou destinatário (`para`), não deixando dados órfãos.
+
+## Interface e Design System (Novare)
+
+A interface do Rumo é desenvolvida em Jetpack Compose e adota os padrões do **Design System Novare**:
+
+- **Paleta Semântica (`NovareColors`)**:
+  - **Midnight Navy (Tema Escuro)**: otimizado para pilotagem noturna e ambientes de baixa luminosidade. Fundo principal azul-marinho profundo (`#0A0F1D`), superfícies em camadas tonais (`#131B2E`, `#1A243B`), texto primário de alto contraste (`#F8FAFC`) e acentos funcionais em azul ciano (`#38BDF8`) e âmbar (`#F59E0B`).
+  - **Clean Slate (Tema Claro)**: projetado para visibilidade sob luz solar direta em suporte de guidão. Fundo neutro arejado (`#F8FAFC`), superfícies claras contrastantes (`#FFFFFF`, `#F1F5F9`) e bordas tonais sutis (`#E2E8F0`).
+- **Formas e Geometria**:
+  - `SquircleShape`: implementação de curvatura contínua (superelipse/suavização cúbica estilo iOS/OneUI) com `CornerSmoothing.High`, eliminando cantos pontiagudos ou quinas duras.
+  - Cantos padronizados: `Squircle12` (chips/badges), `Squircle16` (botões e botões flutuantes), `Squircle20` (cards de conteúdo e containers), `Squircle24` (modais e painéis de navegação).
+- **Componentes Primitivos (`app.hunter.app.ui.components`)**:
+  - `RumoCard`: container com cantos squircle contínuos, fundo de superfície tonal e borda sutil.
+  - `RumoSquircleIcon`: botão de ação e container de ícone com cantos squircle e feedback tátil de toque.
+  - `RumoButton`: botões de ação primária, secundária e perigosa com suporte a ícones, estado desabilitado e cantos contínuos.
+  - `RumoMetricBadge`: pílula compacta para métricas e telemetria (velocidade, distância, tempo, consumo) com ícones temáticos e fundo translúcido.
+  - `RumoBottomNavigation`: barra de navegação inferior flutuante com acabamento translúcido, pílula de seleção ativa e ícones Font Awesome.
+  - `RumoTopAppBar`: barra superior translúcida com ações contextuais, suporte a rolagem e alinhamento visual com o sistema.
+- **Ícones Nativos Font Awesome 6 (`RumoIcons`)**:
+  - Coleção vetorial completa desenhada nativamente em Compose (`app.hunter.app.ui.icons.RumoIcons`), eliminando dependências de fontes externas ou SVGs inflados em runtime.
+  - Cobre navegação (bússola, rota, velocímetro, camadas, postos), status da moto (combustível, bateria, chave inglesa, odômetro), social (amigos, capacete, grupo) e ações gerais (busca, engrenagem, fechar, voltar).
 
 ## Pod (BLE)
 
