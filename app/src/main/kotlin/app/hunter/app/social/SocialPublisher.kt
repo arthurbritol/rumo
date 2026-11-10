@@ -43,15 +43,15 @@ class SocialPublisher(
     private var searchReconciled = false
 
     /**
-     * A fonte da verdade da escolha de busca é `perfisPublicos.searchable`, na nuvem. Uma vez por sessão (antes de
-     * publicar e ao abrir a aba), traz essa escolha para o aparelho: se já existe publicada, ela vale (conta como
-     * respondida) e a resposta local velha é substituída; se nunca foi publicada, vale a resposta local, se houver.
-     * Assim um aparelho que nunca perguntou não desfaz a escolha feita em outro. Lança sem rede (nada é decidido).
+     * Uma vez por sessão (antes de publicar e ao abrir a aba), confere `perfisPublicos.searchable` na nuvem. Só
+     * `true` conta como resposta "Sim" dada em outro aparelho e é adotado (o aparelho passa a ter respondido).
+     * `false` não prova nada: o perfil sai com `false` também enquanto ninguém respondeu, então ele não vira "Não" e
+     * a pergunta continua para quem nunca respondeu. Lança sem rede (nada é decidido).
      */
     suspend fun reconcileSearch() {
         if (searchReconciled) return
         val published = store.publishedSearchable(uid)
-        if (published != null && !searchReconciled) prefs.set(published)
+        if (published == true && !searchReconciled) prefs.set(true)
         searchReconciled = true
     }
 

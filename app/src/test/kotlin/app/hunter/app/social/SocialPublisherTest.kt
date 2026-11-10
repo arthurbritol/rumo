@@ -224,13 +224,16 @@ class SocialPublisherTest {
     }
 
     @Test
-    fun `a escolha publicada vale mais que um Sim velho guardado neste aparelho`() = runTest {
-        cloudProfile(searchable = false) // o outro aparelho disse "Não"
-        val prefs = MemorySearchPrefs(asked = true, searchable = true) // este ainda guarda o Sim antigo
-        publisherWith(prefs).publishAll()
-        assertFalse(prefs.searchable())
-        assertFalse(store.profiles.getValue("me").searchable)
-        assertFalse("me" in store.searchIndex)
+    fun `searchable false na nuvem não conta como resposta, nem apaga um Sim local`() = runTest {
+        cloudProfile(searchable = false) // publicado sem resposta (ou Não): não prova nada
+        val semResposta = MemorySearchPrefs(asked = false)
+        publisherWith(semResposta).publishAll()
+        assertFalse(semResposta.asked()) // a pergunta continua
+        assertFalse(store.profiles.getValue("me").searchable) // e o perfil segue privado
+        val comSim = MemorySearchPrefs(asked = true, searchable = true)
+        publisherWith(comSim).publishAll()
+        assertTrue(comSim.searchable())
+        assertTrue(store.profiles.getValue("me").searchable)
     }
 
     @Test

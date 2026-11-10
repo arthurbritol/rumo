@@ -362,6 +362,19 @@ class SocialViewModelTest {
     }
 
     @Test
+    fun `perfil publicado sem resposta não esconde a pergunta numa nova sessão`() = runTest {
+        val first = vm()
+        runCurrent()
+        assertTrue(first.state.value.searchPromptNeeded)
+        // o perfil saiu da primeira sessão com searchable=false (ninguém respondeu)
+        store.profiles["me"] = PublicProfile("me", "Eu", null, null, null, false)
+        val second = SocialViewModel(FakeBackend(), backgroundScope, clock = { now }, zone = { zone })
+        runCurrent()
+        assertTrue(second.state.value.searchPromptNeeded)
+        assertFalse(second.state.value.searchVisible)
+    }
+
+    @Test
     fun `sem rede não pergunta a busca e pergunta quando a conferência funciona`() = runTest {
         store.publishedSearchableFailure = IOException("sem rede")
         val vm = vm()

@@ -98,8 +98,9 @@ sem exclusão pendente), o `SocialViewModel`/`SocialUiMapper` e as telas (`Frien
 - **Apagar conta** remove também o conteúdo social, de forma retomável. A marca de exclusão
   (`usuarios/{uid}/config/exclusao`) é permanente e as regras negam escrever `busca`, `perfisPublicos` e `atividade`
   depois dela; no aparelho, a limpeza espera a publicação em andamento terminar (trinco do `SocialGraph`).
-- **Busca por nome:** a fonte da verdade da escolha é `perfisPublicos.searchable`. Ao abrir (e antes de publicar) o
-  aparelho confere a nuvem: se já existe, vale a da nuvem; se não, vale a resposta local. Só depois a pergunta é feita.
+- **Busca por nome:** ao abrir (e antes de publicar) o aparelho confere `perfisPublicos.searchable`; só `true` conta como
+  "Sim" já dado em outro aparelho (e é adotado). `false` não prova resposta, pois o perfil sai com `false` enquanto ninguém
+  respondeu; então a pergunta continua para quem nunca respondeu e o perfil segue privado.
 - **Custo de leituras:** na partida só convites e rolês são observados (o marcador precisa deles). Os amigos
   (2 consultas mais 2 leituras por amigo) só carregam com a aba na tela e são relidos ao voltar ao app ou reabrir a aba,
   no mínimo a cada 60 s; a busca usa os amigos em memória e um cache de bloqueados.
@@ -124,8 +125,8 @@ Decisões adiadas de propósito (backlog); nenhuma expõe dados que as regras n�
   que o `SocialViewModel` já tem em memória.
 - **Convite de quem não está na busca (M9):** aparece como "Alguém quer ser seu amigo"; mostrar o nome exigiria um
   campo `deNome` no convite e mudar a regra.
-- **Escolha da busca sem data:** a nuvem manda ao abrir; duas respostas quase simultâneas em aparelhos diferentes
-  ficam com a última a publicar.
+- **Escolha da busca sem data:** um "Não" não é visível na nuvem (fica igual a "nunca respondeu"), então outro aparelho
+  pergunta de novo; e um "Sim" publicado em outro aparelho vale ao abrir, mesmo que este tenha respondido "Não" antes.
 
 ## Pod (BLE)
 
