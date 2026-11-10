@@ -37,7 +37,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
@@ -268,11 +270,14 @@ private fun HunterRoot(
 
     val activeLocations by socialVm.activeFriendsOnRoad.collectAsStateWithLifecycle()
     var ticker by remember { mutableStateOf(0L) }
-    LaunchedEffect(tab == Tab.Map) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, tab == Tab.Map) {
         if (tab == Tab.Map) {
-            while (true) {
-                delay(30_000L)
-                ticker = System.currentTimeMillis()
+            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(30_000L)
+                    ticker = System.currentTimeMillis()
+                }
             }
         }
     }
@@ -291,13 +296,6 @@ private fun HunterRoot(
                 bearing = loc.bearing,
                 timeAgoText = timeAgo,
             )
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        socialVm.focusFriendOnMapEvent.collect { (lat, lon) ->
-            tabIndex = Tab.Map.ordinal
-            vm.focusOn(lat, lon)
         }
     }
 

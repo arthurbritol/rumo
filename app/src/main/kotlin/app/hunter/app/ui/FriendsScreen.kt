@@ -155,7 +155,6 @@ fun FriendsRoute(
             onDeclineRole = { vm.leaveRole(it) },
             onToggleLocationSharing = vm::toggleLocationSharing,
             onFocusFriendOnMap = { lat, lng ->
-                vm.focusFriendOnMap(lat, lng)
                 onFocusFriendOnMap?.invoke(lat, lng)
             },
         )

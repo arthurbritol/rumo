@@ -54,6 +54,7 @@ class LiveLocationPublisherTest {
 
     private fun TestScope.createPublisher(
         usePodState: Boolean = false,
+        minFloorMs: Long = 10_000L,
         minIntervalMs: Long = 30_000L,
         minDistanceMeters: Double = 100.0,
     ): LiveLocationPublisher {
@@ -65,6 +66,7 @@ class LiveLocationPublisherTest {
                 podStatus = podState,
                 grantedPermissions = permissions,
                 clock = { currentTime },
+                minFloorMs = minFloorMs,
                 minIntervalMs = minIntervalMs,
                 minDistanceMeters = minDistanceMeters,
             )
@@ -76,6 +78,7 @@ class LiveLocationPublisherTest {
                 isPodConnected = isPodConnected,
                 grantedPermissions = permissions,
                 clock = { currentTime },
+                minFloorMs = minFloorMs,
                 minIntervalMs = minIntervalMs,
                 minDistanceMeters = minDistanceMeters,
             )
@@ -174,8 +177,8 @@ class LiveLocationPublisherTest {
     }
 
     @Test
-    fun `publica antes de 30s se deslocamento for maior ou igual a 100m`() = runTest {
-        createPublisher(minIntervalMs = 30_000L, minDistanceMeters = 100.0)
+    fun `publica antes de 30s se deslocamento for maior ou igual a 100m respeitando piso de 10s`() = runTest {
+        createPublisher(minFloorMs = 10_000L, minIntervalMs = 30_000L, minDistanceMeters = 100.0)
         isPodConnected.value = true
         permissions.value = setOf("amigo1")
         runCurrent()
@@ -185,8 +188,14 @@ class LiveLocationPublisherTest {
         runCurrent()
         assertEquals(1, store.published.size)
 
-        // Ponto 2: t = +5s, deslocamento ~111m (>= 100m) -> publica imediatamente pela distância
+        // Ponto 2: t = +5s, deslocamento ~111m (>= 100m) -> suprimido pelo piso mínimo de 10s (proteção Spark)
         currentTime += 5_000L
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.551000, longitude = -46.630000))
+        runCurrent()
+        assertEquals(1, store.published.size)
+
+        // Ponto 3: t = +10s (desde o ponto 1), deslocamento >= 100m -> publica respeitando o piso
+        currentTime += 5_000L // total +10s
         locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.551000, longitude = -46.630000))
         runCurrent()
         assertEquals(2, store.published.size)

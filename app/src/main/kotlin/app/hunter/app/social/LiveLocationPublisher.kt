@@ -27,8 +27,10 @@ import kotlinx.coroutines.launch
  * 2) Houver pelo menos um amigo autorizado ([grantedPermissions] não vazio).
  *
  * Filtra as leituras de [locationSource] para não sobrecarregar a cota da nuvem nem a bateria:
+ * - Garante um piso temporal mínimo de [minFloorMs] (padrão: 10 s) para proteger a cota diária do plano Spark
+ *   mesmo em alta velocidade (ex: 120 km/h).
  * - Só envia novo ponto se passaram >= [minIntervalMs] (padrão: 30 s) OU se o deslocamento
- *   for >= [minDistanceMeters] (padrão: 100 m).
+ *   for >= [minDistanceMeters] (padrão: 100 m), desde que respeitado o piso [minFloorMs].
  *
  * Ao desconectar do Pod ou revogar todas as permissões, cancela a coleta e invoca
  * [SocialStore.clearLocation] para que a moto não continue visível como ativa.
@@ -40,6 +42,7 @@ class LiveLocationPublisher(
     private val isPodConnected: Flow<Boolean>,
     private val grantedPermissions: Flow<Set<String>>,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
     private val minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
     private val minDistanceMeters: Double = DEFAULT_MIN_DISTANCE_METERS,
     private val log: (String, Throwable?) -> Unit = { msg, err ->
@@ -53,6 +56,7 @@ class LiveLocationPublisher(
         podStatus: StateFlow<PodUiState>,
         grantedPermissions: Flow<Set<String>>,
         clock: () -> Long = System::currentTimeMillis,
+        minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
         minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
         minDistanceMeters: Double = DEFAULT_MIN_DISTANCE_METERS,
         log: (String, Throwable?) -> Unit = { msg, err ->
@@ -65,6 +69,7 @@ class LiveLocationPublisher(
         isPodConnected = podStatus.map { it.phase == PodPhase.CONNECTED },
         grantedPermissions = grantedPermissions,
         clock = clock,
+        minFloorMs = minFloorMs,
         minIntervalMs = minIntervalMs,
         minDistanceMeters = minDistanceMeters,
         log = log,
@@ -122,7 +127,7 @@ class LiveLocationPublisher(
         val now = clock()
         val elapsed = now - lastSentMs
         val dist = lastSentPoint?.let { Geo.distanceM(it, point) } ?: Double.MAX_VALUE
-        if (lastSentPoint == null || elapsed >= minIntervalMs || dist >= minDistanceMeters) {
+        if (lastSentPoint == null || (elapsed >= minFloorMs && (elapsed >= minIntervalMs || dist >= minDistanceMeters))) {
             val liveLoc = LiveLocation(
                 latitude = point.latitude,
                 longitude = point.longitude,
@@ -167,6 +172,7 @@ class LiveLocationPublisher(
 
     companion object {
         private const val TAG = "Rumo/LiveLoc"
+        const val DEFAULT_MIN_FLOOR_MS = 10_000L
         const val DEFAULT_MIN_INTERVAL_MS = 30_000L
         const val DEFAULT_MIN_DISTANCE_METERS = 100.0
 
@@ -177,6 +183,7 @@ class LiveLocationPublisher(
             podStatus: Flow<PodUiState>,
             grantedPermissions: Flow<Set<String>>,
             clock: () -> Long = System::currentTimeMillis,
+            minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
             minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
             minDistanceMeters: Double = DEFAULT_MIN_DISTANCE_METERS,
             log: (String, Throwable?) -> Unit = { msg, err ->
@@ -189,6 +196,7 @@ class LiveLocationPublisher(
             isPodConnected = podStatus.map { it.phase == PodPhase.CONNECTED },
             grantedPermissions = grantedPermissions,
             clock = clock,
+            minFloorMs = minFloorMs,
             minIntervalMs = minIntervalMs,
             minDistanceMeters = minDistanceMeters,
             log = log,
