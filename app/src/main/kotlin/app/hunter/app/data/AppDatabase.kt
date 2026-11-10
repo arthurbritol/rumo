@@ -4,6 +4,10 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import app.hunter.app.data.anp.AnpCityStatsEntity
+import app.hunter.app.data.anp.AnpFuelDao
+import app.hunter.app.data.anp.AnpStateStatsEntity
+import app.hunter.app.data.anp.AnpStationEntity
 import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceDao
 import app.hunter.maintenance.data.MaintenanceItemEntity
@@ -21,8 +25,9 @@ import app.hunter.trips.data.TripEntity
         TripEntity::class, TrackPointEntity::class,
         FuelupEntity::class, MaintenanceItemEntity::class, OdometerEntity::class,
         PlaceEntity::class, TombstoneEntity::class,
+        AnpStationEntity::class, AnpCityStatsEntity::class, AnpStateStatsEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +35,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun maintenanceDao(): MaintenanceDao
     abstract fun placeDao(): PlaceDao
     abstract fun syncDao(): SyncDao
+    abstract fun anpFuelDao(): AnpFuelDao
 
     companion object {
         /** v1 → v2: nome da viagem e destinos salvos. Preserva tudo que já foi gravado. */
@@ -49,6 +55,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 Migration2To3.statements.forEach { db.execSQL(it) }
+            }
+        }
+
+        /** v3 → v4: cache local de postos e médias de preços de combustíveis da ANP. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Migration3To4.statements.forEach { db.execSQL(it) }
             }
         }
     }

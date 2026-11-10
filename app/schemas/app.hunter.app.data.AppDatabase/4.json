@@ -1,0 +1,844 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "cb100ee46b65ab5f4ee257407cfac516",
+    "entities": [
+      {
+        "tableName": "trips",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `startedAtMs` INTEGER NOT NULL, `endedAtMs` INTEGER, `distanceM` REAL NOT NULL, `elapsedMs` INTEGER NOT NULL, `movingTimeMs` INTEGER NOT NULL, `stoppedTimeMs` INTEGER NOT NULL, `stopCount` INTEGER NOT NULL, `maxSpeedMps` REAL NOT NULL, `elevationGainM` REAL NOT NULL, `elevationLossM` REAL NOT NULL, `title` TEXT, `gid` TEXT NOT NULL DEFAULT '', `updatedAtMs` INTEGER NOT NULL DEFAULT 0, `dirty` INTEGER NOT NULL DEFAULT 1)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtMs",
+            "columnName": "startedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtMs",
+            "columnName": "endedAtMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "distanceM",
+            "columnName": "distanceM",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elapsedMs",
+            "columnName": "elapsedMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "movingTimeMs",
+            "columnName": "movingTimeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stoppedTimeMs",
+            "columnName": "stoppedTimeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stopCount",
+            "columnName": "stopCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxSpeedMps",
+            "columnName": "maxSpeedMps",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elevationGainM",
+            "columnName": "elevationGainM",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elevationLossM",
+            "columnName": "elevationLossM",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "gid",
+            "columnName": "gid",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_trips_gid",
+            "unique": true,
+            "columnNames": [
+              "gid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_trips_gid` ON `${TABLE_NAME}` (`gid`)"
+          }
+        ]
+      },
+      {
+        "tableName": "track_points",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`tripId` INTEGER NOT NULL, `idx` INTEGER NOT NULL, `timeMs` INTEGER NOT NULL, `latitude` REAL NOT NULL, `longitude` REAL NOT NULL, `altitudeM` REAL, `speedMps` REAL, `accuracyM` REAL, `bearingDeg` REAL, PRIMARY KEY(`tripId`, `idx`), FOREIGN KEY(`tripId`) REFERENCES `trips`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "tripId",
+            "columnName": "tripId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "index",
+            "columnName": "idx",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeMs",
+            "columnName": "timeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "altitudeM",
+            "columnName": "altitudeM",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "speedMps",
+            "columnName": "speedMps",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "accuracyM",
+            "columnName": "accuracyM",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "bearingDeg",
+            "columnName": "bearingDeg",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "tripId",
+            "idx"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_track_points_tripId",
+            "unique": false,
+            "columnNames": [
+              "tripId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_track_points_tripId` ON `${TABLE_NAME}` (`tripId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "trips",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tripId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "fuelups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `dateMs` INTEGER NOT NULL, `odometerKm` REAL NOT NULL, `liters` REAL NOT NULL, `totalCost` REAL NOT NULL, `fullTank` INTEGER NOT NULL, `gid` TEXT NOT NULL DEFAULT '', `updatedAtMs` INTEGER NOT NULL DEFAULT 0, `dirty` INTEGER NOT NULL DEFAULT 1)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateMs",
+            "columnName": "dateMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "odometerKm",
+            "columnName": "odometerKm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "liters",
+            "columnName": "liters",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalCost",
+            "columnName": "totalCost",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fullTank",
+            "columnName": "fullTank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gid",
+            "columnName": "gid",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_fuelups_gid",
+            "unique": true,
+            "columnNames": [
+              "gid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_fuelups_gid` ON `${TABLE_NAME}` (`gid`)"
+          }
+        ]
+      },
+      {
+        "tableName": "maintenance_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `intervalKm` INTEGER, `intervalDays` INTEGER, `lastDoneKm` REAL, `lastDoneAtMs` INTEGER, `gid` TEXT NOT NULL DEFAULT '', `updatedAtMs` INTEGER NOT NULL DEFAULT 0, `dirty` INTEGER NOT NULL DEFAULT 1)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "intervalKm",
+            "columnName": "intervalKm",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "intervalDays",
+            "columnName": "intervalDays",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastDoneKm",
+            "columnName": "lastDoneKm",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "lastDoneAtMs",
+            "columnName": "lastDoneAtMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "gid",
+            "columnName": "gid",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_maintenance_items_gid",
+            "unique": true,
+            "columnNames": [
+              "gid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_maintenance_items_gid` ON `${TABLE_NAME}` (`gid`)"
+          }
+        ]
+      },
+      {
+        "tableName": "odometer",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `offsetKm` REAL NOT NULL, `tankLiters` REAL NOT NULL, `updatedAtMs` INTEGER NOT NULL DEFAULT 0, `dirty` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "offsetKm",
+            "columnName": "offsetKm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tankLiters",
+            "columnName": "tankLiters",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `subtitle` TEXT, `lat` REAL NOT NULL, `lon` REAL NOT NULL, `favorite` INTEGER NOT NULL, `lastUsedMs` INTEGER NOT NULL, `useCount` INTEGER NOT NULL, `gid` TEXT NOT NULL DEFAULT '', `updatedAtMs` INTEGER NOT NULL DEFAULT 0, `dirty` INTEGER NOT NULL DEFAULT 1)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subtitle",
+            "columnName": "subtitle",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "favorite",
+            "columnName": "favorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUsedMs",
+            "columnName": "lastUsedMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "useCount",
+            "columnName": "useCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gid",
+            "columnName": "gid",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_places_gid",
+            "unique": true,
+            "columnNames": [
+              "gid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_places_gid` ON `${TABLE_NAME}` (`gid`)"
+          }
+        ]
+      },
+      {
+        "tableName": "tombstones",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`kind` TEXT NOT NULL, `gid` TEXT NOT NULL, `deletedAtMs` INTEGER NOT NULL, `dirty` INTEGER NOT NULL, PRIMARY KEY(`kind`, `gid`))",
+        "fields": [
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gid",
+            "columnName": "gid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtMs",
+            "columnName": "deletedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "kind",
+            "gid"
+          ]
+        }
+      },
+      {
+        "tableName": "anp_stations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `nome` TEXT NOT NULL, `bandeira` TEXT NOT NULL, `cityKey` TEXT NOT NULL, `uf` TEXT NOT NULL, `endereco` TEXT NOT NULL, `bairro` TEXT NOT NULL, `cep` TEXT NOT NULL, `lat` REAL NOT NULL, `lon` REAL NOT NULL, `precoGasolina` REAL, `precoGasolinaAdit` REAL, `precoEtanol` REAL, `precoDiesel` REAL, `dataColeta` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nome",
+            "columnName": "nome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bandeira",
+            "columnName": "bandeira",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cityKey",
+            "columnName": "cityKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uf",
+            "columnName": "uf",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endereco",
+            "columnName": "endereco",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bairro",
+            "columnName": "bairro",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cep",
+            "columnName": "cep",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "precoGasolina",
+            "columnName": "precoGasolina",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "precoGasolinaAdit",
+            "columnName": "precoGasolinaAdit",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "precoEtanol",
+            "columnName": "precoEtanol",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "precoDiesel",
+            "columnName": "precoDiesel",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dataColeta",
+            "columnName": "dataColeta",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_anp_stations_lat_lon",
+            "unique": false,
+            "columnNames": [
+              "lat",
+              "lon"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_anp_stations_lat_lon` ON `${TABLE_NAME}` (`lat`, `lon`)"
+          },
+          {
+            "name": "index_anp_stations_cityKey",
+            "unique": false,
+            "columnNames": [
+              "cityKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_anp_stations_cityKey` ON `${TABLE_NAME}` (`cityKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "anp_city_stats",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cityKey` TEXT NOT NULL, `uf` TEXT NOT NULL, `municipio` TEXT NOT NULL, `lat` REAL NOT NULL, `lon` REAL NOT NULL, `gasolinaAvg` REAL, `gasolinaMin` REAL, `gasolinaMax` REAL, `gasolinaAditAvg` REAL, `gasolinaAditMin` REAL, `gasolinaAditMax` REAL, `etanolAvg` REAL, `etanolMin` REAL, `etanolMax` REAL, `dieselAvg` REAL, `dieselMin` REAL, `dieselMax` REAL, `dataReferencia` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`cityKey`))",
+        "fields": [
+          {
+            "fieldPath": "cityKey",
+            "columnName": "cityKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uf",
+            "columnName": "uf",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "municipio",
+            "columnName": "municipio",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gasolinaAvg",
+            "columnName": "gasolinaAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "gasolinaMin",
+            "columnName": "gasolinaMin",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "gasolinaMax",
+            "columnName": "gasolinaMax",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "gasolinaAditAvg",
+            "columnName": "gasolinaAditAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "gasolinaAditMin",
+            "columnName": "gasolinaAditMin",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "gasolinaAditMax",
+            "columnName": "gasolinaAditMax",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "etanolAvg",
+            "columnName": "etanolAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "etanolMin",
+            "columnName": "etanolMin",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "etanolMax",
+            "columnName": "etanolMax",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dieselAvg",
+            "columnName": "dieselAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dieselMin",
+            "columnName": "dieselMin",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dieselMax",
+            "columnName": "dieselMax",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dataReferencia",
+            "columnName": "dataReferencia",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cityKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_anp_city_stats_lat_lon",
+            "unique": false,
+            "columnNames": [
+              "lat",
+              "lon"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_anp_city_stats_lat_lon` ON `${TABLE_NAME}` (`lat`, `lon`)"
+          }
+        ]
+      },
+      {
+        "tableName": "anp_state_stats",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uf` TEXT NOT NULL, `lat` REAL NOT NULL, `lon` REAL NOT NULL, `gasolinaAvg` REAL, `etanolAvg` REAL, `dieselAvg` REAL, `dataReferencia` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`uf`))",
+        "fields": [
+          {
+            "fieldPath": "uf",
+            "columnName": "uf",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gasolinaAvg",
+            "columnName": "gasolinaAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "etanolAvg",
+            "columnName": "etanolAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dieselAvg",
+            "columnName": "dieselAvg",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "dataReferencia",
+            "columnName": "dataReferencia",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "uf"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cb100ee46b65ab5f4ee257407cfac516')"
+    ]
+  }
+}
