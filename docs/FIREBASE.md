@@ -37,6 +37,30 @@ O roteiro completo, para fazer no aparelho com calma, está em [TESTES-MANUAIS-C
 
 Aviso: a conta de e-mail com o mesmo endereço do Google é vinculada (entrar com Google e com e-mail/senha usando o mesmo endereço resulta na mesma conta).
 
+## Amigos e rolê (versão 0.5)
+
+Depois de atualizar o app para a 0.5, faça **uma vez** no projeto Firebase (sem isso a aba Amigos recebe "permission denied" e os rolês nunca expiram):
+
+1. **Publicar as regras novas** (`firebase/firestore.rules` agora cobre `busca`, `perfisPublicos`, `atividade`, `convites`, `amizades`, `bloqueios` e `roles`):
+
+   ```
+   cd firebase
+   firebase deploy --only firestore:rules
+   ```
+
+2. **Índices:** nenhum índice composto é necessário. As consultas usam só filtros de igualdade (`convites` por `de`/`para`, `amizades` por `a`/`b`, `bloqueios` por `quem`, `roles` por `participantes` com array-contains) ou um intervalo num único campo (`busca`, por prefixo de `displayNameLower`), que o Firestore indexa sozinho. `firebase/firestore.indexes.json` continua vazio. Se algum dia o Logcat (`Rumo/social`) mostrar `FAILED_PRECONDITION ... requires an index`, abra o link da mensagem e crie o índice sugerido, ou acrescente-o a `firestore.indexes.json` e rode `firebase deploy --only firestore:indexes`.
+
+3. **Ativar a política de TTL** do campo `expiraEm` da coleção `roles` (apaga os rolês vencidos, 7 dias depois de criados ou renovados):
+   1. No console do Firebase, abra **Firestore Database**.
+   2. Abra a aba **Time to live** (em versões novas do console pode aparecer como "Políticas de TTL"; também fica no Google Cloud Console, em Firestore > Time-to-live).
+   3. **Criar política**: ID da coleção `roles`, campo de carimbo de data/hora `expiraEm`.
+   4. Salve. A política leva alguns minutos para ficar ativa, e a exclusão pode atrasar até cerca de 24 horas depois do vencimento: por isso o app também ignora e fecha rolês vencidos por conta própria.
+   5. O TTL só apaga o documento do rolê; o Firestore não apaga a subcoleção `roles/{id}/membros` em cascata. O app remove os membros ao encerrar um rolê, e o que sobrar fica inacessível (as regras exigem o rolê) e sem dados pessoais além do nome e do orçamento.
+
+4. Para testar com calma, siga [TESTES-MANUAIS-AMIGOS.md](TESTES-MANUAIS-AMIGOS.md).
+
+Testes das regras (inclui o social): dentro de `firebase/`, `npx firebase-tools emulators:exec --only firestore --project demo-rumo "npm test"`.
+
 ## Versões escolhidas
 
 Verificadas com AGP 8.13.2, Kotlin 2.2.20, Gradle 8.14.3 (`./gradlew.bat test :app:assembleRelease` sem `google-services.json`).
@@ -51,3 +75,13 @@ Verificadas com AGP 8.13.2, Kotlin 2.2.20, Gradle 8.14.3 (`./gradlew.bat test :a
 Com o `google-services.json` presente o plugin é aplicado; **um build COM o arquivo nunca foi verificado** (todos os builds e testes até aqui foram sem ele). Depois de adicioná-lo, o primeiro item a rodar é o "0. Build com o google-services.json" de [TESTES-MANUAIS-CONTA.md](TESTES-MANUAIS-CONTA.md).
 
 O Firestore usa cache só em memória (os documentos da conta não ficam gravados no aparelho depois de sair). Escritas feitas offline não sobrevivem a matar o app; não há perda, porque o banco local (Room) é a fonte da verdade e reenvia o que estiver pendente na próxima sincronização.
+
+## Passos para o social (projeto 2)
+
+Amigos e rolê usam as coleções `busca`, `perfisPublicos`, `atividade`, `convites`, `amizades`, `bloqueios` e `roles` (com a subcoleção `membros`), todas protegidas por `firebase/firestore.rules`.
+
+1. **Publique as regras**: dentro de `firebase/`, `firebase deploy --only firestore:rules`. Sem isso, toda operação social é recusada ("permission denied").
+2. **Índices**: a busca por prefixo (`busca` ordenada por `displayNameLower` com `startAt`/`endAt`) usa só um campo e **não precisa de índice composto**. As demais consultas (igualdade em `de`, `para`, `a`, `b` e `array-contains` em `participantes`) também dispensam índice.
+3. **TTL dos rolês** (apaga rolês vencidos sozinho): no console do Firebase, Firestore Database > Time-to-live (TTL) > Criar política, grupo de coleções `roles`, campo de carimbo de data/hora `expiraEm`. O app grava `expiraEm` como carimbo de data/hora (as regras aceitam número ou carimbo), que é o tipo que o TTL exige; a leitura converte de volta para milissegundos. Mesmo antes da política, o app trata o rolê vencido como expirado. Os documentos da subcoleção `membros` **não** são apagados pelo TTL (o TTL só remove o documento do rolê); eles ficam ilegíveis, pois as regras exigem o rolê existente para ler os membros.
+4. **Limitação conhecida (membros de rolê vencido)**: o TTL apaga só o documento `roles/{id}`; os documentos de `roles/{id}/membros/{uid}` ficam no servidor, ilegíveis pelas regras e fora do alcance de `deleteAllSocial`. O caminho de limpeza é `FirestoreSocialStore.closeRole`: o cliente do criador encerra os rolês vencidos que enxerga (a ligação disso vem na Task 7).
+5. **Bloqueios e consultas**: cada documento de `bloqueios` leva o campo `quem` (uid de quem bloqueia), e a lista dos bloqueios usa `where quem == uid`. Toda consulta de lista precisa de uma restrição que as regras consigam provar (`para`/`de` em convites, `a`/`b` em amizades, `quem` em bloqueios, `participantes array-contains` em roles, `limit` <= 20 em busca); uma consulta sem isso é recusada em tempo de execução.

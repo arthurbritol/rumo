@@ -68,6 +68,19 @@ fun clampText(s: String, max: Int = MAX_PROFILE_TEXT): String {
 }
 
 /**
+ * `lowercase(Locale.ROOT)` de [name] só quando a minúscula muda apenas letras ASCII (igual ao `lower()` das regras,
+ * que não converte maiúsculas acentuadas); caso contrário nulo, e o campo `displayNameLower` deve ser omitido.
+ */
+fun rulesLowerOrNull(name: String): String? {
+    val lower = name.lowercase(Locale.ROOT)
+    val asciiLower = String(CharArray(name.length) { i -> name[i].let { c -> if (c in 'A'..'Z') c + 32 else c } })
+    return if (lower == asciiLower) lower else null
+}
+
+/** Nome exibido válido para as regras (1..60 após aparar; "Motociclista" se vazio). */
+fun safeDisplayName(raw: String): String = clampText(raw).ifEmpty { DEFAULT_NAME }
+
+/**
  * Mapa do perfil que NUNCA viola as regras (um perfil recusado falharia a cada sincronização): nome aparado e
  * limitado a 1..60 ("Motociclista" se vazio), marca/modelo limitados a 60 (em branco viram nulos), ano omitido
  * se nulo ou fora de 1950..2100. `displayNameLower` é `lowercase(Locale.ROOT)` e só vai quando a minúscula muda
@@ -76,11 +89,9 @@ fun clampText(s: String, max: Int = MAX_PROFILE_TEXT): String {
  * `voice` vai como booleano (as regras aceitam bool ou nulo).
  */
 fun profileToMap(p: UserProfile, nowMs: Long): Map<String, Any?> = buildMap {
-    val name = clampText(p.displayName).ifEmpty { DEFAULT_NAME }
+    val name = safeDisplayName(p.displayName)
     put("displayName", name)
-    val lower = name.lowercase(Locale.ROOT)
-    val asciiLower = String(CharArray(name.length) { i -> name[i].let { c -> if (c in 'A'..'Z') c + 32 else c } })
-    if (lower == asciiLower) put("displayNameLower", lower)
+    rulesLowerOrNull(name)?.let { put("displayNameLower", it) }
     put("brand", p.brand?.let(::clampText)?.ifEmpty { null })
     put("model", p.model?.let(::clampText)?.ifEmpty { null })
     if (p.year != null && p.year in 1950..2100) put("year", p.year)

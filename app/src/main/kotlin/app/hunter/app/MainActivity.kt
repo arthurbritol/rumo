@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -36,11 +38,18 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
 import app.hunter.app.account.accountViewModelFactory
+import app.hunter.app.social.SocialViewModel
+import app.hunter.app.social.friendsBadge
+import app.hunter.app.social.pendingCount
+import app.hunter.app.social.socialViewModelFactory
 import app.hunter.app.sync.ProfilePrefs
+import app.hunter.app.sync.safeDisplayName
 import app.hunter.app.ui.AccountNotice
+import app.hunter.app.ui.FriendsRoute
 import app.hunter.app.ui.GarageScreen
 import app.hunter.app.ui.HunterTheme
 import app.hunter.app.ui.MapScreen
@@ -110,6 +119,9 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
     var overlay by rememberSaveable { mutableStateOf(Overlay.NONE.name) }
     val authState by accountVm.state.collectAsStateWithLifecycle()
     val signedIn = authState is AuthState.SignedIn
+    // Um só SocialViewModel para o app: a aba, o marcador de pendências e o Perfil enxergam o mesmo estado.
+    val socialVm: SocialViewModel = viewModel(factory = socialViewModelFactory(account.social))
+    val socialState by socialVm.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         if (route == null) {
@@ -169,7 +181,9 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
             HunterRoot(
                 vm = vmProvider(),
                 prefs = prefs,
+                socialVm = socialVm,
                 signedIn = signedIn,
+                myName = { safeDisplayName(ProfilePrefs.read(prefs)?.displayName.orEmpty()) },
                 accountAvailable = account.available,
                 onOpenProfile = { overlay = Overlay.PROFILE.name },
                 onCreateAccount = { overlay = Overlay.LOGIN.name },
@@ -194,6 +208,8 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             onBack = { overlay = Overlay.NONE.name },
                             updateCheck = vmProvider().updateCheck.collectAsStateWithLifecycle().value,
                             onCheckUpdate = { vmProvider().checkUpdate(force = true) },
+                            searchable = socialState.searchVisible,
+                            onSearchableChange = socialVm::answerSearchPrompt,
                         )
                     }
                     BackHandler { overlay = Overlay.NONE.name }
@@ -225,7 +241,9 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
 private fun HunterRoot(
     vm: HunterViewModel,
     prefs: SharedPreferences,
+    socialVm: SocialViewModel,
     signedIn: Boolean,
+    myName: () -> String,
     accountAvailable: Boolean,
     onOpenProfile: () -> Unit,
     onCreateAccount: () -> Unit,
@@ -235,7 +253,14 @@ private fun HunterRoot(
     val nav by vm.nav.collectAsStateWithLifecycle()
 
     // Toda vez que o app volta para a frente (o processo pode ficar vivo por dias): procura versão nova.
-    LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.checkUpdate() }
+    // Também recalcula a semana dos amigos e publica (respeitando o intervalo mínimo).
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        vm.checkUpdate()
+        socialVm.onForeground()
+    }
+    val social by socialVm.state.collectAsStateWithLifecycle()
+    val badge = friendsBadge(pendingCount(social.invitesReceived.size, social.roles.count { it.pending }))
+    var friendsSubOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -247,7 +272,13 @@ private fun HunterRoot(
                         NavigationBarItem(
                             selected = i == tabIndex,
                             onClick = { tabIndex = i },
-                            icon = { Icon(t.icon, t.label) },
+                            icon = {
+                                if (t == Tab.Friends && badge != null) {
+                                    BadgedBox(badge = { Badge { Text(badge) } }) { Icon(t.icon, t.label) }
+                                } else {
+                                    Icon(t.icon, t.label)
+                                }
+                            },
                             label = { Text(t.label) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = MaterialTheme.colorScheme.primary,
@@ -273,6 +304,14 @@ private fun HunterRoot(
                             when (t) {
                                 Tab.Trips -> TripsScreen(vm)
                                 Tab.Garage -> GarageScreen(vm, onOpenProfile)
+                                Tab.Friends -> FriendsRoute(
+                                    vm = socialVm,
+                                    accountAvailable = accountAvailable,
+                                    accountSignedIn = signedIn,
+                                    myName = myName,
+                                    onSignIn = onCreateAccount,
+                                    onSubScreen = { friendsSubOpen = it },
+                                )
                                 Tab.Pod -> PodScreen(vm)
                                 Tab.Map -> {}
                             }
@@ -281,7 +320,7 @@ private fun HunterRoot(
                 }
             }
             // Composto depois do MapScreen para ter prioridade sobre o "voltar" do mapa.
-            BackHandler(enabled = tab != Tab.Map) { tabIndex = Tab.Map.ordinal }
+            BackHandler(enabled = tab != Tab.Map && !(tab == Tab.Friends && friendsSubOpen)) { tabIndex = Tab.Map.ordinal }
 
             // Aviso de versão nova por cima de tudo, exceto durante a navegação (nada atrapalha a condução).
             val update by vm.update.collectAsStateWithLifecycle()

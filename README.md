@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="Rumo — navegação, viagens e garagem para a Royal Enfield Hunter 350" width="100%">
+  <img src="docs/assets/banner.png" alt="Rumo — navegação, viagens, garagem e amigos para a sua moto" width="100%">
 </p>
 
 <p align="center">
@@ -12,10 +12,17 @@
 
 # Rumo
 
-App Android para a **Royal Enfield Hunter 350**: mapa com busca de destino, rotas pensadas para moto, navegação
-curva a curva com voz, gravação de viagens, controle de abastecimento e manutenção, mapas offline e envio da
-navegação ao **Tripper Pod** por Bluetooth. Funciona sem conta (tudo no celular); com conta opcional, seus
-dados ficam guardados na nuvem. Não modifica o Waze.
+App Android para motociclistas: mapa com busca de destino, rotas pensadas para moto, navegação curva a curva com
+voz, gravação de viagens, controle de abastecimento e manutenção, mapas offline, **amigos e rolê em grupo** e
+conexão com o painel da moto por Bluetooth. Funciona com qualquer moto; hoje o painel suportado é o **Tripper Pod**
+da Royal Enfield, e outras marcas (como a conexão da Yamaha) entram no catálogo de conexões aos poucos. Funciona sem
+conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem. Não modifica o Waze.
+
+<p align="center">
+  <img src="docs/assets/recursos.png" alt="Recursos do Rumo: mapa e rotas, viagens, garagem, amigos, rolê em grupo e conexões" width="90%">
+</p>
+
+> Capturas de tela do app: em breve (a interface ainda vai passar por uma rodada de redesenho).
 
 ## Recursos
 
@@ -51,11 +58,20 @@ dados ficam guardados na nuvem. Não modifica o Waze.
   `app/google-services.json` o app compila e roda normalmente, só sem login.
 - Roteiro de teste no aparelho: [docs/TESTES-MANUAIS-CONTA.md](docs/TESTES-MANUAIS-CONTA.md).
 
+**Amigos e rolê (precisa de conta)**
+- Aba Amigos: busque pelo nome, convide, aceite e veja a moto e os km da semana de cada amigo. Dá para desfazer a
+  amizade ou bloquear, e escolher se você aparece na busca (Perfil).
+- Rolê em grupo: até 10 pessoas, cada uma informa quanto quer gastar; o app mostra a média e até onde o grupo
+  vai com o custo por km de cada um. O rolê some sozinho em 7 dias.
+- Exige publicar as regras e o TTL no Firebase: [docs/FIREBASE.md](docs/FIREBASE.md). Roteiro de teste com duas
+  contas: [docs/TESTES-MANUAIS-AMIGOS.md](docs/TESTES-MANUAIS-AMIGOS.md).
+
 **Tripper Pod**
 - Conexão Bluetooth, PIN no primeiro uso, reconexão automática e bússola.
 - Na navegação, o Pod mostra a manobra, a distância e a chegada, o tempo ou a distância restantes.
-- O protocolo foi validado apenas no Pod da Meteor 350. Na Hunter 350 a compatibilidade é esperada, mas não
-  verificada: teste com a moto parada antes de depender dele.
+- O protocolo foi validado apenas no Pod da Meteor 350. Em outras Royal Enfield (como a Hunter 350) a
+  compatibilidade é esperada, mas não verificada: teste com a moto parada antes de depender dele.
+- Outras marcas: o catálogo de conexões por marca está planejado; até lá, você informa os dados da moto à mão.
 
 ## Instalação
 
@@ -66,7 +82,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 Requer Android 8.0+ e celular arm64. Instala direto, sem Play Store. Depois da primeira instalação o app avisa
-sozinho quando sai uma release nova (consulta o GitHub ao abrir, no máximo a cada 6 h) e atualiza com um toque.
+sozinho quando sai uma release nova (consulta o GitHub toda vez que o app volta para a frente, no máximo a cada 15 min, e há "Buscar atualização" no Perfil) e atualiza com um toque.
 
 ## Desenvolvimento
 
@@ -85,7 +101,7 @@ APIs), as estatísticas de viagem, combustível, manutenção, lembretes e a sin
 ## Versões e releases
 
 Cada push na `main` que altera o app publica uma release nova: `0.3.1`, `0.3.2`, `0.3.3`… O número do meio vem de
-[`version.txt`](version.txt). Para uma mudança grande, edite esse arquivo (`0.4`) e a contagem recomeça em `0.4.1`.
+[`version.txt`](version.txt). Para uma mudança grande, edite esse arquivo (`0.5`) e a contagem recomeça em `0.5.1`.
 
 ## Arquitetura
 
@@ -111,4 +127,4 @@ segurança, em [SECURITY.md](SECURITY.md).
 
 ## Licença
 
-[Apache-2.0](LICENSE). Projeto independente, sem afiliação com a Royal Enfield.
+[Apache-2.0](LICENSE). Projeto independente, sem afiliação com a Royal Enfield, a Yamaha ou outras fabricantes.

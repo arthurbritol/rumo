@@ -15,7 +15,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
-private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont ->
+internal suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont ->
     addOnSuccessListener { cont.resume(it) }
     addOnFailureListener { cont.resumeWithException(it) }
 }
@@ -23,11 +23,15 @@ private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont 
 /**
  * [RemoteStore] sobre o Firestore, nos caminhos permitidos por firebase/firestore.rules:
  * usuarios/{uid} (perfil), subcoleções por [Kind.path], config/hodometro e config/exclusao.
+ *
+ * [deleteSocial] apaga os dados sociais da conta (convites, amizades, rolês etc.) e roda no início de
+ * [deleteAllUserData]; o padrão não faz nada (testes e builds sem social).
  */
 class FirestoreRemoteStore(
     private val db: FirebaseFirestore,
     private val uid: String,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val deleteSocial: suspend (uid: String) -> Unit = {},
 ) : RemoteStore {
     private val user: DocumentReference get() = db.collection("usuarios").document(uid)
     private val odometerRef: DocumentReference get() = user.collection("config").document("hodometro")
@@ -70,6 +74,8 @@ class FirestoreRemoteStore(
         markerRef.get(Source.SERVER).await().getBoolean("pending") ?: false
 
     override suspend fun deleteAllUserData() {
+        // Social primeiro: resumível (a marca de exclusão já foi gravada) e só depois o perfil some.
+        deleteSocial(uid)
         for (kind in Kind.entries) {
             while (true) {
                 val page = col(kind).limit(DELETE_PAGE_SIZE.toLong()).get(Source.SERVER).await().documents

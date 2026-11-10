@@ -1,4 +1,9 @@
 rules_version = '2';
+// Fluxo do cliente (social): criar rolê = UM lote com roles/{id} + membros de todos
+// (criador como aceito, convidados com estado/nome/atualizadoEm); aceitar convite = lote
+// com amizades/{par} + delete do convite; apagar rolê = lote que apaga membros e o rolê
+// (o criador precisa do rolê existente para apagar membros). Medido no emulador: cabe
+// (rolê com 9 amigos + 10 membros num lote).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -77,6 +82,297 @@ service cloud.firestore {
         allow create, update: if dono(uid)
           && request.resource.data.keys().hasOnly(['pending'])
           && request.resource.data.pending is bool;
+      }
+    }
+
+    // ===================== Social: amigos e rolê =====================
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    // Marca permanente de exclusão de conta (usuarios/{uid}/config/exclusao): depois dela nada público
+    // (busca, perfil público, atividade) pode ser escrito de novo por esse uid — uma publicação atrasada, ou de
+    // outro aparelho com o token ainda válido, não ressuscita dados de uma conta que está sendo apagada.
+    // Apagar continua permitido (é a limpeza). 1 chamada exists().
+    function semExclusao(uid) {
+      return !exists(/databases/$(database)/documents/usuarios/$(uid)/config/exclusao);
+    }
+
+    // Id do par de amigos: os dois uids em ordem alfabética, ligados por "_".
+    function parId(a, b) {
+      return a < b ? a + '_' + b : b + '_' + a;
+    }
+
+    // 1 chamada exists().
+    function amigos(a, b) {
+      return exists(/databases/$(database)/documents/amizades/$(parId(a, b)));
+    }
+
+    // Id composto "primeiro_segundo" começa com o uid de quem chama.
+    function idComecaCom(id, uid) {
+      return id.size() > uid.size() + 1 && id[0:uid.size() + 1] == uid + '_';
+    }
+
+    function nomeValido(d, campo) {
+      return d[campo] is string && d[campo].size() >= 1 && d[campo].size() <= 60;
+    }
+
+    // Chave de busca normalizada pelo cliente (sem acento, minúscula): a regra só
+    // confere o formato (string 1..60, sem maiúscula ASCII).
+    function chaveBuscaValida(k) {
+      return k is string && k.size() >= 1 && k.size() <= 60
+        && !k.matches('.*[A-Z].*');
+    }
+
+    // busca/{uid}: índice de busca por nome; qualquer conta lê.
+    function buscaValida(d) {
+      return d.keys().hasOnly(['displayName', 'displayNameLower', 'brand', 'model'])
+        && d.keys().hasAll(['displayName', 'displayNameLower'])
+        && nomeValido(d, 'displayName')
+        && d.displayNameLower is string
+        && chaveBuscaValida(d.displayNameLower)
+        && textoOpcional(d, 'brand', 60)
+        && textoOpcional(d, 'model', 60);
+    }
+
+    function perfilPublicoValido(d) {
+      return d.keys().hasOnly([
+          'displayName', 'displayNameLower', 'brand', 'model', 'year', 'searchable'
+        ])
+        && d.keys().hasAll(['displayName', 'searchable'])
+        && nomeValido(d, 'displayName')
+        && (!('displayNameLower' in d) || chaveBuscaValida(d.displayNameLower))
+        && textoOpcional(d, 'brand', 60)
+        && textoOpcional(d, 'model', 60)
+        && (!('year' in d) || d.year == null
+            || (d.year is int && d.year >= 1950 && d.year <= 2100))
+        && d.searchable is bool;
+    }
+
+    function atividadeValida(d) {
+      return d.keys().hasOnly(['weekStartMs', 'weekKm'])
+        && d.keys().hasAll(['weekStartMs', 'weekKm'])
+        && epochMsOk(d.weekStartMs)
+        && numeroOk(d.weekKm);
+    }
+
+    // Número finito, não negativo e limitado.
+    function numeroOk(x) {
+      return x is number && x >= 0 && x < 1000000000000;
+    }
+
+    // Epoch em ms (hoje ~1.8e12): teto próprio, bem acima do dos valores.
+    function epochMsOk(x) {
+      return x is number && x >= 0 && x < 100000000000000;
+    }
+
+    function epochMsOpcional(d, campo) {
+      return !(campo in d) || d[campo] == null || epochMsOk(d[campo]);
+    }
+
+    function expiraOk(x) {
+      return epochMsOk(x) || x is timestamp;
+    }
+
+    function numeroOuNulo(d, campo) {
+      return !(campo in d) || d[campo] == null || numeroOk(d[campo]);
+    }
+
+    match /busca/{uid} {
+      allow get: if logado();
+      // Só consulta limitada (o cliente busca por prefixo de displayNameLower).
+      allow list: if logado() && request.query.limit <= 20;
+      allow create, update: if dono(uid) && semExclusao(uid) && buscaValida(request.resource.data);
+      allow delete: if dono(uid);
+    }
+
+    // Leitura por amigo: 1 chamada exists().
+    // Não há leitura por "dividir um rolê": exigiria saber o id do rolê em
+    // comum, que o documento não tem (limitado a dono + amigos).
+    match /perfisPublicos/{uid} {
+      allow read: if dono(uid) || (logado() && amigos(request.auth.uid, uid));
+      allow create, update: if dono(uid) && semExclusao(uid) && perfilPublicoValido(request.resource.data);
+      allow delete: if dono(uid);
+    }
+
+    match /atividade/{uid} {
+      allow read: if dono(uid) || (logado() && amigos(request.auth.uid, uid));
+      allow create, update: if dono(uid) && semExclusao(uid) && atividadeValida(request.resource.data);
+      allow delete: if dono(uid);
+    }
+
+    // Convite: id "de_para". Não consulta bloqueios (não revela bloqueio).
+    match /convites/{id} {
+      allow create: if logado()
+        && request.resource.data.keys().hasAll(['de', 'para'])
+        && request.resource.data.keys().hasOnly(['de', 'para', 'criadoEm'])
+        && epochMsOpcional(request.resource.data, 'criadoEm')
+        && request.resource.data.de == request.auth.uid
+        && request.resource.data.de.size() <= 128
+        && request.resource.data.para is string
+        && request.resource.data.para.size() <= 128
+        && request.resource.data.para != request.resource.data.de
+        && id == request.resource.data.de + '_' + request.resource.data.para;
+      allow read, delete: if logado()
+        && (request.auth.uid == resource.data.de || request.auth.uid == resource.data.para);
+    }
+
+    // Amizade: id = par ordenado; criada só pelo destinatário de um convite,
+    // no mesmo lote que apaga esse convite. 2 chamadas (exists + existsAfter).
+    function conviteDoOutro(outro) {
+      return /databases/$(database)/documents/convites/$(outro + '_' + request.auth.uid);
+    }
+
+    function outroDoPar(d) {
+      return request.auth.uid == d.a ? d.b : d.a;
+    }
+
+    match /amizades/{id} {
+      allow create: if logado()
+        && request.resource.data.keys().hasOnly(['a', 'b', 'criadoEm'])
+        && request.resource.data.keys().hasAll(['a', 'b'])
+        && epochMsOpcional(request.resource.data, 'criadoEm')
+        && request.resource.data.a is string
+        && request.resource.data.b is string
+        && request.resource.data.a < request.resource.data.b
+        && id == request.resource.data.a + '_' + request.resource.data.b
+        && (request.auth.uid == request.resource.data.a || request.auth.uid == request.resource.data.b)
+        && exists(conviteDoOutro(outroDoPar(request.resource.data)))
+        && !existsAfter(conviteDoOutro(outroDoPar(request.resource.data)));
+      allow read, delete: if logado()
+        && (request.auth.uid == resource.data.a || request.auth.uid == resource.data.b);
+    }
+
+    // Bloqueio: id "quemBloqueia_bloqueado"; só quem bloqueia enxerga.
+    match /bloqueios/{id} {
+      allow get, delete: if logado() && idComecaCom(id, request.auth.uid);
+      // Listagem por where quem == uid (id não existe em regras de list).
+      allow list: if logado() && resource.data.quem == request.auth.uid;
+      allow create: if logado() && idComecaCom(id, request.auth.uid)
+        && request.auth.uid.size() <= 128 && id.size() <= request.auth.uid.size() + 129
+        && request.resource.data.keys().hasOnly(['criadoEm', 'quem'])
+        && request.resource.data.keys().hasAll(['quem'])
+        && request.resource.data.quem == request.auth.uid
+        && epochMsOpcional(request.resource.data, 'criadoEm');
+    }
+
+    // Rolê. Criação: criador + até 9 convidados, todos amigos do criador:
+    // no máximo 9 exists() (limite de 10 por avaliação).
+    function amigoOuVazio(lista, i, criador) {
+      return lista.size() <= i || amigos(criador, lista[i]);
+    }
+
+    function convidadosSaoAmigos(p, criador) {
+      let o = p.removeAll([criador]);
+      return o.size() <= 9
+        && amigoOuVazio(o, 0, criador) && amigoOuVazio(o, 1, criador)
+        && amigoOuVazio(o, 2, criador) && amigoOuVazio(o, 3, criador)
+        && amigoOuVazio(o, 4, criador) && amigoOuVazio(o, 5, criador)
+        && amigoOuVazio(o, 6, criador) && amigoOuVazio(o, 7, criador)
+        && amigoOuVazio(o, 8, criador);
+    }
+
+    function roleCamposValidos(d) {
+      return d.keys().hasOnly(['nome', 'criadorUid', 'participantes', 'expiraEm', 'criadoEm'])
+        && d.keys().hasAll(['nome', 'criadorUid', 'participantes', 'expiraEm'])
+        && nomeValido(d, 'nome')
+        && d.criadorUid is string
+        && d.participantes is list
+        && d.participantes.size() >= 1 && d.participantes.size() <= 10
+        && d.participantes.toSet().size() == d.participantes.size()
+        && d.expiraEm != null
+        && expiraOk(d.expiraEm)
+        && epochMsOpcional(d, 'criadoEm');
+    }
+
+    function roleCriacaoValida(d) {
+      return roleCamposValidos(d)
+        && d.criadorUid == request.auth.uid
+        && request.auth.uid in d.participantes
+        && convidadosSaoAmigos(d.participantes, request.auth.uid);
+    }
+
+    // Participante sai: só `participantes` muda, e só perde o próprio uid.
+    // O criador não sai assim: precisa apagar o rolê.
+    function saidaPropria(antes, depois) {
+      return request.auth.uid != antes.criadorUid
+        && depois.diff(antes).affectedKeys().hasOnly(['participantes'])
+        && depois.participantes == antes.participantes.removeAll([request.auth.uid]);
+    }
+
+    // Criador: nome, expiraEm e remoções em participantes (continua dentro).
+    function edicaoDoCriador(antes, depois) {
+      return depois.diff(antes).affectedKeys().hasOnly(['nome', 'expiraEm', 'participantes'])
+        && nomeValido(depois, 'nome')
+        && expiraOk(depois.expiraEm)
+        && depois.participantes.hasOnly(antes.participantes)
+        && depois.participantes.size() <= antes.participantes.size()
+        && depois.participantes.toSet().size() == depois.participantes.size()
+        && antes.criadorUid in depois.participantes;
+    }
+
+    function membroValido(d) {
+      return d.keys().hasOnly(['estado', 'orcamento', 'custoPorKm', 'atualizadoEm', 'nome'])
+        && d.keys().hasAll(['estado'])
+        && (d.estado == 'convidado' || d.estado == 'aceito')
+        && epochMsOpcional(d, 'atualizadoEm')
+        && numeroOuNulo(d, 'orcamento')
+        && numeroOuNulo(d, 'custoPorKm')
+        && textoOpcional(d, 'nome', 60);
+    }
+
+    // Convidado criado pelo criador: só estado, nome e atualizadoEm.
+    function convidadoInicial(d) {
+      return d.estado == 'convidado'
+        && d.keys().hasOnly(['estado', 'nome', 'atualizadoEm', 'orcamento', 'custoPorKm'])
+        && (!('orcamento' in d) || d.orcamento == null)
+        && (!('custoPorKm' in d) || d.custoPorKm == null);
+    }
+
+    function roleAposLote(rid) {
+      return getAfter(/databases/$(database)/documents/roles/$(rid)).data;
+    }
+
+    function souParticipante(rid) {
+      return request.auth.uid in get(/databases/$(database)/documents/roles/$(rid)).data.participantes;
+    }
+
+    match /roles/{id} {
+      allow read: if logado() && request.auth.uid in resource.data.participantes;
+      allow create: if logado() && roleCriacaoValida(request.resource.data);
+      allow delete: if logado() && resource.data.criadorUid == request.auth.uid;
+      allow update: if logado() && request.auth.uid in resource.data.participantes
+        && request.resource.data.criadorUid == resource.data.criadorUid
+        && (saidaPropria(resource.data, request.resource.data)
+            || (resource.data.criadorUid == request.auth.uid
+                && edicaoDoCriador(resource.data, request.resource.data)));
+
+      match /membros/{uid} {
+        // Ler os demais: o leitor tem doc 'aceito' E ainda está em participantes
+        // do rolê (que precisa existir). 2 chamadas get().
+        allow get: if dono(uid)
+          || (logado() && souParticipante(id)
+              && get(/databases/$(database)/documents/roles/$(id)/membros/$(request.auth.uid)).data.estado == 'aceito');
+        allow list: if logado() && souParticipante(id)
+          && get(/databases/$(database)/documents/roles/$(id)/membros/$(request.auth.uid)).data.estado == 'aceito';
+        // Criador cria os convidados (e o próprio, já aceito) junto com o rolê:
+        // getAfter() enxerga o rolê do mesmo lote. 1 chamada por membro
+        // (cada escrita do lote é avaliada à parte).
+        allow create: if logado() && membroValido(request.resource.data)
+          && roleAposLote(id).criadorUid == request.auth.uid
+          && uid in roleAposLote(id).participantes
+          && (uid == request.auth.uid
+              ? request.resource.data.estado == 'aceito'
+              : convidadoInicial(request.resource.data));
+        // Só o dono do documento, enquanto ainda é participante, muda
+        // estado/orçamento/custo (nunca volta a 'convidado'). 1 get().
+        allow update: if dono(uid) && membroValido(request.resource.data)
+          && request.resource.data.estado == 'aceito'
+          && souParticipante(id);
+        // Dono apaga o próprio; criador apaga qualquer um (1 get()).
+        allow delete: if dono(uid)
+          || (logado() && get(/databases/$(database)/documents/roles/$(id)).data.criadorUid == request.auth.uid);
       }
     }
 
