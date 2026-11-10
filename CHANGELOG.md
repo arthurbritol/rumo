@@ -2,6 +2,21 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.5.2]
+
+### Adicionado
+- **Localização compartilhada com amigos**: acompanhe amigos em tempo real durante passeios e viagens com a moto conectada via Bluetooth (Tripper Pod).
+- **Controle seletivo amigo por amigo**: ative ou desative o compartilhamento individualmente para cada amigo através de um interruptor dedicado na aba Amigos.
+- **Transmissão atrelada à moto**: a localização só é transmitida para a nuvem quando a moto estiver conectada (`PodPhase.CONNECTED`) e houver ao menos um amigo autorizado. Ao desligar a moto ou desconectar o Pod, a localização é apagada do Firestore imediatamente.
+- **Status "Na estrada" na aba Amigos**: amigos autorizados que estiverem pilotando mostram o badge destacado "Na estrada" e o botão "Ver no mapa".
+- **Marcadores de moto no mapa principal**: motos de amigos autorizados são desenhadas no `HunterMap` com ícone orientado pelo rumo (`bearing`), nome do amigo e tempo decorrido desde a última leitura (ex: "agora", "há 1 min").
+- **Centralização suave de câmera**: tocar em "Ver no mapa" na aba Amigos alterna para a aba Mapa e centraliza a visualização na coordenada exata da moto do parceiro.
+- **Regras de segurança no Firestore**: novas coleções `permissoesLocalizacao` e `localizacoes` protegidas por regras estritas — somente amigos mútuos com permissão explícita ativa conseguem ler coordenadas.
+- **Limpeza completa ao apagar a conta**: ao excluir a conta, todos os registros de localização e permissões de localização (enviadas e recebidas) são limpos da nuvem.
+
+### Alterado
+- Regras de segurança do Firestore atualizadas com as novas coleções de localização: é necessário republicá-las com `firebase deploy --only firestore:rules`. Veja [docs/FIREBASE.md](docs/FIREBASE.md).
+
 ## [0.5.0]
 
 ### Adicionado

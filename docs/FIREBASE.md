@@ -85,3 +85,34 @@ Amigos e rolê usam as coleções `busca`, `perfisPublicos`, `atividade`, `convi
 3. **TTL dos rolês** (apaga rolês vencidos sozinho): no console do Firebase, Firestore Database > Time-to-live (TTL) > Criar política, grupo de coleções `roles`, campo de carimbo de data/hora `expiraEm`. O app grava `expiraEm` como carimbo de data/hora (as regras aceitam número ou carimbo), que é o tipo que o TTL exige; a leitura converte de volta para milissegundos. Mesmo antes da política, o app trata o rolê vencido como expirado. Os documentos da subcoleção `membros` **não** são apagados pelo TTL (o TTL só remove o documento do rolê); eles ficam ilegíveis, pois as regras exigem o rolê existente para ler os membros.
 4. **Limitação conhecida (membros de rolê vencido)**: o TTL apaga só o documento `roles/{id}`; os documentos de `roles/{id}/membros/{uid}` ficam no servidor, ilegíveis pelas regras e fora do alcance de `deleteAllSocial`. O caminho de limpeza é `FirestoreSocialStore.closeRole`: o cliente do criador encerra os rolês vencidos que enxerga (a ligação disso vem na Task 7).
 5. **Bloqueios e consultas**: cada documento de `bloqueios` leva o campo `quem` (uid de quem bloqueia), e a lista dos bloqueios usa `where quem == uid`. Toda consulta de lista precisa de uma restrição que as regras consigam provar (`para`/`de` em convites, `a`/`b` em amizades, `quem` em bloqueios, `participantes array-contains` em roles, `limit` <= 20 em busca); uma consulta sem isso é recusada em tempo de execução.
+
+## Localização compartilhada com amigos (versão 0.5.2 / Projeto 3)
+
+Após atualizar o app para a versão 0.5.2, aplique as novas regras de segurança no projeto Firebase real (sem isso as permissões e a localização recebem "permission denied"):
+
+1. **Publicar as regras novas** (`firebase/firestore.rules` agora cobre também `permissoesLocalizacao` e `localizacoes`):
+
+   ```bash
+   cd firebase
+   firebase deploy --only firestore:rules
+   ```
+
+2. **Novas coleções e regras de segurança**:
+   - **`permissoesLocalizacao/{de_para}`**:
+     - Concessão de permissão unidirecional para visualização de posição. O ID do documento é estritamente `de + '_' + para`.
+     - `create`: exige login, `request.auth.uid == de`, `de != para`, amizade mútua ativa (`amigos(de, para)`) e campos válidos (`de`, `para`, opcional `criadoEm`).
+     - `read, delete`: permitido para ambas as pontas (`request.auth.uid == de` ou `request.auth.uid == para`), permitindo ao concedente revogar ou ao amigo destinatário remover.
+   - **`localizacoes/{uid}`**:
+     - Ponto em tempo real da moto do motociclista `uid`.
+     - `create, update`: apenas o próprio dono (`request.auth.uid == uid`), desde que a conta não esteja em exclusão (`semExclusao(uid)`), com campos válidos (`latitude` entre -90 e 90, `longitude` entre -180 e 180, `bearing` opcional 0..360, `speedKmh` opcional >= 0 e `updatedAtMs` epoch ms válido).
+     - `delete`: apenas o próprio dono (`request.auth.uid == uid`).
+     - `read`: apenas o dono OU usuário logado que seja amigo mútuo (`amigos(uid, request.auth.uid)`) **e** possua concessão ativa em `permissoesLocalizacao/$(uid + '_' + request.auth.uid)`.
+
+3. **Índices**: nenhum índice composto é necessário. As consultas em `permissoesLocalizacao` utilizam filtros simples de igualdade em campo único (`whereEqualTo("de", uid)` e `whereEqualTo("para", uid)`). A leitura de coordenadas é feita diretamente por referência de documento (`localizacoes/{uid}`). O arquivo `firebase/firestore.indexes.json` continua vazio.
+
+4. **Testes automatizados das regras**: dentro de `firebase/`, execute os testes no emulador local:
+   ```bash
+   npx firebase-tools emulators:exec --only firestore --project demo-rumo "npm test"
+   ```
+
+5. **Testes manuais**: para o roteiro completo de validação com dois aparelhos, consulte [TESTES-MANUAIS-LOCALIZACAO.md](TESTES-MANUAIS-LOCALIZACAO.md).

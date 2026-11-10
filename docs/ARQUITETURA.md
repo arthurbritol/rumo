@@ -33,8 +33,8 @@ flowchart TD
 | `navigation` | `ValhallaClient` (custo `motorcycle`), `PhotonGeocoder`, `FuelStationFinder` (Overpass), `NavEngine` (projeção na polilinha, fora de rota, recálculo), `NavAnnouncer` (voz), `PodManeuvers` (Valhalla → ícones do Pod) |
 | `trips` | Entidades Room, `TripRecorder`, `TrackingService` (serviço de localização em primeiro plano), `AndroidLocationSource` |
 | `maintenance` | Entidades e DAO de abastecimento, itens de manutenção e hodômetro |
-| `sync-core` | JVM puro: pacote `app.hunter.social` (amigos e rolê) e `SyncEngine` (baixa, mescla e sobe), `merge`/`mergeOdometer` (último a escrever vence, sem duplicar), `LocalStore`/`RemoteStore` (interfaces), `OnboardingFlow` (ordem da primeira abertura), `BikeCatalog` |
-| `app` | `AppDatabase` (Room v3), `HunterViewModel`, telas Compose, `HunterMap` (MapLibre), `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`) e telas de entrada e perfil |
+| `sync-core` | JVM puro: pacote `app.hunter.social` (amigos, rolê e localização compartilhada com `LiveLocation`, `LocationPermission`) e `SyncEngine` (baixa, mescla e sobe), `merge`/`mergeOdometer` (último a escrever vence, sem duplicar), `LocalStore`/`RemoteStore` (interfaces), `OnboardingFlow` (ordem da primeira abertura), `BikeCatalog` |
+| `app` | `AppDatabase` (Room v3), `HunterViewModel`, telas Compose, `HunterMap` (MapLibre e marcadores de amigos), `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`), social e localização compartilhada (`SocialGraph`, `LiveLocationPublisher`, `FirestoreSocialStore`) e telas de entrada e perfil |
 
 ## Decisões
 
@@ -127,6 +127,42 @@ Decisões adiadas de propósito (backlog); nenhuma expõe dados que as regras n�
   campo `deNome` no convite e mudar a regra.
 - **Escolha da busca sem data:** um "Não" não é visível na nuvem (fica igual a "nunca respondeu"), então outro aparelho
   pergunta de novo; e um "Sim" publicado em outro aparelho vale ao abrir, mesmo que este tenha respondido "Não" antes.
+
+## Localização compartilhada com amigos (Projeto 3)
+
+Compartilhamento de posição geográfica em tempo real com amigos autorizados, condicionado estritamente à moto conectada via Bluetooth (Tripper Pod). Sem moto conectada, nada é transmitido para a nuvem.
+
+### Coleções no Firestore
+- **`permissoesLocalizacao/{deUid_paraUid}`**: concessão unidirecional em que `deUid` autoriza `paraUid` a ver sua localização.
+  - Campos: `de` (string), `para` (string), `criadoEm` (epoch ms opcional).
+  - Regras: criação restrita a usuários autenticados onde `de == request.auth.uid`, `de != para` e existe amizade mútua (`amigos(de, para)`). Leitura e exclusão permitidas a ambas as pontas (`de` ou `para`).
+- **`localizacoes/{uid}`**: coordenada ativa da moto do usuário `uid`.
+  - Campos: `latitude` (-90..90), `longitude` (-180..180), `bearing` (0..360 ou nulo), `speedKmh` (>= 0 ou nulo) e `updatedAtMs` (epoch ms recente).
+  - Regras: escrita e exclusão restritas ao dono (`request.auth.uid == uid`), negadas se houver exclusão de conta pendente. Leitura permitida apenas para o dono ou amigos mútuos que possuam documento ativo em `permissoesLocalizacao/{uid_leitor}`.
+
+### Ciclo de vida e `LiveLocationPublisher`
+O `LiveLocationPublisher` (no módulo `app`, gerenciado pelo `SocialGraph`) opera de forma totalmente reativa:
+1. **Gatilhos de transmissão**:
+   - Observa `PodStatus.state`: a transmissão só é habilitada quando o Pod está na fase `PodPhase.CONNECTED`.
+   - Observa `observeGrantedPermissions`: requer pelo menos um amigo autorizado (`grantedPermissions.isNotEmpty()`).
+   - Se o Pod desconectar ou a lista de permissões esvaziar, o publisher cancela a coleta e executa `SocialStore.clearLocation()`, deletando imediatamente `localizacoes/{uid}` no Firestore.
+2. **Filtragem e cota (Spark)**:
+   - Coleta pontos de GPS via `LocationSource` (`AndroidLocationSource`).
+   - Só emite nova coordenada para o Firestore se decorreram pelo menos **30 segundos** desde a última escrita OU se o deslocamento foi superior a **100 metros**.
+3. **Tolerância a desconexões abruptas**:
+   - Se o aparelho desligar sem rede ou sem chance de invocar `clearLocation()`, o leitor no cliente descarta qualquer coordenada com `updatedAtMs` mais antigo que **5 minutos** (critério de inatividade), ocultando o marcador de amigo offline.
+
+### Visualização na UI
+- **Aba Amigos (`FriendsScreen`)**:
+  - Cada card de amigo possui um interruptor individual de "Compartilhar localização" que cria ou apaga o documento `permissoesLocalizacao/{meuUid_amigoUid}`.
+  - Amigos que estão com moto conectada e nos autorizaram exibem o badge destacado **"Na estrada"** e o botão **"Ver no mapa"**.
+- **Aba Mapa (`HunterMap` / `MapScreen`)**:
+  - O mapa observa as localizações ativas dos amigos autorizados enquanto a aba estiver visível.
+  - Desenha marcadores com ícone estilizado de moto apontando no sentido do deslocamento (`bearing`), acompanhados pelo nome do amigo e texto relativo de tempo decorrido (ex: "Ana • agora", "há 1 min", etc.).
+  - Tocar em "Ver no mapa" na aba Amigos dispara um evento via `SocialViewModel.focusFriendOnMapEvent` que alterna para a aba Mapa e centraliza suavemente a câmera na coordenada da moto.
+
+### Exclusão de conta
+- No fluxo de exclusão de conta (`deleteAllUserData`), `FirestoreSocialStore.deleteAllSocial` apaga o documento `localizacoes/{uid}` e remove todas as concessões em `permissoesLocalizacao` onde o usuário é remetente (`de`) ou destinatário (`para`), não deixando dados órfãos.
 
 ## Pod (BLE)
 
