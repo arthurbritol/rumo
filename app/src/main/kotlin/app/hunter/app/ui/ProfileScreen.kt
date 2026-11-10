@@ -72,6 +72,9 @@ fun ProfileRoute(
     onBack: () -> Unit,
     updateCheck: UpdateCheck = UpdateCheck.IDLE,
     onCheckUpdate: () -> Unit = {},
+    /** Logado: se a pessoa aparece na busca por nome; nulo esconde a opção. */
+    searchable: Boolean? = null,
+    onSearchableChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val versionName = remember {
@@ -125,6 +128,8 @@ fun ProfileRoute(
         versionName = versionName,
         updateCheck = updateCheck,
         onCheckUpdate = onCheckUpdate,
+        searchable = searchable.takeIf { state is AuthState.SignedIn },
+        onSearchableChange = onSearchableChange,
     )
 }
 
@@ -234,6 +239,8 @@ fun ProfileScreen(
     versionName: String = "",
     updateCheck: UpdateCheck = UpdateCheck.IDLE,
     onCheckUpdate: () -> Unit = {},
+    searchable: Boolean? = null,
+    onSearchableChange: (Boolean) -> Unit = {},
 ) {
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -284,6 +291,21 @@ fun ProfileScreen(
 
         if (editProfile != null) {
             ProfileEditSection(summary = profileSummary, busy = busy, start = editProfile, onSave = onSaveProfile)
+        }
+
+        if (searchable != null) {
+            SectionTitle("Amigos")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Aparecer na busca", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Amigos podem achar você pelo nome e mandar convite.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(checked = searchable, onCheckedChange = onSearchableChange)
+            }
         }
 
         SectionTitle("Apresentação")

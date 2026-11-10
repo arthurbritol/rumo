@@ -344,4 +344,78 @@ class SocialViewModelTest {
         assertEquals(false, backend.publishCalls.last())
         assertEquals(2, backend.publishCalls.size)
     }
+
+    @Test
+    fun `ao carregar o criador encerra os rolês vencidos`() = runTest {
+        store.rolesById["velho"] = Role("velho", "A", "me", listOf("me"), now - 1)
+        store.rolesById["novo"] = Role("novo", "B", "me", listOf("me"), now + 1000)
+        vm()
+        runCurrent()
+        assertEquals(listOf("velho"), store.closed)
+    }
+
+    @Test
+    fun `abrir o rolê como criador renova e mostra participantes e plano`() = runTest {
+        store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me", "ana"), now + 1000)
+        store.rolesFlow.value = store.rolesById.values.toList()
+        store.membersByRole["r1"] = mutableListOf(
+            Member("me", "Eu", MemberState.ACCEPTED, 100.0, 0.5),
+            Member("ana", "Ana", MemberState.ACCEPTED, 100.0, 0.5),
+        )
+        val vm = vm()
+        runCurrent()
+        vm.openRole("r1")
+        runCurrent()
+        assertEquals(listOf("r1"), store.renewed)
+        val d = vm.roleDetail.value!!
+        assertEquals("R$ 100,00", d.averageLabel)
+        assertEquals("até 200 km", d.reachText)
+        assertEquals(listOf("ana"), d.participants.filter { it.canRemove }.map { it.uid })
+        vm.closeRoleDetail()
+        assertNull(vm.roleDetail.value)
+    }
+
+    @Test
+    fun `convidado que abre o rolê não renova`() = runTest {
+        store.rolesById["r1"] = Role("r1", "Praia", "ana", listOf("ana", "me"), now + 1000)
+        store.rolesFlow.value = store.rolesById.values.toList()
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        val vm = vm()
+        runCurrent()
+        vm.openRole("r1")
+        runCurrent()
+        assertTrue(store.renewed.isEmpty())
+    }
+
+    @Test
+    fun `criador remove participante e quem não é criador é recusado`() = runTest {
+        store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me", "ana"), now + 1000)
+        store.rolesById["r2"] = Role("r2", "Rua", "ana", listOf("ana", "me"), now + 1000)
+        store.rolesFlow.value = store.rolesById.values.toList()
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        store.membersByRole["r2"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        val vm = vm()
+        runCurrent()
+        vm.removeParticipant("r1", "ana")
+        runCurrent()
+        assertEquals(listOf("r1" to "ana"), store.leftRoles)
+        vm.removeParticipant("r2", "ana")
+        runCurrent()
+        assertEquals(1, store.leftRoles.size)
+        assertEquals(refusalMessage(Refusal.NOT_CREATOR), vm.state.value.message)
+    }
+
+    @Test
+    fun `criar rolê chama onCreated só em caso de sucesso`() = runTest {
+        store.friendsFlow.value = listOf(friend("ana", "Ana"))
+        val vm = vm()
+        runCurrent()
+        var created = 0
+        vm.createRole("  ", listOf("ana"), Member("", "Eu", MemberState.ACCEPTED, null, null)) { created++ }
+        runCurrent()
+        assertEquals(0, created)
+        vm.createRole("Praia", listOf("ana"), Member("", "Eu", MemberState.ACCEPTED, 80.0, null)) { created++ }
+        runCurrent()
+        assertEquals(1, created)
+    }
 }

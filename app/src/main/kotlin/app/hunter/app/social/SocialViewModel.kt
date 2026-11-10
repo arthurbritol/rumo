@@ -84,6 +84,14 @@ class SocialViewModel(
     private val _state = MutableStateFlow(SocialUi(signedIn = backend.uid.value != null))
     val state: StateFlow<SocialUi> = _state.asStateFlow()
 
+    private val _detail = MutableStateFlow<RoleDetailUi?>(null)
+
+    /** Rolê aberto na tela de detalhe (nulo: nenhum aberto, ou ainda carregando os participantes). */
+    val roleDetail: StateFlow<RoleDetailUi?> = _detail.asStateFlow()
+    private var detailJob: Job? = null
+    private var detailRoleId: String? = null
+    private var rawMembers: List<Member>? = null
+
     private var session: SocialSession? = null
     private var searchJob: Job? = null
 
@@ -123,6 +131,7 @@ class SocialViewModel(
         rawRoles = emptyList()
         roleStates = emptyMap()
         searchJob?.cancel()
+        closeRoleDetail()
         val s = uid?.let { backend.session(it) }
         session = s
         if (s == null) {
@@ -139,6 +148,7 @@ class SocialViewModel(
             launch { observe("convites", { s.store.observeInvitesReceived(s.uid) }) { onInvites(s, it) } }
             launch { observe("roles", { s.store.observeRoles(s.uid) }) { onRoles(s, it) } }
             launch { loadSent(s) }
+            launch { closeExpiredRoles(s) }
             awaitCancellation()
         }
     }
@@ -199,9 +209,26 @@ class SocialViewModel(
     /** Volta do app para a frente: recalcula a semana na tela (ela pode ter virado) e publica respeitando o intervalo. */
     fun onForeground() {
         if (session == null) return
+        recalcWeek()
+        backend.publishSoon()
+    }
+
+    /** Refaz as listas com o relógio de agora: a semana (ou a validade de um rolê) pode ter virado com a tela aberta. */
+    fun recalcWeek() {
+        if (session == null) return
         rebuildFriends()
         rebuildRoles()
-        backend.publishSoon()
+    }
+
+    /** O criador encerra os rolês vencidos ao carregar (o TTL do Firestore não apaga os membros). Falha em silêncio. */
+    private suspend fun closeExpiredRoles(s: SocialSession) {
+        try {
+            s.engine.closeExpiredRoles()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // tenta de novo no próximo carregamento
+        }
     }
 
     private suspend fun onInvites(s: SocialSession, emitted: List<Invite>) {
@@ -243,6 +270,59 @@ class SocialViewModel(
     private fun rebuildRoles() {
         val me = session?.uid ?: return
         _state.update { it.copy(roles = roleRows(rawRoles, me, roleStates, { uid -> friendNames[uid] }, clock())) }
+        rebuildDetail()
+    }
+
+    private fun rebuildDetail() {
+        val id = detailRoleId ?: return
+        val me = session?.uid ?: return
+        val members = rawMembers
+        val row = _state.value.roles.firstOrNull { it.id == id }
+        _detail.value = if (members == null || row == null) null else roleDetailUi(row, members, me)
+    }
+
+    /**
+     * Abre o rolê [id]: observa os participantes e, se sou o criador, renova a validade (agora + 7 dias).
+     * Só vale para rolê que já aceitei (as regras só deixam listar os membros a quem aceitou).
+     */
+    fun openRole(id: String) {
+        val s = session ?: return
+        detailJob?.cancel()
+        detailRoleId = id
+        rawMembers = null
+        _detail.value = null
+        detailJob = scope.launch {
+            if (rawRoles.firstOrNull { it.id == id }?.creatorUid == s.uid) {
+                try {
+                    s.engine.renewRole(id)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // sem rede: abre mesmo assim
+                }
+            }
+            observe(DETAIL_OBSERVER, { s.store.observeMembers(id) }) {
+                rawMembers = it
+                rebuildDetail()
+            }
+        }
+    }
+
+    fun closeRoleDetail() {
+        detailJob?.cancel()
+        detailJob = null
+        detailRoleId = null
+        rawMembers = null
+        _detail.value = null
+        if (failing.remove(DETAIL_OBSERVER)) syncOffline()
+    }
+
+    /** O criador tira [uid] do rolê. */
+    fun removeParticipant(roleId: String, uid: String) = act { s ->
+        val role = rawRoles.firstOrNull { it.id == roleId }
+        if (role == null || role.creatorUid != s.uid) return@act SocialResult.Refused(Refusal.NOT_CREATOR)
+        s.store.leaveRole(roleId, uid)
+        null
     }
 
     private fun nameMap(): Map<String, String> = names + friendNames
@@ -337,7 +417,7 @@ class SocialViewModel(
     fun block(uid: String) = act { it.engine.block(uid) }
 
     /** Cria o rolê com [friendUids]; [myFigures] são meu orçamento e custo por km iniciais. */
-    fun createRole(name: String, friendUids: List<String>, myFigures: Member) = act { s ->
+    fun createRole(name: String, friendUids: List<String>, myFigures: Member, onCreated: () -> Unit = {}) = act(onCreated) { s ->
         s.engine.createRole(name, friendUids, myFigures).also { if (it == SocialResult.Ok) backend.publishSoon(force = true) }
     }
 
@@ -346,12 +426,12 @@ class SocialViewModel(
         s.engine.acceptRole(id).also { if (it == SocialResult.Ok) backend.publishSoon(force = true) }
     }
 
-    fun leaveRole(id: String) = act { s ->
+    fun leaveRole(id: String, onDone: () -> Unit = {}) = act(onDone, alsoOnNull = true) { s ->
         s.engine.leaveRole(id)
         null
     }
 
-    fun closeRole(id: String) = act { it.engine.closeRole(id) }
+    fun closeRole(id: String, onDone: () -> Unit = {}) = act(onDone) { it.engine.closeRole(id) }
 
     /** Define meu orçamento no rolê, mantendo o custo por km que já estava publicado. Valor negativo ou inválido é recusado. */
     fun setBudget(roleId: String, budget: Double?) {
@@ -383,7 +463,11 @@ class SocialViewModel(
      * Roda uma ação do social: uma por vez (toques repetidos são ignorados), com [SocialUi.busy]. Recusa das regras
      * vira mensagem; qualquer outra falha vira offline + mensagem. Depois do sucesso recarrega os convites enviados.
      */
-    private fun act(block: suspend (SocialSession) -> SocialResult?) {
+    private fun act(
+        onSuccess: (() -> Unit)? = null,
+        alsoOnNull: Boolean = false,
+        block: suspend (SocialSession) -> SocialResult?,
+    ) {
         val s = session ?: return
         if (_state.value.busy) return
         _state.update { it.copy(busy = true, message = null) }
@@ -392,6 +476,7 @@ class SocialViewModel(
                 val result = block(s)
                 actionFailed = false
                 if (result is SocialResult.Refused) _state.update { it.copy(message = refusalMessage(result.reason)) }
+                if (result == SocialResult.Ok || (alsoOnNull && result == null)) onSuccess?.invoke()
                 syncOffline()
                 loadSent(s)
             } catch (e: CancellationException) {
@@ -409,6 +494,8 @@ class SocialViewModel(
         _state.update { it.copy(offline = true, message = ACTION_FAILED_MESSAGE) }
     }
 }
+
+private const val DETAIL_OBSERVER = "membros"
 
 /** Uso: `viewModel<SocialViewModel>(factory = socialViewModelFactory(app.account.social))`. */
 fun socialViewModelFactory(backend: SocialBackend): ViewModelProvider.Factory = viewModelFactory {

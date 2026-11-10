@@ -2,7 +2,10 @@ package app.hunter.app.social
 
 import app.hunter.social.Activity
 import app.hunter.social.Friend
+import app.hunter.social.Member
 import app.hunter.social.MemberState
+import app.hunter.social.MemberWarning
+import app.hunter.social.NoReach
 import app.hunter.social.PublicProfile
 import app.hunter.social.Refusal
 import app.hunter.social.Role
@@ -107,5 +110,123 @@ class SocialUiMapperTest {
         assertTrue(texts.all { it.isNotBlank() })
         assertEquals(Refusal.entries.size, texts.toSet().size)
         assertNotEquals(refusalMessage(Refusal.SELF), refusalMessage(Refusal.NOT_FRIENDS))
+    }
+
+    @Test
+    fun `marcador da aba some com zero e satura em 99+`() {
+        assertNull(friendsBadge(0))
+        assertEquals("3", friendsBadge(3))
+        assertEquals("99", friendsBadge(99))
+        assertEquals("99+", friendsBadge(100))
+        assertEquals(5, pendingCount(3, 2))
+    }
+
+    @Test
+    fun `com o banner de offline as mensagens genéricas de rede somem`() {
+        assertNull(messageToShow(true, OFFLINE_MESSAGE))
+        assertNull(messageToShow(true, ACTION_FAILED_MESSAGE))
+        assertEquals(OFFLINE_MESSAGE, messageToShow(false, OFFLINE_MESSAGE))
+        assertEquals("Vocês já são amigos.", messageToShow(true, "Vocês já são amigos."))
+    }
+
+    @Test
+    fun `seleção de amigos para no limite de 9`() {
+        var sel = emptySet<String>()
+        (1..12).forEach { sel = toggleSelection(sel, "u$it") }
+        assertEquals(9, sel.size)
+        assertTrue("u10" !in sel)
+        assertEquals(8, toggleSelection(sel, "u1").size)
+    }
+
+    @Test
+    fun `dinheiro em reais com vírgula e milhar`() {
+        assertEquals("R$ 150,00", moneyLabel(150.0))
+        assertEquals("R$ 1.234,50", moneyLabel(1234.5))
+        assertEquals("150", budgetInputText(150.0))
+        assertEquals("150,50", budgetInputText(150.5))
+        assertEquals("", budgetInputText(null))
+    }
+
+    @Test
+    fun `lê o orçamento digitado`() {
+        assertEquals(150.0, parseBudget("150"))
+        assertEquals(150.5, parseBudget("150,5"))
+        assertEquals(1234.5, parseBudget("R$ 1.234,50"))
+        assertEquals(1500.0, parseBudget("1.500"))
+        assertEquals(90.25, parseBudget("90.25"))
+        assertNull(parseBudget(""))
+        assertNull(parseBudget("abc"))
+        assertNull(parseBudget("-5"))
+        assertNull(parseBudget("1,234"))
+        assertNull(parseBudget("99999999"))
+    }
+
+    @Test
+    fun `alcance arredonda para baixo`() {
+        assertEquals("até 180 km", reachLabel(180.9))
+        assertEquals("menos de 1 km", reachLabel(0.4))
+    }
+
+    @Test
+    fun `avisos e motivos de não haver alcance`() {
+        assertEquals("Passa do que você pode gastar", warningLabel(MemberWarning.OVER_BUDGET, true))
+        assertEquals("Passa do que esta pessoa pode gastar", warningLabel(MemberWarning.OVER_BUDGET, false))
+        assertEquals("Sem dados de consumo", warningLabel(MemberWarning.NO_CONSUMPTION_DATA, false))
+        assertNull(warningLabel(null, true))
+        val texts = NoReach.entries.map(::noReachMessage)
+        assertEquals(NoReach.entries.size, texts.toSet().size)
+        assertTrue(noReachMessage(NoReach.NO_CONSUMPTION_DATA).contains("consumo"))
+    }
+
+    private fun role(creator: Boolean = true) =
+        RoleRow("r1", "Praia", null, creator, false, 3, now + 1000, false)
+
+    @Test
+    fun `detalhe do rolê mostra média, alcance, avisos e quem pode ser removido`() {
+        val members = listOf(
+            Member("me", "Eu", MemberState.ACCEPTED, 100.0, 0.5),
+            Member("ana", "Ana", MemberState.ACCEPTED, 100.0, 1.0),
+            Member("bia", "Bia", MemberState.ACCEPTED, 50.0, null),
+            Member("caio", "Caio", MemberState.INVITED, null, null),
+        )
+        val d = roleDetailUi(role(), members, "me")
+        // orçamento médio (100+100+50)/3 = 83,33; custo médio (0,5+1)/2 = 0,75 => alcance 111,1 km
+        assertEquals("R$ 83,33", d.averageLabel)
+        assertEquals("até 111 km", d.reachText)
+        assertTrue(d.hasReach)
+        assertEquals(listOf("me", "ana", "bia", "caio"), d.participants.map { it.uid })
+        val byUid = d.participants.associateBy { it.uid }
+        assertEquals("Você", byUid.getValue("me").name)
+        assertEquals("R$ 100,00", byUid.getValue("me").budgetLabel)
+        assertNull(byUid.getValue("me").warning)
+        assertEquals("Passa do que esta pessoa pode gastar", byUid.getValue("ana").warning)
+        assertEquals("Sem dados de consumo", byUid.getValue("bia").warning)
+        assertNull(byUid.getValue("caio").warning)
+        assertEquals(listOf("ana", "bia", "caio"), d.participants.filter { it.canRemove }.map { it.uid })
+    }
+
+    @Test
+    fun `sem dados de consumo ninguém tem alcance e o texto explica`() {
+        val members = listOf(
+            Member("me", "Eu", MemberState.ACCEPTED, 100.0, null),
+            Member("ana", "Ana", MemberState.ACCEPTED, null, null),
+            Member("bia", "Bia", MemberState.INVITED, null, null),
+        )
+        val d = roleDetailUi(role(creator = false), members, "me")
+        assertTrue(!d.hasReach)
+        assertEquals(noReachMessage(NoReach.NO_CONSUMPTION_DATA), d.reachText)
+        assertEquals("R$ 100,00", d.averageLabel)
+        assertEquals("Sem dados de consumo", d.participants.first { it.uid == "me" }.warning)
+        assertEquals("Sem orçamento", d.participants.first { it.uid == "ana" }.budgetLabel)
+        assertEquals("Aguardando resposta", d.participants.first { it.uid == "bia" }.budgetLabel)
+        assertTrue(d.participants.none { it.canRemove })
+        assertEquals(100.0, d.myBudget)
+    }
+
+    @Test
+    fun `subtítulo do rolê na lista`() {
+        assertEquals("Convite de Ana · 3 pessoas", roleSubtitle(RoleRow("r", "A", "Ana", false, true, 3, 0, false)))
+        assertEquals("Você criou · 1 pessoa", roleSubtitle(RoleRow("r", "A", null, true, false, 1, 0, false)))
+        assertTrue(roleSubtitle(RoleRow("r", "A", null, true, false, 1, 0, true)).startsWith("Expirado"))
     }
 }

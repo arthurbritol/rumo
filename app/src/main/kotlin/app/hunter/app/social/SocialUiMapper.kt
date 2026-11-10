@@ -1,7 +1,11 @@
 package app.hunter.app.social
 
 import app.hunter.social.Friend
+import app.hunter.social.Member
 import app.hunter.social.MemberState
+import app.hunter.social.MemberWarning
+import app.hunter.social.NoReach
+import app.hunter.social.RolePlanner
 import app.hunter.social.Refusal
 import app.hunter.social.Role
 import app.hunter.social.WeekMath
@@ -106,4 +110,159 @@ fun refusalMessage(reason: Refusal): String = when (reason) {
     Refusal.ROLE_EXPIRED -> "Este rolê já expirou."
     Refusal.INVITE_GONE -> "Este convite não existe mais."
     Refusal.NAME_INVALID -> "Dê um nome ao rolê, com até 60 letras."
+}
+
+// ------------------------------------------------------------------ aba Amigos
+
+const val OFFLINE_BANNER = "Amigos precisa de internet. Mostrando o último dado carregado."
+
+/** Marcador da aba: nada com zero, o número até 99 e "99+" acima. */
+fun friendsBadge(count: Int): String? = when {
+    count <= 0 -> null
+    count > 99 -> "99+"
+    else -> count.toString()
+}
+
+/** Convites de amizade recebidos mais convites de rolê ainda sem resposta. */
+fun pendingCount(invitesReceived: Int, pendingRoles: Int): Int = invitesReceived + pendingRoles
+
+/** Aviso a exibir: com o banner de offline na tela, as mensagens genéricas de rede são redundantes. */
+fun messageToShow(offline: Boolean, message: String?): String? =
+    if (offline && (message == OFFLINE_MESSAGE || message == ACTION_FAILED_MESSAGE)) null else message
+
+const val MAX_ROLE_PEOPLE = 10
+const val ROLE_LIMIT_NOTICE = "Um rolê tem no máximo 10 pessoas, com você. Escolha até 9 amigos."
+
+/** Marca ou desmarca [uid]; passar do limite de [max] amigos é ignorado. */
+fun toggleSelection(selected: Set<String>, uid: String, max: Int = MAX_ROLE_PEOPLE - 1): Set<String> = when {
+    uid in selected -> selected - uid
+    selected.size >= max -> selected
+    else -> selected + uid
+}
+
+// ------------------------------------------------------------------ rolê
+
+/** "R$ 1.234,50". */
+fun moneyLabel(value: Double): String = "R$ " + String.format(PT_BR, "%,.2f", value)
+
+/** Texto do campo de orçamento para um valor já salvo ("150" ou "150,50"); vazio sem valor. */
+fun budgetInputText(value: Double?): String {
+    if (value == null || !value.isFinite()) return ""
+    val t = String.format(PT_BR, "%.2f", value)
+    return if (t.endsWith(",00")) t.dropLast(3) else t
+}
+
+private val THOUSANDS = Regex("""\d{1,3}(\.\d{3})+""")
+private val DECIMAL = Regex("""\d+(\.\d{1,2})?""")
+
+/** Lê um valor em reais digitado ("150", "150,5", "1.234,50", "R$ 90"); inválido ou vazio vira nulo. */
+fun parseBudget(text: String): Double? {
+    val t = text.trim().removePrefix("R$").replace(" ", "")
+    if (t.isEmpty()) return null
+    val norm = when {
+        ',' in t -> t.replace(".", "").replace(',', '.')
+        THOUSANDS.matches(t) -> t.replace(".", "")
+        else -> t
+    }
+    if (!DECIMAL.matches(norm)) return null
+    return norm.toDouble().takeIf { it <= 1_000_000.0 }
+}
+
+/** Alcance sugerido em km inteiros, arredondado para baixo (nunca promete mais do que o orçamento paga). */
+fun reachLabel(km: Double): String {
+    val whole = Math.floor(km).toLong()
+    return if (whole < 1) "menos de 1 km" else "até $whole km"
+}
+
+/** Aviso de uma linha do rolê; [isMe] troca o sujeito. Nulo quando não há aviso. */
+fun warningLabel(warning: MemberWarning?, isMe: Boolean): String? = when (warning) {
+    null -> null
+    MemberWarning.OVER_BUDGET -> if (isMe) "Passa do que você pode gastar" else "Passa do que esta pessoa pode gastar"
+    MemberWarning.NO_CONSUMPTION_DATA -> "Sem dados de consumo"
+}
+
+/** Por que não há alcance sugerido. */
+fun noReachMessage(reason: NoReach): String = when (reason) {
+    NoReach.NO_ACCEPTED_MEMBERS -> "Ninguém aceitou o rolê ainda."
+    NoReach.NO_BUDGETS -> "Ninguém informou orçamento ainda. Quando alguém informar, o alcance aparece aqui."
+    NoReach.NO_CONSUMPTION_DATA ->
+        "Ninguém tem dados de consumo ainda, então não dá para calcular o alcance. Registre abastecimentos no app."
+}
+
+/** Participante na tela do rolê. [invited]: ainda não aceitou. [warning]: aviso já em texto. */
+data class ParticipantRow(
+    val uid: String,
+    val name: String,
+    val isMe: Boolean,
+    val invited: Boolean,
+    val budgetLabel: String,
+    val warning: String?,
+    val canRemove: Boolean,
+)
+
+/** Tela do rolê: [averageLabel] média dos orçamentos, [reachText] alcance sugerido ou o motivo de não haver. */
+data class RoleDetailUi(
+    val roleId: String,
+    val name: String,
+    val isCreator: Boolean,
+    val expired: Boolean,
+    val participants: List<ParticipantRow>,
+    val averageLabel: String,
+    val reachText: String,
+    val hasReach: Boolean,
+    val myBudget: Double?,
+    val iAccepted: Boolean,
+)
+
+const val NO_AVERAGE_LABEL = "Sem orçamentos ainda"
+
+/** Monta a tela do rolê a partir dos membros lidos; o planejamento é o do [RolePlanner]. */
+fun roleDetailUi(role: RoleRow, members: List<Member>, me: String): RoleDetailUi {
+    val plan = RolePlanner.plan(members)
+    val warnings = plan.members.associate { it.uid to it.warning }
+    val rows = members
+        .sortedWith(compareByDescending<Member> { it.uid == me }.thenBy { it.state != MemberState.ACCEPTED }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        .map { m ->
+            val isMe = m.uid == me
+            val invited = m.state != MemberState.ACCEPTED
+            ParticipantRow(
+                uid = m.uid,
+                name = if (isMe) "Você" else m.name.trim().ifEmpty { UNKNOWN_FRIEND_NAME },
+                isMe = isMe,
+                invited = invited,
+                budgetLabel = when {
+                    invited -> "Aguardando resposta"
+                    m.budget == null -> "Sem orçamento"
+                    else -> moneyLabel(m.budget!!)
+                },
+                warning = if (invited) null else warningLabel(warnings[m.uid], isMe),
+                canRemove = role.isCreator && !isMe,
+            )
+        }
+    val mine = members.firstOrNull { it.uid == me }
+    return RoleDetailUi(
+        roleId = role.id,
+        name = role.name,
+        isCreator = role.isCreator,
+        expired = role.expired,
+        participants = rows,
+        averageLabel = plan.averageBudget?.let(::moneyLabel) ?: NO_AVERAGE_LABEL,
+        reachText = plan.suggestedReachKm?.let(::reachLabel) ?: noReachMessage(plan.noReach ?: NoReach.NO_BUDGETS),
+        hasReach = plan.suggestedReachKm != null,
+        myBudget = mine?.budget,
+        iAccepted = mine?.state == MemberState.ACCEPTED,
+    )
+}
+
+/** Segunda linha do rolê na lista. */
+fun roleSubtitle(row: RoleRow): String {
+    val people = if (row.participantCount == 1) "1 pessoa" else "${row.participantCount} pessoas"
+    return when {
+        row.pending -> "Convite de ${row.creatorName ?: "um amigo"} · $people"
+        row.expired -> "Expirado · abra para renovar por mais 7 dias"
+        row.isCreator -> "Você criou · $people"
+        row.creatorName != null -> "De ${row.creatorName} · $people"
+        else -> people
+    }
 }

@@ -119,10 +119,17 @@ class FakeSocialStore : SocialStore {
         val i = l.indexOfFirst { it.uid == uid }
         l[i] = l[i].copy(state = MemberState.ACCEPTED)
     }
-    override suspend fun leaveRole(roleId: String, uid: String) { check() }
+    val leftRoles = mutableListOf<Pair<String, String>>()
+    val renewed = mutableListOf<String>()
+    override suspend fun leaveRole(roleId: String, uid: String) {
+        check()
+        leftRoles += roleId to uid
+        membersByRole[roleId]?.removeAll { it.uid == uid }
+    }
     override suspend fun closeRole(roleId: String) { check(); closed += roleId; rolesById.remove(roleId); rolesFlow.value = rolesById.values.toList() }
     override suspend fun renewRole(roleId: String, newExpiresAtMs: Long) {
         check()
+        renewed += roleId
         rolesById[roleId]?.let { rolesById[roleId] = it.copy(expiresAtMs = newExpiresAtMs) }
     }
     override suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?) {
