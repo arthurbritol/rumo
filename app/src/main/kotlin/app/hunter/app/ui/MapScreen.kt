@@ -3,6 +3,11 @@ package app.hunter.app.ui
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.HunterViewModel
 import app.hunter.app.PreviewUi
+import app.hunter.app.R
 import app.hunter.nav.Place
 import app.hunter.nav.RouteProfile
 import app.hunter.trips.service.TrackingService
@@ -94,6 +100,9 @@ fun MapScreen(
     val online by vm.online.collectAsStateWithLifecycle()
     val focusTarget by vm.focusTarget.collectAsStateWithLifecycle()
     val focusNonce by vm.focusNonce.collectAsStateWithLifecycle()
+    val fuelLayerEnabled by vm.fuelLayerEnabled.collectAsStateWithLifecycle()
+    val visibleFuelStations by vm.visibleFuelStations.collectAsStateWithLifecycle()
+    val selectedFuelStation by vm.selectedFuelStation.collectAsStateWithLifecycle()
 
     var searching by remember { mutableStateOf(false) }
     var follow by remember { mutableStateOf(true) }
@@ -138,8 +147,12 @@ fun MapScreen(
         onDispose { lifecycle.removeObserver(obs); vm.stopLocation() }
     }
 
-    BackHandler(enabled = searching || preview != null) {
-        if (searching) searching = false else vm.cancelPreview()
+    BackHandler(enabled = searching || preview != null || selectedFuelStation != null) {
+        when {
+            searching -> searching = false
+            selectedFuelStation != null -> vm.selectFuelStation(null)
+            preview != null -> vm.cancelPreview()
+        }
     }
 
     val navigating = nav.active
@@ -170,14 +183,17 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize(),
             me = live,
             friends = friends,
+            fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
             route = if (navigating) nav.route?.shape else preview?.route?.shape,
             altRoutes = altRoutes,
             destination = if (navigating) nav.destination?.latLon else preview?.place?.latLon,
             camera = camera,
             cameraNonce = nonce,
             paddingTopDp = if (navigating) 200 else if (preview != null) 110 else 0,
-            paddingBottomDp = if (navigating) 120 else if (preview != null) 440 else 0,
+            paddingBottomDp = if (navigating) 120 else if (preview != null) 440 else if (selectedFuelStation != null) 360 else 0,
             onLongPress = { if (!navigating) vm.previewAt(it) },
+            onFuelStationClick = { vm.selectFuelStation(it) },
+            onBoundingBoxChanged = { vm.updateMapBoundingBox(it) },
             onUserGesture = {
                 if (preview == null) {
                     follow = false
@@ -186,17 +202,45 @@ fun MapScreen(
             },
         )
 
+        // Controles flutuantes na lateral do mapa (Camada de postos + Centralizar)
+        if (!searching && preview == null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = 16.dp,
+                        bottom = when {
+                            selectedFuelStation != null -> 340.dp
+                            navigating -> 190.dp
+                            rec.isRecording -> 210.dp
+                            else -> 190.dp
+                        },
+                    ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                SquircleIconButton(
+                    iconRes = R.drawable.fa_gas_pump,
+                    description = "Camada de postos de combustível",
+                    selected = fuelLayerEnabled,
+                    onClick = { vm.toggleFuelLayer() },
+                )
+                if (!follow) {
+                    CircleButton(
+                        icon = Icons.Default.LocationOn,
+                        description = "Centralizar",
+                        onClick = { follow = true; nonce++; vm.clearFocus() },
+                        container = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+        }
+
         // ----- Navegação -----
         if (navigating) {
             NavBanner(vm, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp))
             NavBottom(vm, Modifier.align(Alignment.BottomCenter).padding(12.dp), onStop = { TrackingService.stop(context); vm.stopNavigationNow() })
-            if (!follow) {
-                CircleButton(
-                    Icons.Default.LocationOn, "Centralizar", { follow = true; nonce++; vm.clearFocus() },
-                    Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 190.dp),
-                    container = MaterialTheme.colorScheme.primary, tint = MaterialTheme.colorScheme.onPrimary,
-                )
-            }
             if (nav.arrived) {
                 AlertDialog(
                     onDismissRequest = {},
@@ -213,8 +257,31 @@ fun MapScreen(
             PreviewCard(vm, pv, onStart = beginNav, modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
         }
 
+        // ----- Card de Detalhes do Posto -----
+        AnimatedVisibility(
+            visible = selectedFuelStation != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(12.dp),
+        ) {
+            selectedFuelStation?.let { station ->
+                val distM = live?.let { loc ->
+                    app.hunter.model.Geo.distanceM(loc.latitude, loc.longitude, station.lat, station.lon)
+                }
+                FuelStationCard(
+                    station = station,
+                    distanceM = distM,
+                    onNavigate = { vm.navigateToStation(station) },
+                    onAddStop = { vm.addStationAsStop(station) },
+                    onClose = { vm.selectFuelStation(null) },
+                )
+            }
+        }
+
         // ----- Ocioso / gravando -----
-        if (!navigating && pv == null) {
+        if (!navigating && pv == null && selectedFuelStation == null) {
             Column(
                 Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).fillMaxWidth(),
             ) {
@@ -238,11 +305,6 @@ fun MapScreen(
                 Modifier.align(Alignment.BottomCenter).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (!follow) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        CircleButton(Icons.Default.LocationOn, "Centralizar", { follow = true; nonce++; vm.clearFocus() })
-                    }
-                }
                 if (!hasLocation && !locationOk) {
                     FloatingCard {
                         Text("Permita a localização", style = MaterialTheme.typography.titleMedium)

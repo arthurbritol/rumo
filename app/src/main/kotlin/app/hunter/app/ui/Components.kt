@@ -504,6 +504,43 @@ fun CircleButton(
     }
 }
 
+/** Botão quadrado arredondado (squircle) para controles do mapa (ex: camada de postos). */
+@Composable
+fun SquircleIconButton(
+    iconRes: Int,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    container: Color = MaterialTheme.colorScheme.surface,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    selected: Boolean = false,
+) {
+    val bg = if (selected) MaterialTheme.colorScheme.primary else container
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else tint
+    val border = if (selected) {
+        BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+    }
+    Surface(
+        onClick = onClick,
+        modifier = modifier.size(52.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = bg,
+        shadowElevation = 10.dp,
+        border = border,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = description,
+                tint = fg,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
 @Composable
 fun SelectChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(

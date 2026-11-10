@@ -4,7 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hunter.app.data.PlaceEntity
+import app.hunter.app.fuel.FuelPriceRepository
+import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.app.sync.ProfilePrefs
+import app.hunter.app.ui.FuelMapCoordinator
 import app.hunter.maintenance.Odometer
 import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceItemEntity
@@ -17,6 +20,7 @@ import app.hunter.model.FuelPlanner
 import app.hunter.model.FuelState
 import app.hunter.model.FuelSummary
 import app.hunter.model.Fuelup
+import app.hunter.model.GeoBox
 import app.hunter.model.MaintenanceItem
 import app.hunter.model.MaintenanceMath
 import app.hunter.model.TrackPoint
@@ -30,6 +34,7 @@ import app.hunter.nav.RouteProfile
 import app.hunter.podble.PodStatus
 import app.hunter.trips.recording.AndroidLocationSource
 import app.hunter.trips.recording.TrackingStatus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import app.hunter.app.account.AuthState
@@ -148,6 +153,60 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearFocus() {
         _focusTarget.value = null
+    }
+
+    // ---------- camada de postos e combustíveis (ANP) ----------
+
+    private val fuelRepo: FuelPriceRepository by lazy { hunter.fuelPriceRepository }
+
+    private val fuelCoordinator: FuelMapCoordinator by lazy {
+        FuelMapCoordinator(
+            scope = viewModelScope,
+            repository = fuelRepo,
+            ioDispatcher = Dispatchers.IO,
+            debounceMs = 300L,
+        )
+    }
+
+    /** Estado da camada de postos no mapa (ligada/desligada). */
+    val fuelLayerEnabled: StateFlow<Boolean> get() = fuelCoordinator.fuelLayerEnabled
+
+    /** Posto de combustível selecionado para exibição do card de detalhes. */
+    val selectedFuelStation: StateFlow<ResolvedFuelStation?> get() = fuelCoordinator.selectedFuelStation
+
+    /** Lista de postos visíveis na caixa delimitadora da tela com preços resolvidos. */
+    val visibleFuelStations: StateFlow<List<ResolvedFuelStation>> get() = fuelCoordinator.visibleFuelStations
+
+    fun toggleFuelLayer() = fuelCoordinator.toggleFuelLayer()
+
+    fun selectFuelStation(station: ResolvedFuelStation?) = fuelCoordinator.selectFuelStation(station)
+
+    fun updateMapBoundingBox(box: GeoBox) = fuelCoordinator.updateMapBoundingBox(box)
+
+    fun navigateToStation(station: ResolvedFuelStation) {
+        selectFuelStation(null)
+        val place = Place(
+            name = station.nome,
+            subtitle = station.endereco.ifBlank { station.bairro },
+            lat = station.lat,
+            lon = station.lon,
+        )
+        previewTo(place)
+    }
+
+    fun addStationAsStop(station: ResolvedFuelStation) {
+        selectFuelStation(null)
+        val place = Place(
+            name = station.nome,
+            subtitle = station.endereco.ifBlank { station.bairro },
+            lat = station.lat,
+            lon = station.lon,
+        )
+        if (_preview.value != null) {
+            chooseStation(place)
+        } else {
+            previewTo(place)
+        }
     }
 
     // ---------- conexão ----------

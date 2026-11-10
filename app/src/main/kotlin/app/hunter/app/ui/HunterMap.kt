@@ -20,8 +20,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.hunter.app.fuel.PriceSource
+import app.hunter.app.fuel.ResolvedFuelStation
+import app.hunter.model.GeoBox
 import app.hunter.model.TrackPoint
 import app.hunter.nav.LatLon
+import java.util.Locale
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -111,11 +115,12 @@ private const val SRC_TRAIL = "trail-src"
 private const val SRC_DEST = "dest-src"
 private const val SRC_FRIENDS = "friends-src"
 private const val SRC_ME = "me-src"
+private const val SRC_FUEL = "fuel-src"
 
 /**
  * Mapa (MapLibre + OpenFreeMap, sem chave de API). Desenha: rota principal, rotas alternativas, trilha
- * gravada colorida por velocidade, destino, amigos na estrada e a posição do motociclista. Tudo é redesenhado
- * quando os parâmetros mudam; a câmera obedece a [camera].
+ * gravada colorida por velocidade, destino, amigos na estrada, postos de combustível e a posição do motociclista.
+ * Tudo é redesenhado quando os parâmetros mudam; a câmera obedece a [camera].
  */
 @Composable
 fun HunterMap(
@@ -123,6 +128,7 @@ fun HunterMap(
     dark: Boolean = LocalDark.current,
     me: TrackPoint? = null,
     friends: List<FriendMarker> = emptyList(),
+    fuelStations: List<ResolvedFuelStation> = emptyList(),
     route: List<LatLon>? = null,
     altRoutes: List<List<LatLon>> = emptyList(),
     trail: List<TrackPoint>? = null,
@@ -134,6 +140,8 @@ fun HunterMap(
     paddingBottomDp: Int = 0,
     interactive: Boolean = true,
     onLongPress: ((LatLon) -> Unit)? = null,
+    onFuelStationClick: (ResolvedFuelStation) -> Unit = {},
+    onBoundingBoxChanged: (GeoBox) -> Unit = {},
     onUserGesture: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -152,6 +160,9 @@ fun HunterMap(
 
     val latestLongPress by rememberUpdatedState(onLongPress)
     val latestGesture by rememberUpdatedState(onUserGesture)
+    val latestFuelStations by rememberUpdatedState(fuelStations)
+    val latestFuelClick by rememberUpdatedState(onFuelStationClick)
+    val latestBoxChanged by rememberUpdatedState(onBoundingBoxChanged)
 
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -183,8 +194,40 @@ fun HunterMap(
             m.addOnMapLongClickListener { ll ->
                 latestLongPress?.invoke(LatLon(ll.latitude, ll.longitude)) != null
             }
+            m.addOnMapClickListener { latLng ->
+                val screenPoint = m.projection.toScreenLocation(latLng)
+                val features = m.queryRenderedFeatures(screenPoint, "fuel-symbol", "fuel-label")
+                if (features.isNotEmpty()) {
+                    val stationId = features.first().getStringProperty("id")
+                    val foundStation = latestFuelStations.find { it.id == stationId }
+                    if (foundStation != null) {
+                        latestFuelClick(foundStation)
+                        return@addOnMapClickListener true
+                    }
+                }
+                false
+            }
+            m.addOnCameraIdleListener {
+                val region = m.projection.visibleRegion.latLngBounds
+                val box = GeoBox(
+                    minLat = minOf(region.latitudeSouth, region.latitudeNorth),
+                    minLon = minOf(region.longitudeWest, region.longitudeEast),
+                    maxLat = maxOf(region.latitudeSouth, region.latitudeNorth),
+                    maxLon = maxOf(region.longitudeWest, region.longitudeEast),
+                )
+                latestBoxChanged(box)
+            }
             m.addOnCameraMoveStartedListener { reason -> if (reason == REASON_API_GESTURE) latestGesture() }
             m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(LatLng(-8.05, -34.9)).zoom(11.0).build()))
+            val initialBounds = m.projection.visibleRegion.latLngBounds
+            latestBoxChanged(
+                GeoBox(
+                    minLat = minOf(initialBounds.latitudeSouth, initialBounds.latitudeNorth),
+                    minLon = minOf(initialBounds.longitudeWest, initialBounds.longitudeEast),
+                    maxLat = maxOf(initialBounds.latitudeSouth, initialBounds.latitudeNorth),
+                    maxLon = maxOf(initialBounds.longitudeWest, initialBounds.longitudeEast),
+                ),
+            )
             map = m
         }
     }
@@ -230,6 +273,10 @@ fun HunterMap(
     LaunchedEffect(style, friends) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
         src.setGeoJson(friendsFeatures(friends))
+    }
+    LaunchedEffect(style, fuelStations) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL) ?: return@LaunchedEffect
+        src.setGeoJson(fuelStationsFeatures(fuelStations))
     }
     LaunchedEffect(style, me?.timeMs, me?.latitude, me?.longitude) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_ME) ?: return@LaunchedEffect
@@ -338,7 +385,8 @@ private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
 private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME).forEach { st.addSource(GeoJsonSource(it)) }
+    st.addImage("fuel-station", fuelStationBitmap(density))
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME, SRC_FUEL).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -369,6 +417,26 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
         ),
     )
     st.addLayer(
+        SymbolLayer("fuel-symbol", SRC_FUEL).withProperties(
+            iconImage("fuel-station"),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
+        ),
+    )
+    st.addLayer(
+        SymbolLayer("fuel-label", SRC_FUEL).withProperties(
+            textField(Expression.get("price")),
+            textSize(11f),
+            textColor(if (dark) "#FFFFFF" else "#0F172A"),
+            textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
+            textHaloWidth(2f),
+            textAnchor("top"),
+            textOffset(arrayOf(0f, 1.4f)),
+            textAllowOverlap(true),
+            textIgnorePlacement(false),
+        ),
+    )
+    st.addLayer(
         SymbolLayer("friends-symbol", SRC_FRIENDS).withProperties(
             iconImage("friend-bike"),
             iconRotate(Expression.get("b")),
@@ -396,6 +464,72 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             iconAllowOverlap(true), iconIgnorePlacement(true),
         ),
     )
+}
+
+/** Formata o preço principal do posto para exibição na pílula do mapa (ex: "R$ 5,79" ou "~R$ 5,82"). */
+fun formatStationMapPrice(station: ResolvedFuelStation): String {
+    val price = station.precoGasolina ?: station.precoEtanol ?: station.precoDiesel
+    if (price == null || !price.isFinite() || price <= 0.0) return "-"
+    val formatted = String.format(Locale.forLanguageTag("pt-BR"), "R$ %.2f", price)
+    return when (station.fonte) {
+        PriceSource.POSTO_ANP -> formatted
+        PriceSource.MEDIA_MUNICIPAL, PriceSource.MEDIA_ESTADUAL -> "~$formatted"
+    }
+}
+
+/** Converte lista de postos resolvidos em FeatureCollection para o MapLibre GeoJsonSource. */
+fun fuelStationsFeatures(stations: List<ResolvedFuelStation>): FeatureCollection {
+    if (stations.isEmpty()) return FeatureCollection.fromFeatures(emptyList<Feature>())
+    val features = stations.map { station ->
+        val feature = Feature.fromGeometry(Point.fromLngLat(station.lon, station.lat))
+        feature.addStringProperty("id", station.id)
+        feature.addStringProperty("price", formatStationMapPrice(station))
+        feature.addStringProperty("name", station.nome)
+        feature.addStringProperty("source", station.fonte.name)
+        feature
+    }
+    return FeatureCollection.fromFeatures(features)
+}
+
+/** Marcador de posto de combustível: fundo Midnight Navy, anel tonal e ícone de bomba de combustível. */
+private fun fuelStationBitmap(density: Float): Bitmap {
+    val size = (36 * density).toInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val cx = size / 2f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // Fundo circular Midnight Navy
+    paint.style = Paint.Style.FILL
+    paint.color = 0xFF141C2B.toInt()
+    c.drawCircle(cx, cx, size * 0.46f, paint)
+
+    // Borda tonal Novare Orange
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 2.5f * density
+    paint.color = 0xFFFF7A1A.toInt()
+    c.drawCircle(cx, cx, size * 0.44f, paint)
+
+    // Corpo da bomba
+    paint.style = Paint.Style.FILL
+    paint.color = 0xFFFFFFFF.toInt()
+    val left = cx - size * 0.16f
+    val top = cx - size * 0.20f
+    val right = cx + size * 0.08f
+    val bottom = cx + size * 0.22f
+    c.drawRect(left, top, right, bottom, paint)
+
+    // Mangueira e bico
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 1.5f * density
+    val hose = Path().apply {
+        moveTo(right, top + size * 0.08f)
+        lineTo(right + size * 0.10f, top + size * 0.08f)
+        lineTo(right + size * 0.10f, bottom - size * 0.04f)
+    }
+    c.drawPath(hose, paint)
+
+    return bmp
 }
 
 /** Marcador de amigo na estrada: halo ciano/azul, anel branco e seta apontando para o norte (gira com o rumo). */
