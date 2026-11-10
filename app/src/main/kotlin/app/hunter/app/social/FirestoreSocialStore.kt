@@ -14,7 +14,6 @@ import app.hunter.social.SocialStore
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -184,7 +183,7 @@ class FirestoreSocialStore(
             sentInvitesQuery(uid).fetch().documents.filter { it.getString("para") == other }.map { it.reference } +
             receivedInvitesQuery(uid).fetch().documents.filter { it.getString("de") == other }.map { it.reference }
         val batch = db.batch()
-        batch.set(ref("bloqueios/${blockId(uid, other)}"), blockToMap(clock()))
+        batch.set(ref("bloqueios/${blockId(uid, other)}"), blockToMap(uid, clock()))
         doomed.forEach { batch.delete(it) }
         batch.commit().await()
     }
@@ -194,15 +193,10 @@ class FirestoreSocialStore(
     }
 
     /**
-     * Consulta dos bloqueios de [uid]: faixa do id do documento (`uid_` até `uid_` + U+F8FF).
-     *
-     * ATENÇÃO: medido no emulador, as regras ATUAIS recusam esta consulta (em `list` o `id` é nulo, então
-     * `idComecaCom` falha). Ver o relatório da Task 4: é preciso um campo `quem` e uma regra de `list` por ele.
-     * Quando as regras mudarem, só esta função muda.
+     * Bloqueios feitos por [uid]: `where quem == uid`. As regras só admitem `list` por esse campo (em `list` o `id`
+     * é nulo, então uma faixa de id não é aceita; medido no emulador).
      */
-    private fun blockedQuery(uid: String): Query = db.collection("bloqueios")
-        .whereGreaterThanOrEqualTo(FieldPath.documentId(), "${uid}_")
-        .whereLessThanOrEqualTo(FieldPath.documentId(), "${uid}_")
+    private fun blockedQuery(uid: String): Query = db.collection("bloqueios").whereEqualTo("quem", uid)
 
     override suspend fun blocked(uid: String): Set<String> =
         blockedQuery(uid).fetch().documents.map { it.id.removePrefix("${uid}_") }.toSet()

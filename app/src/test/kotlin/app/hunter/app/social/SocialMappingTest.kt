@@ -106,8 +106,9 @@ class SocialMappingTest {
     }
 
     @Test
-    fun `bloqueio leva so criadoEm`() {
-        assertEquals(mapOf("criadoEm" to 4L), blockToMap(4L))
+    fun `bloqueio leva criadoEm e quem`() {
+        val now = System.currentTimeMillis()
+        assertEquals(mapOf("criadoEm" to now, "quem" to "ana"), blockToMap("ana", now))
     }
 
     @Test

@@ -145,8 +145,14 @@ fun friendshipToMap(x: String, y: String, nowMs: Long): Map<String, Any?> {
     return mapOf("a" to a, "b" to b, "criadoEm" to nowMs)
 }
 
-/** Mapa de `bloqueios/{por_alvo}`: as regras só aceitam `criadoEm`. */
-fun blockToMap(nowMs: Long): Map<String, Any?> = mapOf("criadoEm" to nowMs)
+/**
+ * Mapa de `bloqueios/{por_alvo}`: `criadoEm` e `quem` (uid de quem bloqueia, igual ao uid da conta). `quem` existe
+ * para a consulta `where quem == uid`: as regras não conseguem provar uma consulta por prefixo do id.
+ */
+fun blockToMap(by: String, nowMs: Long): Map<String, Any?> {
+    require(by.length <= MAX_UID_CHARS) { "uid acima de $MAX_UID_CHARS caracteres." }
+    return mapOf("criadoEm" to nowMs, "quem" to by)
+}
 
 private const val STATE_INVITED = "convidado"
 private const val STATE_ACCEPTED = "aceito"
