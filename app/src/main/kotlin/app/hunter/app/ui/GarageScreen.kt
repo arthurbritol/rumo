@@ -56,6 +56,8 @@ import app.hunter.app.OfflineArea
 import app.hunter.app.OfflineMaps
 import app.hunter.app.R
 import app.hunter.app.ReminderWorker
+import app.hunter.app.fuel.FuelPriceReference
+import app.hunter.app.fuel.PriceSource
 import app.hunter.app.sync.ProfilePrefs
 import app.hunter.model.DueState
 import app.hunter.model.FuelMath
@@ -63,6 +65,7 @@ import app.hunter.model.FuelSegment
 import app.hunter.model.Fuelup
 import app.hunter.model.GeoBox
 import app.hunter.podble.PodPhase
+import java.util.Locale
 import kotlin.math.max
 
 @Composable
@@ -386,7 +389,7 @@ private fun FuelSection(vm: HunterViewModel) {
         }
     }
 
-    if (adding) AddFuelDialog(defaultOdo = odo, onDismiss = { adding = false }) { o, l, c, full ->
+    if (adding) AddFuelDialog(defaultOdo = odo, vm = vm, onDismiss = { adding = false }) { o, l, c, full ->
         vm.addFuelup(o, l, c, full)
         adding = false
     }
@@ -429,16 +432,78 @@ private fun ConsumptionBars(segments: List<FuelSegment>, avg: Double?, modifier:
     }
 }
 
+private val PtBrLocale: Locale = Locale.forLanguageTag("pt-BR")
+
+/**
+ * Constrói o texto do chip com a sugestão de preço da ANP para exibição no diálogo de abastecimento.
+ * Ex: "Média em Recife/PE: R$ 5,82/L (Gasolina)" ou "Média estadual (SP): R$ 5,85/L".
+ */
+fun buildFuelPriceSuggestionText(ref: FuelPriceReference): String? {
+    val (price, fuel) = when {
+        ref.precoGasolina != null && ref.precoGasolina > 0.0 && ref.precoGasolina.isFinite() -> ref.precoGasolina to "Gasolina"
+        ref.precoEtanol != null && ref.precoEtanol > 0.0 && ref.precoEtanol.isFinite() -> ref.precoEtanol to "Etanol"
+        else -> return null
+    }
+    val priceStr = String.format(PtBrLocale, "R$ %.2f", price)
+    return when (ref.fonte) {
+        PriceSource.MEDIA_ESTADUAL -> {
+            if (fuel == "Gasolina") "Média estadual (${ref.regiaoNome}): $priceStr/L"
+            else "Média estadual (${ref.regiaoNome}): $priceStr/L ($fuel)"
+        }
+        else -> "Média em ${ref.regiaoNome}: $priceStr/L ($fuel)"
+    }
+}
+
+/**
+ * Retorna o preço sugerido do combustível de referência, priorizando Gasolina e recorrendo ao Etanol.
+ */
+fun resolveSuggestedFuelPrice(ref: FuelPriceReference): Double? = when {
+    ref.precoGasolina != null && ref.precoGasolina > 0.0 && ref.precoGasolina.isFinite() -> ref.precoGasolina
+    ref.precoEtanol != null && ref.precoEtanol > 0.0 && ref.precoEtanol.isFinite() -> ref.precoEtanol
+    else -> null
+}
+
+/**
+ * Calcula o custo total a partir dos litros e do preço por litro com proteção para zeros e negativos.
+ */
+fun calculateCostFromLiters(liters: Double, pricePerLiter: Double): Double {
+    if (liters <= 0.0 || pricePerLiter <= 0.0 || !liters.isFinite() || !pricePerLiter.isFinite()) return 0.0
+    return liters * pricePerLiter
+}
+
+/**
+ * Calcula a quantidade de litros a partir do custo total e preço por litro com proteção contra divisão por zero.
+ */
+fun calculateLitersFromCost(cost: Double, pricePerLiter: Double): Double {
+    if (cost <= 0.0 || pricePerLiter <= 0.0 || !cost.isFinite() || !pricePerLiter.isFinite()) return 0.0
+    return cost / pricePerLiter
+}
+
 @Composable
-private fun AddFuelDialog(defaultOdo: Double, onDismiss: () -> Unit, onSave: (Double, Double, Double, Boolean) -> Unit) {
+private fun AddFuelDialog(
+    defaultOdo: Double,
+    vm: HunterViewModel,
+    onDismiss: () -> Unit,
+    onSave: (Double, Double, Double, Boolean) -> Unit,
+) {
     var odo by remember { mutableStateOf(fmtNum(defaultOdo, 0)) }
     var liters by remember { mutableStateOf("") }
     var cost by remember { mutableStateOf("") }
     var full by remember { mutableStateOf(true) }
+    var fuelRef by remember { mutableStateOf<FuelPriceReference?>(null) }
+    var suggestionApplied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        fuelRef = vm.getFuelPriceReference()
+    }
+
     val o = parseNumber(odo)
     val l = parseNumber(liters)
     val c = parseNumber(cost)
     val valid = o != null && o >= 0 && l != null && l > 0 && c != null && c >= 0
+
+    val suggestedPrice = fuelRef?.let { resolveSuggestedFuelPrice(it) }
+    val suggestionText = fuelRef?.let { buildFuelPriceSuggestionText(it) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -446,8 +511,61 @@ private fun AddFuelDialog(defaultOdo: Double, onDismiss: () -> Unit, onSave: (Do
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 NumberField("Hodômetro (km)", odo) { odo = it }
-                NumberField("Litros", liters) { liters = it }
-                NumberField("Valor total (R$)", cost) { cost = it }
+                NumberField("Litros", liters) {
+                    liters = it
+                    suggestionApplied = false
+                }
+                NumberField("Valor total (R$)", cost) {
+                    cost = it
+                    suggestionApplied = false
+                }
+                if (suggestionText != null && suggestedPrice != null) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (suggestionApplied) NovareSuccess.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, if (suggestionApplied) NovareSuccess else MaterialTheme.colorScheme.outlineVariant),
+                        onClick = {
+                            val curL = parseNumber(liters)
+                            val curC = parseNumber(cost)
+                            if (curL != null && curL > 0.0) {
+                                val computed = calculateCostFromLiters(curL, suggestedPrice)
+                                cost = fmtNum(computed, 2)
+                                suggestionApplied = true
+                            } else if (curC != null && curC > 0.0) {
+                                val computed = calculateLitersFromCost(curC, suggestedPrice)
+                                liters = fmtNum(computed, 2)
+                                suggestionApplied = true
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.fa_gas_pump),
+                                contentDescription = null,
+                                tint = if (suggestionApplied) NovareSuccess else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = suggestionText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (suggestionApplied) NovareSuccess else MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = if (suggestionApplied) "Preço de referência aplicado!" else "Toque para calcular com a média ANP",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (suggestionApplied) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Tanque cheio")

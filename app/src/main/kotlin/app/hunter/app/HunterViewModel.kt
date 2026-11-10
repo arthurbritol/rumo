@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hunter.app.data.PlaceEntity
+import app.hunter.app.fuel.FuelPriceReference
 import app.hunter.app.fuel.FuelPriceRepository
 import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.app.sync.ProfilePrefs
@@ -208,6 +209,15 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
             previewTo(place)
         }
     }
+
+    suspend fun getFuelPriceReference(): FuelPriceReference? {
+        val loc = _live.value ?: return null
+        return fuelRepo.getNearestReferencePrice(loc.latitude, loc.longitude)
+    }
+
+    fun calculateSuggestedCost(liters: Double, pricePerLiter: Double): Double =
+        if (liters <= 0.0 || pricePerLiter <= 0.0 || !liters.isFinite() || !pricePerLiter.isFinite()) 0.0
+        else liters * pricePerLiter
 
     // ---------- conexão ----------
 
