@@ -5,6 +5,8 @@ import app.hunter.app.sync.await
 import app.hunter.social.Activity
 import app.hunter.social.Friend
 import app.hunter.social.Invite
+import app.hunter.social.LiveLocation
+import app.hunter.social.LocationPermission
 import app.hunter.social.Member
 import app.hunter.social.PublicProfile
 import app.hunter.social.Role
@@ -50,6 +52,7 @@ import kotlinx.coroutines.sync.withPermit
 class FirestoreSocialStore(
     private val db: FirebaseFirestore,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val currentUid: () -> String? = { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid },
 ) : SocialStore {
 
     private fun ref(path: String): DocumentReference = db.document(path)
@@ -264,6 +267,13 @@ class FirestoreSocialStore(
         awaitClose { reg.remove() }
     }.buffer(Channel.CONFLATED)
 
+    private fun DocumentReference.snapshots(): Flow<DocumentSnapshot> = callbackFlow {
+        val reg = addSnapshotListener { snap, err ->
+            if (err != null) close(err) else if (snap != null) trySend(snap)
+        }
+        awaitClose { reg.remove() }
+    }.buffer(Channel.CONFLATED)
+
     override fun observeInvitesReceived(uid: String): Flow<List<Invite>> =
         receivedInvitesQuery(uid).snapshots().map { s -> s.documents.mapNotNull { mapToInvite(it.map()) } }
 
@@ -358,6 +368,53 @@ class FirestoreSocialStore(
         return if (d.exists()) mapToMember(uid, d.map()) else null
     }
 
+    // ---------------------------------------------------------------- localização compartilhada
+
+    override suspend fun grantLocationPermission(friendUid: String) {
+        val myUid = currentUid() ?: return
+        val docId = LocationPermission.docId(myUid, friendUid)
+        ref("permissoesLocalizacao/$docId").set(locationPermissionToMap(myUid, friendUid, clock())).await()
+    }
+
+    override suspend fun revokeLocationPermission(friendUid: String) {
+        val myUid = currentUid() ?: return
+        val docId = LocationPermission.docId(myUid, friendUid)
+        try {
+            ref("permissoesLocalizacao/$docId").delete().await()
+        } catch (_: FirebaseFirestoreException) {
+            // Documento já inexistente
+        }
+    }
+
+    override fun observeGrantedPermissions(myUid: String): Flow<Set<String>> =
+        db.collection("permissoesLocalizacao")
+            .whereEqualTo("de", myUid)
+            .snapshots()
+            .map { s -> s.documents.mapNotNull { it.getString("para") }.toSet() }
+            .distinctUntilChanged()
+
+    override fun observeReceivedPermissions(myUid: String): Flow<Set<String>> =
+        db.collection("permissoesLocalizacao")
+            .whereEqualTo("para", myUid)
+            .snapshots()
+            .map { s -> s.documents.mapNotNull { it.getString("de") }.toSet() }
+            .distinctUntilChanged()
+
+    override suspend fun publishLocation(loc: LiveLocation) {
+        val myUid = currentUid() ?: return
+        ref("localizacoes/$myUid").set(liveLocationToMap(loc)).await()
+    }
+
+    override suspend fun clearLocation() {
+        val myUid = currentUid() ?: return
+        ref("localizacoes/$myUid").delete().await()
+    }
+
+    override fun observeFriendLocation(friendUid: String): Flow<LiveLocation?> =
+        ref("localizacoes/$friendUid").snapshots().map { snap ->
+            if (snap.exists()) mapToLiveLocation(snap.map()) else null
+        }
+
     // ---------------------------------------------------------------- apagar a conta
 
     private suspend fun deleteAll(refs: List<DocumentReference>) {
@@ -381,7 +438,7 @@ class FirestoreSocialStore(
      * Apaga todo o social de [uid]. Idempotente e resumível: cada etapa só olha o que ainda existe e pode ser
      * repetida depois de uma queda. Ordem: 1) `busca` (some da pesquisa primeiro); 2) rolês (criados: membros e rolê
      * num lote; os demais: saída própria); 3) convites enviados e recebidos; 4) amizades; 5) bloqueios feitos;
-     * 6) `perfisPublicos` e `atividade` (só os amigos os liam, e as amizades já se foram).
+     * 6) `localizacoes` e `permissoesLocalizacao`; 7) `perfisPublicos` e `atividade` (só os amigos os liam, e as amizades já se foram).
      */
     override suspend fun deleteAllSocial(uid: String) {
         ref("busca/$uid").delete().await()
@@ -396,6 +453,9 @@ class FirestoreSocialStore(
         deleteQuery(receivedInvitesQuery(uid))
         friendsQueries(uid).forEach { deleteQuery(it) }
         deleteQuery(blockedQuery(uid))
+        ref("localizacoes/$uid").delete().await()
+        deleteQuery(db.collection("permissoesLocalizacao").whereEqualTo("de", uid))
+        deleteQuery(db.collection("permissoesLocalizacao").whereEqualTo("para", uid))
         val batch = db.batch()
         batch.delete(ref("perfisPublicos/$uid"))
         batch.delete(ref("atividade/$uid"))

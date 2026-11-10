@@ -4,6 +4,8 @@ import app.hunter.app.sync.clampText
 import app.hunter.app.sync.safeDisplayName
 import app.hunter.social.Activity
 import app.hunter.social.Invite
+import app.hunter.social.LiveLocation
+import app.hunter.social.LocationPermission
 import app.hunter.social.Member
 import app.hunter.social.MemberState
 import app.hunter.social.PublicProfile
@@ -239,3 +241,45 @@ fun mapToRole(id: String, data: Map<String, Any?>): Role? {
     val expires = (data["expiraEm"] as? Number)?.toLong() ?: return null
     return Role(id, name, creator, participants, expires)
 }
+
+/** Mapa de `localizacoes/{uid}`: coordenadas, rumo, velocidade e instante da atualização. */
+fun liveLocationToMap(loc: LiveLocation): Map<String, Any?> = mapOf(
+    "latitude" to if (loc.latitude.isNaN()) 0.0 else loc.latitude.coerceIn(-90.0, 90.0),
+    "longitude" to if (loc.longitude.isNaN()) 0.0 else loc.longitude.coerceIn(-180.0, 180.0),
+    "bearing" to loc.bearing?.let { if (it.isNaN()) null else it.coerceIn(0f, 360f) },
+    "speedKmh" to loc.speedKmh?.let { if (it.isNaN()) null else it.coerceIn(0f, (NUMBER_LIMIT - 1).toFloat()) },
+    "updatedAtMs" to boundedEpoch(loc.updatedAtMs),
+)
+
+/** Inverso de [liveLocationToMap]. Retorna nulo se faltarem campos obrigatórios ou forem inválidos. */
+fun mapToLiveLocation(data: Map<String, Any?>): LiveLocation? {
+    val lat = (data["latitude"] as? Number)?.toDouble() ?: return null
+    val lng = (data["longitude"] as? Number)?.toDouble() ?: return null
+    val updated = (data["updatedAtMs"] as? Number)?.toLong() ?: return null
+    if (lat !in -90.0..90.0 || lng !in -180.0..180.0) return null
+    val bearing = (data["bearing"] as? Number)?.toFloat()
+    val speed = (data["speedKmh"] as? Number)?.toFloat()
+    return LiveLocation(
+        latitude = lat,
+        longitude = lng,
+        bearing = bearing,
+        speedKmh = speed,
+        updatedAtMs = updated,
+    )
+}
+
+/** Mapa de `permissoesLocalizacao/{de_para}`. */
+fun locationPermissionToMap(de: String, para: String, criadoEm: Long): Map<String, Any?> {
+    require(de != para) { "Permissão para si mesmo." }
+    require(de.length <= MAX_UID_CHARS && para.length <= MAX_UID_CHARS) { "uid acima de $MAX_UID_CHARS caracteres." }
+    return mapOf("de" to de, "para" to para, "criadoEm" to boundedEpoch(criadoEm))
+}
+
+/** Inverso de [locationPermissionToMap]. */
+fun mapToLocationPermission(data: Map<String, Any?>): LocationPermission? {
+    val de = data["de"] as? String ?: return null
+    val para = data["para"] as? String ?: return null
+    val criadoEm = (data["criadoEm"] as? Number)?.toLong() ?: return null
+    return LocationPermission(de, para, criadoEm)
+}
+
