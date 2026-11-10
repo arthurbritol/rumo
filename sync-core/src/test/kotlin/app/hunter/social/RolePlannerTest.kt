@@ -82,4 +82,23 @@ class RolePlannerTest {
         val p = RolePlanner.plan(listOf(m("a", null, 1.0)))
         assertEquals(NoReach.NO_BUDGETS, p.noReach)
     }
+
+    @Test
+    fun `valores não finitos ou negativos são ignorados`() {
+        val p = RolePlanner.plan(listOf(
+            m("a", 100.0, 1.0), m("b", Double.NaN, Double.NaN), m("c", Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
+            m("d", -50.0, -1.0),
+        ))
+        assertEquals(100.0, p.averageBudget!!, 1e-9)
+        assertEquals(1.0, p.averageCostPerKm!!, 1e-9)
+        assertEquals(100.0, p.suggestedReachKm!!, 1e-9)
+    }
+
+    @Test
+    fun `tolerância de 0,01 no OVER_BUDGET`() {
+        val ok = RolePlanner.plan(listOf(m("a", 99.995, 1.0), m("b", 100.005, 1.0)))
+        assertNull(ok.members.first { it.uid == "a" }.warning)
+        val over = RolePlanner.plan(listOf(m("a", 99.98, 1.0), m("b", 100.02, 1.0)))
+        assertEquals(MemberWarning.OVER_BUDGET, over.members.first { it.uid == "a" }.warning)
+    }
 }

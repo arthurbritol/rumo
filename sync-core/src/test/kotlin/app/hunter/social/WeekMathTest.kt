@@ -64,4 +64,14 @@ class WeekMathTest {
         )
         assertEquals(20.0, WeekMath.weekKm(trips, monday, recife), 1e-9)
     }
+
+    @Test
+    fun `semana com mudança de horário (America-New_York)`() {
+        val ny = ZoneId.of("America/New_York")
+        val monday = ms(ny, 2026, 3, 2, 0, 0) // EST
+        assertEquals(monday, WeekMath.weekStartMs(ms(ny, 2026, 3, 8, 23, 0), ny))
+        assertEquals(ms(ny, 2026, 3, 9, 0, 0), WeekMath.weekStartMs(ms(ny, 2026, 3, 11, 12, 0), ny))
+        assertEquals(ms(ny, 2026, 3, 9, 0, 0), WeekMath.weekStartMs(ms(ny, 2026, 3, 9, 0, 0), ny))
+        assertEquals(5.0, WeekMath.weekKm(listOf(TripSlice(ms(ny, 2026, 3, 8, 23, 30), 5_000.0)), monday, ny), 1e-9)
+    }
 }

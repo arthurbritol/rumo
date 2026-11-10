@@ -1,5 +1,7 @@
 package app.hunter.social
 
+import kotlinx.coroutines.flow.Flow
+
 /** Perfil público de um usuário (o que os amigos e a busca enxergam). */
 data class PublicProfile(
     val uid: String,
@@ -53,6 +55,15 @@ interface SocialStore {
     suspend fun friends(uid: String): List<Friend>
     suspend fun blocked(uid: String): Set<String>
 
+    /** Leitura barata: só os ids dos amigos, sem carregar perfis. */
+    suspend fun friendUids(uid: String): Set<String>
+
+    /** Observação em tempo real (as leituras pontuais acima continuam valendo). */
+    fun observeInvitesReceived(uid: String): Flow<List<Invite>>
+    fun observeFriends(uid: String): Flow<List<Friend>>
+    fun observeRoles(uid: String): Flow<List<Role>>
+    fun observeMembers(roleId: String): Flow<List<Member>>
+
     suspend fun createRole(role: Role, creator: Member, invited: List<Member>)
     suspend fun acceptRole(roleId: String, uid: String)
     suspend fun leaveRole(roleId: String, uid: String)
@@ -71,4 +82,16 @@ sealed interface SocialResult {
 }
 
 /** Motivos de recusa das regras sociais. */
-enum class Refusal { SELF, ALREADY_FRIENDS, FRIEND_LIMIT, BLOCKED_BY_ME, TOO_SHORT, ROLE_FULL, NOT_FRIENDS, NOT_CREATOR, ROLE_EXPIRED }
+enum class Refusal {
+    SELF, ALREADY_FRIENDS, FRIEND_LIMIT, BLOCKED_BY_ME,
+
+    /** Texto de busca curto demais. */
+    TOO_SHORT,
+    ROLE_FULL, NOT_FRIENDS, NOT_CREATOR, ROLE_EXPIRED,
+
+    /** O convite recebido não existe mais (cancelado ou já tratado). */
+    INVITE_GONE,
+
+    /** Nome de rolê vazio ou com mais de 60 caracteres. */
+    NAME_INVALID,
+}
