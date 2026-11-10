@@ -168,8 +168,8 @@ fun CreateRoleScreen(
                 ) {
                     SquircleIcon(
                         iconRes = R.drawable.fa_user,
-                        backgroundColor = if (on) NovareAccent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
-                        tintColor = if (on) NovareAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        backgroundColor = if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                        tintColor = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -318,8 +318,8 @@ fun RoleDetailScreen(
                 ) {
                     SquircleIcon(
                         iconRes = R.drawable.fa_gas_pump,
-                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                        tintColor = NovareAccent,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        tintColor = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp),
                     )
                     Text(
@@ -474,8 +474,8 @@ private fun ParticipantCard(p: ParticipantRow, busy: Boolean, onRemove: (String)
         ) {
             SquircleIcon(
                 iconRes = R.drawable.fa_user,
-                backgroundColor = if (p.isMe) NovareAccent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
-                tintColor = if (p.isMe) NovareAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                backgroundColor = if (p.isMe) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                tintColor = if (p.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Column(Modifier.weight(1f)) {
                 Row(
@@ -489,7 +489,7 @@ private fun ParticipantCard(p: ParticipantRow, busy: Boolean, onRemove: (String)
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (p.isMe) {
-                        RumoBadge(text = "Você", color = NovareAccent)
+                        RumoBadge(text = "Você", color = MaterialTheme.colorScheme.primary)
                     } else if (p.invited) {
                         RumoBadge(text = "Aguardando", color = NovareWarning)
                     }
@@ -498,7 +498,7 @@ private fun ParticipantCard(p: ParticipantRow, busy: Boolean, onRemove: (String)
                     text = p.budgetLabel,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (p.invited) MaterialTheme.colorScheme.onSurfaceVariant else NovareAccent,
+                    color = if (p.invited) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
                 )
                 p.warnings.forEach { warning ->
                     Text(

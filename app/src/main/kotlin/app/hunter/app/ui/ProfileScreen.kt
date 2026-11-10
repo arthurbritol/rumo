@@ -283,7 +283,7 @@ fun ProfileScreen(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = NovareAccent)
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.size(10.dp))
                     Text("Aguarde…", style = MaterialTheme.typography.bodyMedium)
                 }
@@ -319,8 +319,8 @@ fun ProfileScreen(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
-                color = NovareInfo.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, NovareInfo.copy(alpha = 0.4f)),
+                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)),
             ) {
                 Row(
                     modifier = Modifier.padding(14.dp),
@@ -334,7 +334,7 @@ fun ProfileScreen(
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = onDismissMessage) {
-                        Text("Ok", color = NovareAccent, fontWeight = FontWeight.Bold)
+                        Text("Ok", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -348,8 +348,8 @@ fun ProfileScreen(
             ) {
                 SquircleIcon(
                     iconRes = R.drawable.fa_user,
-                    backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                    tintColor = NovareAccent,
+                    backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    tintColor = MaterialTheme.colorScheme.primary,
                     contentDescription = "Piloto",
                 )
                 Spacer(Modifier.width(12.dp))
@@ -379,8 +379,8 @@ fun ProfileScreen(
             ui.notice?.let { n ->
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = (if (ui.signedIn) NovareWarning else NovareInfo).copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, (if (ui.signedIn) NovareWarning else NovareInfo).copy(alpha = 0.35f)),
+                    color = (if (ui.signedIn) NovareWarning else MaterialTheme.colorScheme.secondary).copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, (if (ui.signedIn) NovareWarning else MaterialTheme.colorScheme.secondary).copy(alpha = 0.35f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp),
@@ -569,8 +569,8 @@ fun ProfileScreen(
                 ) {
                     SquircleIcon(
                         iconRes = R.drawable.fa_users,
-                        backgroundColor = NovareInfo.copy(alpha = 0.15f),
-                        tintColor = NovareInfo,
+                        backgroundColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                        tintColor = MaterialTheme.colorScheme.secondary,
                         contentDescription = "Privacidade",
                     )
                     Spacer(Modifier.width(12.dp))
@@ -630,7 +630,7 @@ fun ProfileScreen(
                 Text(
                     text = it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (updateCheck == UpdateCheck.FOUND) NovareAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (updateCheck == UpdateCheck.FOUND) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 

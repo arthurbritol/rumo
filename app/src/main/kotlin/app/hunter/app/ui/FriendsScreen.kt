@@ -207,6 +207,7 @@ fun FriendsScreen(
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
     var invitesSectionY by remember { mutableIntStateOf(0) }
+    var rolesSectionY by remember { mutableIntStateOf(0) }
 
     val pendingInvitesCount = ui.invitesReceived.size
     val pendingRolesCount = ui.roles.count { it.pending }
@@ -258,7 +259,12 @@ fun FriendsScreen(
                 onClick = {
                     if (totalPending > 0) {
                         coroutineScope.launch {
-                            scrollState.animateScrollTo(maxOf(0, invitesSectionY - 24))
+                            val targetY = if (ui.invitesReceived.isEmpty() && pendingRolesCount > 0) {
+                                rolesSectionY
+                            } else {
+                                invitesSectionY
+                            }
+                            scrollState.animateScrollTo(maxOf(0, targetY - 24))
                         }
                     }
                 },
@@ -347,8 +353,8 @@ fun FriendsScreen(
                 ) {
                     SquircleIcon(
                         iconRes = R.drawable.fa_users,
-                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                        tintColor = NovareAccent,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        tintColor = MaterialTheme.colorScheme.primary,
                     )
                     Column(Modifier.weight(1f)) {
                         Text("Entre para usar amigos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -438,7 +444,13 @@ fun FriendsScreen(
         ui.friends.forEach { FriendCard(it, ui.busy, onUnfriend, onBlock, onToggleLocationSharing, onFocusFriendOnMap) }
 
         // 6. Lista de Rolês em Grupo
-        SectionTitle("Rolês (${ui.roles.size})")
+        Box(
+            Modifier.onGloballyPositioned { coords ->
+                rolesSectionY = coords.positionInParent().y.toInt() + scrollState.value
+            }
+        ) {
+            SectionTitle("Rolês (${ui.roles.size})")
+        }
         RolesSection(ui, onCreateRole, onOpenRole, onAcceptRole, onDeclineRole)
 
         Spacer(Modifier.height(24.dp))
@@ -556,8 +568,8 @@ private fun InviteReceivedCard(
         ) {
             SquircleIcon(
                 iconRes = R.drawable.fa_user,
-                backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                tintColor = NovareAccent,
+                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                tintColor = MaterialTheme.colorScheme.primary,
             )
             Column(Modifier.weight(1f)) {
                 Text(row.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -880,8 +892,8 @@ private fun RoleCard(
         ) {
             SquircleIcon(
                 iconRes = R.drawable.fa_users,
-                backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                tintColor = NovareAccent,
+                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                tintColor = MaterialTheme.colorScheme.primary,
             )
             Column(Modifier.weight(1f)) {
                 Row(
@@ -956,7 +968,7 @@ private fun RoleCard(
                         text = if (row.pending) "Aceite p/ ver" else "Ver detalhes",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
-                        color = NovareAccent,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }

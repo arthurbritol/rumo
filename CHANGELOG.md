@@ -5,23 +5,25 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 ## [0.6.0]
 
 ### Adicionado
-- **Design System Novare**: paleta semântica completa com variantes Midnight Navy (modo escuro profundo em camadas com base azul-marinho `#0A0F1D`, superfícies `#131B2E`/`#1A243B` e acentos ciano e âmbar) e Clean Slate (modo claro contrastante e arejado com bordas tonais sutis).
-- **Tipografia e Geometria refinadas**: cantos squircle contínuos com `SquircleShape` (curvatura cúbica sem descontinuidade estilo iOS/OneUI) e elevações sutis via bordas tonais (`RumoCard`).
-- **Biblioteca de Ícones Nativos Font Awesome 6**: coleção vetorial nativa em Compose (`RumoIcons`) com mais de 40 glifos de alta legibilidade para navegação, telemetria, controles e ações (Solid, Regular e Brand).
-- **Componentes Base Unificados**:
-  - `RumoCard`: container com cantos squircle, preenchimento de superfície e borda tonal suave.
-  - `RumoSquircleIcon`: botão de ação e container de ícone com cantos contínuos e feedback de toque.
-  - `RumoButton`: botões de ação primária, secundária e perigosa com hierarquia visual clara e cantos suaves.
-  - `RumoMetricBadge`: pílula compacta de telemetria com fundo translúcido e ícones temáticos.
-  - `RumoBottomNavigation`: barra de navegação inferior flutuante com acabamento translúcido, pílula ativa e ícones Font Awesome.
-  - `RumoTopAppBar`: barra superior translúcida com ações contextuais e suporte a rolagem.
+- **Design System Novare**: paleta semântica completa com variantes Midnight Navy (modo escuro profundo em camadas com base azul-marinho `#0B111D`, superfícies `#141C2B`/`#1E2D44` e acentos ciano e âmbar) e Clean Slate (modo claro contrastante e arejado com bordas tonais sutis).
+- **Tipografia e Geometria refinadas**: cantos arredondados contínuos com `SquircleIcon`, `HCard` e elevações sutis via micro-bordas tonais.
+- **Biblioteca de Ícones Nativos Font Awesome 6**: coleção vetorial em `app/src/main/res/drawable/fa_*.xml` com mais de 40 glifos de alta legibilidade para navegação, telemetria, controles e ações (Solid, Regular e Brand).
+- **Componentes Base Unificados (`app.hunter.app.ui.Components`)**:
+  - `HCard`: container com cantos arredondados de 22dp, preenchimento de superfície e micro-borda tonal suave.
+  - `SquircleIcon`: container quadrado arredondado para ícones Font Awesome ou Material com fundo colorido.
+  - `HeroMetricCard`: cartão hero para grandes instrumentos (hodômetro, resumo do rolê, autonomia) com alinhamento refinado de ações.
+  - `RumoSearchField`: campo de busca estilizado de 48dp com cantos de 14dp, área de toque acessível e ícone Font Awesome integrado.
+  - `RumoPrimaryButton`: botão de ação primária com altura de 54dp, cantos de 16dp e gradiente Novare (`#FF7A1A` -> `#EA580C`).
+  - `RumoSecondaryButton`: botão de ação secundária com outline, cantos de 16dp e suporte a estado desabilitado.
+  - `StatusPill`: pílula compacta de status/tendência com fundo colorido e tipografia destacada.
+  - `RumoBadge`: badge compacto com cantos arredondados e cor configurável.
 
 ### Alterado
-- **Navegação e Interface Global**: substituição de Material Icons padrão por glifos vetoriais Font Awesome 6 em todas as telas (`MapScreen`, `TripHistoryScreen`, `GarageScreen`, `FriendsScreen`, `RoleScreens`, `ProfileScreen`, `OnboardingScreen`, `OfflineMapsScreen`).
-- **Aba Mapa e HUD**: controles flutuantes com `RumoSquircleIcon` (camadas, busca, centralização, bússola), HUD de navegação com cantos squircle contínuos e badges de telemetria refinados.
-- **Garagem e Manutenção**: cartões de status e métricas de moto reestilizados com `RumoCard`, badges de alerta tonalizados e formulários modernizados.
-- **Histórico e Detalhes de Viagem**: cards de viagem modernizados com chips de data/duração, layout compacto e estatísticas com `RumoMetricBadge`.
-- **Social e Amigos**: cards de amigos e rolês em grupo com avatares em squircle, chips de status ("Na estrada") e botões de ação consistentes.
+- **Navegação e Interface Global**: substituição de Material Icons padrão por glifos vetoriais Font Awesome 6 (`fa_*.xml`) em todas as telas (`MapScreen`, `TripsScreen`, `GarageScreen`, `FriendsScreen`, `RoleScreens`, `ProfileScreen`, `OnboardingScreen`, `OfflineMapsScreen`).
+- **Aba Mapa e HUD**: controles flutuantes com `SquircleIcon` (camadas, busca, centralização, bússola), HUD de navegação e badges de telemetria refinados.
+- **Garagem e Manutenção**: cartões de status e métricas de moto reestilizados com `HCard`, badges de alerta tonalizados e formulários modernizados.
+- **Histórico e Detalhes de Viagem**: cards de viagem modernizados em `TripsScreen` com `LazyColumn` ponderado, layout compacto e estatísticas organizadas com `HeroMetricCard`.
+- **Social e Amigos**: cards de amigos e rolês em grupo com avatares em squircle, chips de status ("Na estrada"), sino de notificações interativo com rolagem contextual e botões de ação consistentes.
 - **Onboarding e Telas de Apoio**: apresentação inicial com ilustrações harmonizadas, tipografia equilibrada e transições elegantes.
 
 ## [0.5.2]

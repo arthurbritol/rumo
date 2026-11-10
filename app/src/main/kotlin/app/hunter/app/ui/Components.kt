@@ -175,13 +175,10 @@ fun HeroMetricCard(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .padding(bottom = 6.dp)
-                        .weight(1f, fill = false),
+                    modifier = Modifier.padding(bottom = 6.dp),
                 )
-            } else {
-                Spacer(Modifier.weight(1f))
             }
+            Spacer(Modifier.weight(1f))
             if (actionText != null && onAction != null) {
                 TextButton(
                     onClick = onAction,
@@ -249,14 +246,19 @@ fun RumoSearchField(
                 )
             }
             if (value.isNotEmpty()) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Limpar busca",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                Box(
                     modifier = Modifier
-                        .size(18.dp)
+                        .size(36.dp)
                         .clickable { onValueChange("") },
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Limpar busca",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
@@ -300,7 +302,7 @@ fun RumoPrimaryButton(
                     Icon(
                         painter = painterResource(leadingIconRes),
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = if (enabled) Color.White else Color.White.copy(alpha = 0.5f),
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.size(8.dp))
@@ -326,6 +328,16 @@ fun RumoSecondaryButton(
     leadingIconRes: Int? = null,
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val contentColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    val borderColor = if (enabled) {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+    } else {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.38f)
+    }
     Surface(
         onClick = onClick,
         enabled = enabled,
@@ -334,8 +346,8 @@ fun RumoSecondaryButton(
             .height(RUMO_SECONDARY_BUTTON_HEIGHT_DP.dp),
         shape = shape,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, borderColor),
+        contentColor = contentColor,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp),
@@ -346,7 +358,7 @@ fun RumoSecondaryButton(
                 Icon(
                     painter = painterResource(leadingIconRes),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = contentColor,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.size(8.dp))
@@ -355,7 +367,7 @@ fun RumoSecondaryButton(
                 text = text,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = contentColor,
             )
         }
     }

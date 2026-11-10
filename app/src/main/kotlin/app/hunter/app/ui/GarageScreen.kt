@@ -97,10 +97,8 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                val bikeModel = remember {
-                    val p = ProfilePrefs.read(context.getSharedPreferences("app", 0))
-                    listOfNotNull(p?.brand, p?.model).joinToString(" ").ifEmpty { "Hunter 350" }
-                }
+                val p = ProfilePrefs.read(context.getSharedPreferences("app", 0))
+                val bikeModel = listOfNotNull(p?.brand, p?.model).joinToString(" ").ifEmpty { "Hunter 350" }
                 Text(
                     bikeModel,
                     style = MaterialTheme.typography.labelMedium,
@@ -206,8 +204,8 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
                 ) {
                     SquircleIcon(
                         iconRes = R.drawable.fa_gas_pump,
-                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                        tintColor = NovareAccent,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        tintColor = MaterialTheme.colorScheme.primary,
                     )
                     Text(
                         "AUTONOMIA",
@@ -229,7 +227,7 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
                             text = rangeUnit,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = NovareAccent,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(bottom = 3.dp),
                         )
                     }
@@ -357,8 +355,8 @@ private fun FuelSection(vm: HunterViewModel) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 SquircleIcon(
                     iconRes = R.drawable.fa_gas_pump,
-                    backgroundColor = NovareAccent.copy(alpha = 0.12f),
-                    tintColor = NovareAccent,
+                    backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    tintColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(end = 12.dp),
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -375,7 +373,7 @@ private fun FuelSection(vm: HunterViewModel) {
                     seg?.let {
                         Text(
                             "${fmtNum(it.kmPerL)} km/l · ${fmtMoney(it.costPerKm)}/km",
-                            color = NovareAccent,
+                            color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -488,8 +486,8 @@ private fun MaintenanceSection(vm: HunterViewModel) {
             ) {
                 SquircleIcon(
                     iconRes = R.drawable.fa_bell,
-                    backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                    tintColor = NovareAccent,
+                    backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    tintColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(end = 12.dp),
                 )
                 Text("Receber lembretes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -571,8 +569,8 @@ private fun OfflineSection(vm: HunterViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SquircleIcon(
                 iconRes = R.drawable.fa_map_location_dot,
-                backgroundColor = NovareInfo.copy(alpha = 0.15f),
-                tintColor = NovareInfo,
+                backgroundColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                tintColor = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.padding(end = 12.dp),
             )
             Text("Mapas sem internet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)

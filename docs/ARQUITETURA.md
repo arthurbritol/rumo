@@ -168,22 +168,23 @@ O `LiveLocationPublisher` (no módulo `app`, gerenciado pelo `SocialGraph`) oper
 
 A interface do Rumo é desenvolvida em Jetpack Compose e adota os padrões do **Design System Novare**:
 
-- **Paleta Semântica (`NovareColors`)**:
-  - **Midnight Navy (Tema Escuro)**: otimizado para pilotagem noturna e ambientes de baixa luminosidade. Fundo principal azul-marinho profundo (`#0A0F1D`), superfícies em camadas tonais (`#131B2E`, `#1A243B`), texto primário de alto contraste (`#F8FAFC`) e acentos funcionais em azul ciano (`#38BDF8`) e âmbar (`#F59E0B`).
-  - **Clean Slate (Tema Claro)**: projetado para visibilidade sob luz solar direta em suporte de guidão. Fundo neutro arejado (`#F8FAFC`), superfícies claras contrastantes (`#FFFFFF`, `#F1F5F9`) e bordas tonais sutis (`#E2E8F0`).
+- **Paleta Semântica Novare**:
+  - **Midnight Navy (Tema Escuro)**: otimizado para pilotagem noturna e ambientes de baixa luminosidade. Fundo principal azul-marinho profundo (`#0B111D`), superfícies em camadas tonais (`#141C2B`, `#1E2D44`), texto primário de alto contraste (`#F8FAFC`) e acentos funcionais em laranja (`#FF7A1A`), ciano (`#38BDF8`) e âmbar (`#F59E0B`).
+  - **Clean Slate (Tema Claro)**: projetado para visibilidade sob luz solar direta em suporte de guidão. Fundo neutro arejado (`#F1F5F9`), superfícies claras contrastantes (`#FFFFFF`, `#E2E8F0`), texto escuro (`#0F172A`) e cores com contraste ajustado para superfícies claras (`#EA580C`, `#0284C7`).
 - **Formas e Geometria**:
-  - `SquircleShape`: implementação de curvatura contínua (superelipse/suavização cúbica estilo iOS/OneUI) com `CornerSmoothing.High`, eliminando cantos pontiagudos ou quinas duras.
-  - Cantos padronizados: `Squircle12` (chips/badges), `Squircle16` (botões e botões flutuantes), `Squircle20` (cards de conteúdo e containers), `Squircle24` (modais e painéis de navegação).
-- **Componentes Primitivos (`app.hunter.app.ui.components`)**:
-  - `RumoCard`: container com cantos squircle contínuos, fundo de superfície tonal e borda sutil.
-  - `RumoSquircleIcon`: botão de ação e container de ícone com cantos squircle e feedback tátil de toque.
-  - `RumoButton`: botões de ação primária, secundária e perigosa com suporte a ícones, estado desabilitado e cantos contínuos.
-  - `RumoMetricBadge`: pílula compacta para métricas e telemetria (velocidade, distância, tempo, consumo) com ícones temáticos e fundo translúcido.
-  - `RumoBottomNavigation`: barra de navegação inferior flutuante com acabamento translúcido, pílula de seleção ativa e ícones Font Awesome.
-  - `RumoTopAppBar`: barra superior translúcida com ações contextuais, suporte a rolagem e alinhamento visual com o sistema.
-- **Ícones Nativos Font Awesome 6 (`RumoIcons`)**:
-  - Coleção vetorial completa desenhada nativamente em Compose (`app.hunter.app.ui.icons.RumoIcons`), eliminando dependências de fontes externas ou SVGs inflados em runtime.
-  - Cobre navegação (bússola, rota, velocímetro, camadas, postos), status da moto (combustível, bateria, chave inglesa, odômetro), social (amigos, capacete, grupo) e ações gerais (busca, engrenagem, fechar, voltar).
+  - Cantos arredondados contínuos com `SquircleIcon` (squircle 44dp, raio 12dp), `HCard` (cantos 22dp), botões (16dp), campos de busca (14dp) e badges (pílula 50%/10dp), eliminando cantos pontiagudos ou quinas duras.
+- **Componentes Base Unificados (`app.hunter.app.ui.Components`)**:
+  - `HCard`: container com cantos arredondados de 22dp, fundo de superfície tonal e micro-borda suave (`outline` com opacidade 0.5f).
+  - `SquircleIcon`: container quadrado arredondado (44dp, cantos 12dp) para ícones Font Awesome ou Material com fundo colorido.
+  - `HeroMetricCard`: cartão hero para grandes instrumentos (hodômetro, resumo do rolê, autonomia) com suporte a ação contextual alinhada à direita.
+  - `RumoSearchField`: campo de busca estilizado de 48dp com cantos de 14dp, área de toque acessível (36dp) e ícone Font Awesome integrado.
+  - `RumoPrimaryButton`: botão de ação primária com altura de 54dp, cantos de 16dp, gradiente Novare (`#FF7A1A` -> `#EA580C`) e suporte a ícone e estado desabilitado.
+  - `RumoSecondaryButton`: botão de ação secundária com altura de 50dp, outline tonal, cantos de 16dp e atenuação de 0.38f para texto e borda quando desabilitado.
+  - `StatusPill`: pílula compacta de status/tendência com fundo colorido e tipografia destacada.
+  - `RumoBadge`: badge compacto com cantos arredondados para identificadores contextuais (ex: "Você").
+- **Ícones Vetoriais Font Awesome 6 (`app/src/main/res/drawable/fa_*.xml`)**:
+  - Coleção vetorial em arquivos XML de recursos (`app/src/main/res/drawable/fa_*.xml`) com mais de 40 glifos de alta legibilidade para navegação, telemetria, controles e ações.
+  - Cobre navegação (bússola, rota, velocímetro, camadas, postos), status da moto (combustível, bateria, chave inglesa, odômetro), social (amigos, capacete, grupo, sino de notificações) e ações gerais (busca, engrenagem, fechar, voltar).
 
 ## Pod (BLE)
 

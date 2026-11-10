@@ -106,8 +106,8 @@ fun TripsScreen(vm: HunterViewModel) {
                 ) {
                     SquircleIcon(
                         iconRes = R.drawable.fa_route,
-                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                        tintColor = NovareAccent,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        tintColor = MaterialTheme.colorScheme.primary,
                         contentDescription = "Trajeto",
                     )
                     Spacer(Modifier.width(12.dp))
@@ -179,6 +179,9 @@ fun TripsScreen(vm: HunterViewModel) {
             SectionTitle("Histórico de viagens")
 
             LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
@@ -190,8 +193,8 @@ fun TripsScreen(vm: HunterViewModel) {
                         ) {
                             SquircleIcon(
                                 iconRes = R.drawable.fa_route,
-                                backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                                tintColor = NovareAccent,
+                                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                tintColor = MaterialTheme.colorScheme.primary,
                                 contentDescription = "Rota",
                             )
                             Spacer(Modifier.width(12.dp))
@@ -343,8 +346,8 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
             ) {
                 SquircleIcon(
                     iconRes = R.drawable.fa_route,
-                    backgroundColor = NovareAccent.copy(alpha = 0.15f),
-                    tintColor = NovareAccent,
+                    backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    tintColor = MaterialTheme.colorScheme.primary,
                     contentDescription = "Viagem",
                 )
                 Spacer(Modifier.width(12.dp))
@@ -466,7 +469,7 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
             },
             confirmButton = {
                 TextButton(onClick = { vm.renameTrip(trip.id, name.trim()); renaming = false }) {
-                    Text("Salvar", color = NovareAccent, fontWeight = FontWeight.Bold)
+                    Text("Salvar", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancelar") } },
