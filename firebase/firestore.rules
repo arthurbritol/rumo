@@ -139,13 +139,26 @@ service cloud.firestore {
     function atividadeValida(d) {
       return d.keys().hasOnly(['weekStartMs', 'weekKm'])
         && d.keys().hasAll(['weekStartMs', 'weekKm'])
-        && numeroOk(d.weekStartMs)
+        && epochMsOk(d.weekStartMs)
         && numeroOk(d.weekKm);
     }
 
     // Número finito, não negativo e limitado.
     function numeroOk(x) {
       return x is number && x >= 0 && x < 1000000000000;
+    }
+
+    // Epoch em ms (hoje ~1.8e12): teto próprio, bem acima do dos valores.
+    function epochMsOk(x) {
+      return x is number && x >= 0 && x < 100000000000000;
+    }
+
+    function epochMsOpcional(d, campo) {
+      return !(campo in d) || d[campo] == null || epochMsOk(d[campo]);
+    }
+
+    function expiraOk(x) {
+      return epochMsOk(x) || x is timestamp;
     }
 
     function numeroOuNulo(d, campo) {
@@ -180,7 +193,7 @@ service cloud.firestore {
       allow create: if logado()
         && request.resource.data.keys().hasAll(['de', 'para'])
         && request.resource.data.keys().hasOnly(['de', 'para', 'criadoEm'])
-        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm is number)
+        && epochMsOpcional(request.resource.data, 'criadoEm')
         && request.resource.data.de == request.auth.uid
         && request.resource.data.de.size() <= 128
         && request.resource.data.para is string
@@ -205,6 +218,7 @@ service cloud.firestore {
       allow create: if logado()
         && request.resource.data.keys().hasOnly(['a', 'b', 'criadoEm'])
         && request.resource.data.keys().hasAll(['a', 'b'])
+        && epochMsOpcional(request.resource.data, 'criadoEm')
         && request.resource.data.a is string
         && request.resource.data.b is string
         && request.resource.data.a < request.resource.data.b
@@ -222,7 +236,7 @@ service cloud.firestore {
       allow create: if logado() && idComecaCom(id, request.auth.uid)
         && request.auth.uid.size() <= 128 && id.size() <= request.auth.uid.size() + 129
         && request.resource.data.keys().hasOnly(['criadoEm'])
-        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm is number);
+        && epochMsOpcional(request.resource.data, 'criadoEm');
     }
 
     // Rolê. Criação: criador + até 9 convidados, todos amigos do criador:
@@ -250,7 +264,8 @@ service cloud.firestore {
         && d.participantes.size() >= 1 && d.participantes.size() <= 10
         && d.participantes.toSet().size() == d.participantes.size()
         && d.expiraEm != null
-        && (d.expiraEm is number || d.expiraEm is timestamp);
+        && expiraOk(d.expiraEm)
+        && epochMsOpcional(d, 'criadoEm');
     }
 
     function roleCriacaoValida(d) {
@@ -272,7 +287,7 @@ service cloud.firestore {
     function edicaoDoCriador(antes, depois) {
       return depois.diff(antes).affectedKeys().hasOnly(['nome', 'expiraEm', 'participantes'])
         && nomeValido(depois, 'nome')
-        && (depois.expiraEm is number || depois.expiraEm is timestamp)
+        && expiraOk(depois.expiraEm)
         && depois.participantes.hasOnly(antes.participantes)
         && depois.participantes.size() <= antes.participantes.size()
         && depois.participantes.toSet().size() == depois.participantes.size()
@@ -283,6 +298,7 @@ service cloud.firestore {
       return d.keys().hasOnly(['estado', 'orcamento', 'custoPorKm', 'atualizadoEm', 'nome'])
         && d.keys().hasAll(['estado'])
         && (d.estado == 'convidado' || d.estado == 'aceito')
+        && epochMsOpcional(d, 'atualizadoEm')
         && numeroOuNulo(d, 'orcamento')
         && numeroOuNulo(d, 'custoPorKm')
         && textoOpcional(d, 'nome', 60);

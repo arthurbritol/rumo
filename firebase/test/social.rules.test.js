@@ -420,3 +420,27 @@ test('M7: amizade por quem não é a nem b é negada; duplicado em participantes
   await assertFails(db(ANA).doc('roles/r1').update({ participantes: [ANA, BETO, BETO] }));
   await assertFails(db(ANA).doc('roles/dup').set(roleDoc(ANA, [ANA, ANA])));
 });
+
+// ---------- rodada 2: valores realistas de tempo ----------
+test('timestamps reais (Date.now e +7 dias) são aceitos; valor absurdo é negado', async () => {
+  const agora = Date.now();
+  const em7 = agora + 7 * 24 * 3600 * 1000;
+  await assertSucceeds(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: agora, weekKm: 120.5 }));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: 1e14, weekKm: 1 }));
+  await assertSucceeds(db(ANA).doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO, criadoEm: agora }));
+  await assertFails(db(ANA).doc(`convites/${ANA}_${CAIO}`).set({ de: ANA, para: CAIO, criadoEm: 1e14 }));
+  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: agora }));
+  await semearAmizade(ANA, BETO);
+  const da = db(ANA);
+  const b = da.batch();
+  b.set(da.doc('roles/rt'), roleDoc(ANA, [ANA, BETO], { expiraEm: em7, criadoEm: agora }));
+  b.set(da.doc(`roles/rt/membros/${ANA}`), membro({ estado: 'aceito', atualizadoEm: agora, nome: 'Ana' }));
+  b.set(da.doc(`roles/rt/membros/${BETO}`), { estado: 'convidado', nome: 'Beto', atualizadoEm: agora });
+  await assertSucceeds(b.commit());
+  await assertSucceeds(db(BETO).doc(`roles/rt/membros/${BETO}`)
+    .update({ estado: 'aceito', atualizadoEm: agora + 5, orcamento: 250, custoPorKm: 0.6 }));
+  await assertSucceeds(da.doc('roles/rt').update({ expiraEm: em7 + 1000 }));
+  await assertFails(da.doc('roles/rt').update({ expiraEm: 1e14 }));
+  await assertFails(db(BETO).doc(`roles/rt/membros/${BETO}`).update({ atualizadoEm: 1e14 }));
+  await assertFails(da.doc('roles/rx').set(roleDoc(ANA, [ANA], { expiraEm: 1e14 })));
+});
