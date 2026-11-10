@@ -1,4 +1,9 @@
 rules_version = '2';
+// Fluxo do cliente (social): criar rolê = UM lote com roles/{id} + membros de todos
+// (criador como aceito, convidados com estado/nome/atualizadoEm); aceitar convite = lote
+// com amizades/{par} + delete do convite; apagar rolê = lote que apaga membros e o rolê
+// (o criador precisa do rolê existente para apagar membros). Medido no emulador: cabe
+// (rolê com 9 amigos + 10 membros num lote).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -134,8 +139,17 @@ service cloud.firestore {
     function atividadeValida(d) {
       return d.keys().hasOnly(['weekStartMs', 'weekKm'])
         && d.keys().hasAll(['weekStartMs', 'weekKm'])
-        && d.weekStartMs is number
-        && d.weekKm is number;
+        && numeroOk(d.weekStartMs)
+        && numeroOk(d.weekKm);
+    }
+
+    // Número finito, não negativo e limitado.
+    function numeroOk(x) {
+      return x is number && x >= 0 && x < 1000000000000;
+    }
+
+    function numeroOuNulo(d, campo) {
+      return !(campo in d) || d[campo] == null || numeroOk(d[campo]);
     }
 
     match /busca/{uid} {
@@ -165,9 +179,12 @@ service cloud.firestore {
     match /convites/{id} {
       allow create: if logado()
         && request.resource.data.keys().hasAll(['de', 'para'])
-        && request.resource.data.keys().size() <= 5
+        && request.resource.data.keys().hasOnly(['de', 'para', 'criadoEm'])
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm is number)
         && request.resource.data.de == request.auth.uid
+        && request.resource.data.de.size() <= 128
         && request.resource.data.para is string
+        && request.resource.data.para.size() <= 128
         && request.resource.data.para != request.resource.data.de
         && id == request.resource.data.de + '_' + request.resource.data.para;
       allow read, delete: if logado()
@@ -201,7 +218,11 @@ service cloud.firestore {
 
     // Bloqueio: id "quemBloqueia_bloqueado"; só quem bloqueia enxerga.
     match /bloqueios/{id} {
-      allow read, create, delete: if logado() && idComecaCom(id, request.auth.uid);
+      allow read, delete: if logado() && idComecaCom(id, request.auth.uid);
+      allow create: if logado() && idComecaCom(id, request.auth.uid)
+        && request.auth.uid.size() <= 128 && id.size() <= request.auth.uid.size() + 129
+        && request.resource.data.keys().hasOnly(['criadoEm'])
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm is number);
     }
 
     // Rolê. Criação: criador + até 9 convidados, todos amigos do criador:
@@ -227,6 +248,7 @@ service cloud.firestore {
         && d.criadorUid is string
         && d.participantes is list
         && d.participantes.size() >= 1 && d.participantes.size() <= 10
+        && d.participantes.toSet().size() == d.participantes.size()
         && d.expiraEm != null
         && (d.expiraEm is number || d.expiraEm is timestamp);
     }
@@ -239,8 +261,10 @@ service cloud.firestore {
     }
 
     // Participante sai: só `participantes` muda, e só perde o próprio uid.
+    // O criador não sai assim: precisa apagar o rolê.
     function saidaPropria(antes, depois) {
-      return depois.diff(antes).affectedKeys().hasOnly(['participantes'])
+      return request.auth.uid != antes.criadorUid
+        && depois.diff(antes).affectedKeys().hasOnly(['participantes'])
         && depois.participantes == antes.participantes.removeAll([request.auth.uid]);
     }
 
@@ -250,6 +274,8 @@ service cloud.firestore {
         && nomeValido(depois, 'nome')
         && (depois.expiraEm is number || depois.expiraEm is timestamp)
         && depois.participantes.hasOnly(antes.participantes)
+        && depois.participantes.size() <= antes.participantes.size()
+        && depois.participantes.toSet().size() == depois.participantes.size()
         && antes.criadorUid in depois.participantes;
     }
 
@@ -257,9 +283,25 @@ service cloud.firestore {
       return d.keys().hasOnly(['estado', 'orcamento', 'custoPorKm', 'atualizadoEm', 'nome'])
         && d.keys().hasAll(['estado'])
         && (d.estado == 'convidado' || d.estado == 'aceito')
-        && (!('orcamento' in d) || d.orcamento == null || d.orcamento is number)
-        && (!('custoPorKm' in d) || d.custoPorKm == null || d.custoPorKm is number)
+        && numeroOuNulo(d, 'orcamento')
+        && numeroOuNulo(d, 'custoPorKm')
         && textoOpcional(d, 'nome', 60);
+    }
+
+    // Convidado criado pelo criador: só estado, nome e atualizadoEm.
+    function convidadoInicial(d) {
+      return d.estado == 'convidado'
+        && d.keys().hasOnly(['estado', 'nome', 'atualizadoEm', 'orcamento', 'custoPorKm'])
+        && (!('orcamento' in d) || d.orcamento == null)
+        && (!('custoPorKm' in d) || d.custoPorKm == null);
+    }
+
+    function roleAposLote(rid) {
+      return getAfter(/databases/$(database)/documents/roles/$(rid)).data;
+    }
+
+    function souParticipante(rid) {
+      return request.auth.uid in get(/databases/$(database)/documents/roles/$(rid)).data.participantes;
     }
 
     match /roles/{id} {
@@ -273,22 +315,27 @@ service cloud.firestore {
                 && edicaoDoCriador(resource.data, request.resource.data)));
 
       match /membros/{uid} {
-        // 1 chamada get() (o doc do próprio leitor).
+        // Ler os demais: o leitor tem doc 'aceito' E ainda está em participantes
+        // do rolê (que precisa existir). 2 chamadas get().
         allow get: if dono(uid)
-          || (logado() && get(/databases/$(database)/documents/roles/$(id)/membros/$(request.auth.uid)).data.estado == 'aceito');
-        allow list: if logado()
+          || (logado() && souParticipante(id)
+              && get(/databases/$(database)/documents/roles/$(id)/membros/$(request.auth.uid)).data.estado == 'aceito');
+        allow list: if logado() && souParticipante(id)
           && get(/databases/$(database)/documents/roles/$(id)/membros/$(request.auth.uid)).data.estado == 'aceito';
         // Criador cria os convidados (e o próprio, já aceito) junto com o rolê:
-        // getAfter() enxerga o rolê do mesmo lote. 1 chamada.
+        // getAfter() enxerga o rolê do mesmo lote. 1 chamada por membro
+        // (cada escrita do lote é avaliada à parte).
         allow create: if logado() && membroValido(request.resource.data)
-          && getAfter(/databases/$(database)/documents/roles/$(id)).data.criadorUid == request.auth.uid
-          && uid in getAfter(/databases/$(database)/documents/roles/$(id)).data.participantes
+          && roleAposLote(id).criadorUid == request.auth.uid
+          && uid in roleAposLote(id).participantes
           && (uid == request.auth.uid
               ? request.resource.data.estado == 'aceito'
-              : request.resource.data.estado == 'convidado');
-        // Só o dono do documento muda estado/orçamento/custo (nunca volta a 'convidado').
+              : convidadoInicial(request.resource.data));
+        // Só o dono do documento, enquanto ainda é participante, muda
+        // estado/orçamento/custo (nunca volta a 'convidado'). 1 get().
         allow update: if dono(uid) && membroValido(request.resource.data)
-          && request.resource.data.estado == 'aceito';
+          && request.resource.data.estado == 'aceito'
+          && souParticipante(id);
         // Dono apaga o próprio; criador apaga qualquer um (1 get()).
         allow delete: if dono(uid)
           || (logado() && get(/databases/$(database)/documents/roles/$(id)).data.criadorUid == request.auth.uid);

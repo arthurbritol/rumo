@@ -297,3 +297,126 @@ test('caminhos fora do desenho continuam negados', async () => {
   await assertFails(db(ANA).doc('qualquer/coisa').set({ a: 1 }));
   await assertFails(db(ANA).doc(`roles/r1/outra/${ANA}`).set({ a: 1 }));
 });
+
+// ---------- rodada 1 da revisão ----------
+test('I1: aceito removido do rolê não lista nem lê os demais; o próprio doc ele ainda lê e apaga', async () => {
+  await semearRole();
+  await assertSucceeds(db(ANA).doc('roles/r1').update({ participantes: [ANA, CAIO] })); // remove Beto
+  await assertFails(db(BETO).collection('roles/r1/membros').get());
+  await assertFails(db(BETO).doc(`roles/r1/membros/${ANA}`).get());
+  await assertFails(db(BETO).doc(`roles/r1/membros/${BETO}`).update({ orcamento: 1 }));
+  await assertSucceeds(db(BETO).doc(`roles/r1/membros/${BETO}`).get());
+  await assertSucceeds(db(BETO).doc(`roles/r1/membros/${BETO}`).delete());
+});
+
+test('I1: quem saiu pela saída própria não lê os demais', async () => {
+  await semearRole();
+  await assertSucceeds(db(BETO).doc('roles/r1').update({ participantes: [ANA, CAIO] }));
+  await assertFails(db(BETO).doc(`roles/r1/membros/${CAIO}`).get());
+  await assertFails(db(BETO).collection('roles/r1/membros').get());
+  await assertSucceeds(db(BETO).doc(`roles/r1/membros/${BETO}`).delete());
+});
+
+test('I1: convidado removido não vira aceito; apaga o próprio doc', async () => {
+  await semearRole();
+  await assertSucceeds(db(ANA).doc('roles/r1').update({ participantes: [ANA, BETO] })); // remove Caio
+  await assertFails(db(CAIO).doc(`roles/r1/membros/${CAIO}`).update({ estado: 'aceito' }));
+  await assertSucceeds(db(CAIO).doc(`roles/r1/membros/${CAIO}`).delete());
+});
+
+test('I1: rolê apagado não permite leitura cruzada; dono ainda apaga o próprio doc', async () => {
+  await semearRole();
+  await semear((d) => d.doc('roles/r1').delete());
+  await assertFails(db(BETO).doc(`roles/r1/membros/${ANA}`).get());
+  await assertFails(db(BETO).collection('roles/r1/membros').get());
+  await assertFails(db(CAIO).doc(`roles/r1/membros/${CAIO}`).update({ estado: 'aceito' }));
+  await assertSucceeds(db(BETO).doc(`roles/r1/membros/${BETO}`).get());
+  await assertSucceeds(db(BETO).doc(`roles/r1/membros/${BETO}`).delete());
+});
+
+test('I2a: um único lote cria rolê + 9 amigos + 10 membros', async () => {
+  const amigos = [];
+  for (let i = 0; i < 9; i++) amigos.push(`amigo${i}`);
+  for (const f of amigos) await semearAmizade(ANA, f);
+  const da = db(ANA);
+  const b = da.batch();
+  b.set(da.doc('roles/big'), roleDoc(ANA, [ANA, ...amigos]));
+  b.set(da.doc(`roles/big/membros/${ANA}`), membro({ estado: 'aceito', nome: 'Ana' }));
+  for (const f of amigos) b.set(da.doc(`roles/big/membros/${f}`), { estado: 'convidado', nome: f, atualizadoEm: 1 });
+  await assertSucceeds(b.commit());
+});
+
+test('I2b: lote do criador apaga o rolê e todos os membros', async () => {
+  await semearRole();
+  const da = db(ANA);
+  const b = da.batch();
+  b.delete(da.doc(`roles/r1/membros/${ANA}`));
+  b.delete(da.doc(`roles/r1/membros/${BETO}`));
+  b.delete(da.doc(`roles/r1/membros/${CAIO}`));
+  b.delete(da.doc('roles/r1'));
+  await assertSucceeds(b.commit());
+});
+
+test('I2c: lote de aceitar convite (amizade + apagar convite)', async () => {
+  await semear((d) => d.doc(`convites/${CAIO}_${DUDA}`).set({ de: CAIO, para: DUDA }));
+  const dd = db(DUDA);
+  const b = dd.batch();
+  b.set(dd.doc(`amizades/${par(CAIO, DUDA)}`), amizade(CAIO, DUDA));
+  b.delete(dd.doc(`convites/${CAIO}_${DUDA}`));
+  await assertSucceeds(b.commit());
+});
+
+test('M2: criador não sai pela saída própria', async () => {
+  await semear((d) => d.doc('roles/r1').set(roleDoc(ANA, [ANA, BETO])));
+  await assertFails(db(ANA).doc('roles/r1').update({ participantes: [BETO] }));
+});
+
+test('M3: convidado criado pelo criador só tem estado, nome e atualizadoEm', async () => {
+  await semearAmizade(ANA, BETO);
+  const da = db(ANA);
+  const b = da.batch();
+  b.set(da.doc('roles/r1'), roleDoc(ANA, [ANA, BETO]));
+  b.set(da.doc(`roles/r1/membros/${BETO}`), membro({ orcamento: 5 }));
+  await assertFails(b.commit());
+  const b2 = da.batch();
+  b2.set(da.doc('roles/r1'), roleDoc(ANA, [ANA, BETO]));
+  b2.set(da.doc(`roles/r1/membros/${BETO}`), { estado: 'convidado', nome: 'Beto', atualizadoEm: 1 });
+  await assertSucceeds(b2.commit());
+});
+
+test('M5: números negativos, enormes ou não finitos são negados', async () => {
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: 1, weekKm: -1 }));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: 1, weekKm: 1e12 }));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: -5, weekKm: 1 }));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: 1, weekKm: Infinity }));
+  await semearRole();
+  const ref = db(BETO).doc(`roles/r1/membros/${BETO}`);
+  await assertFails(ref.update({ orcamento: -1 }));
+  await assertFails(ref.update({ custoPorKm: 1e12 }));
+  await assertSucceeds(ref.update({ orcamento: 0, custoPorKm: null }));
+});
+
+test('M4: convite e bloqueio só com campos esperados e textos curtos', async () => {
+  const longo = 'u'.repeat(129);
+  await assertFails(db(longo).doc(`convites/${longo}_${BETO}`).set({ de: longo, para: BETO }));
+  await assertFails(db(ANA).doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO, a: 1, b: 2 }));
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1, extra: 'x' }));
+  await assertFails(db(longo).doc(`bloqueios/${longo}_${BETO}`).set({ criadoEm: 1 }));
+  await assertSucceeds(db(ANA).doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO, criadoEm: 1 }));
+});
+
+test('M7: amizade por quem não é a nem b é negada; duplicado em participantes é negado', async () => {
+  await semear(async (d) => {
+    await d.doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO });
+    await d.doc(`convites/${BETO}_${ANA}`).set({ de: BETO, para: ANA });
+    await d.doc(`convites/${ANA}_${CAIO}`).set({ de: ANA, para: CAIO });
+  });
+  const dc = db(CAIO);
+  const b = dc.batch();
+  b.set(dc.doc(`amizades/${par(ANA, BETO)}`), amizade(ANA, BETO));
+  b.delete(dc.doc(`convites/${ANA}_${CAIO}`));
+  await assertFails(b.commit());
+  await semear((d) => d.doc('roles/r1').set(roleDoc(ANA, [ANA, BETO])));
+  await assertFails(db(ANA).doc('roles/r1').update({ participantes: [ANA, BETO, BETO] }));
+  await assertFails(db(ANA).doc('roles/dup').set(roleDoc(ANA, [ANA, ANA])));
+});
