@@ -1,0 +1,56 @@
+name: Sincronização Semanal ANP
+
+on:
+  schedule:
+    # Roda toda segunda-feira às 03:00 UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      anp_url:
+        description: "URL opcional do CSV da ANP para ingestão direta"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  sync-anp:
+    name: Sincronizar e publicar dados da ANP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v7
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Executar testes de validação ETL
+        run: python scripts/test_sync_anp_fuel.py
+
+      - name: Processar dados ANP e gerar payload comprimido
+        run: |
+          if [ -n "${{ github.event.inputs.anp_url }}" ]; then
+            python scripts/sync_anp_fuel.py --input "${{ github.event.inputs.anp_url }}" --output anp-fuel-latest.json.gz
+          else
+            python scripts/sync_anp_fuel.py --generate-seed --output anp-fuel-latest.json.gz
+          fi
+
+      - name: Validar integridade do payload gerado
+        run: |
+          python -c "import gzip, json; d=json.loads(gzip.open('anp-fuel-latest.json.gz').read()); print('Cidades:', len(d['cidades']), 'Estados:', len(d['estados']), 'Postos:', len(d['postos']))"
+
+      - name: Publicar ou atualizar release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="anp-data-latest"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" anp-fuel-latest.json.gz \
+              --title "Preços de Combustíveis ANP (Atualização Contínua)" \
+              --notes "Base consolidada e compactada da série histórica de preços da ANP."
+          else
+            gh release upload "$TAG" anp-fuel-latest.json.gz --clobber
+          fi

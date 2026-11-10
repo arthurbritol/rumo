@@ -16,3 +16,9 @@ ref/
 
 firebase/node_modules/
 firebase/*-debug.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
