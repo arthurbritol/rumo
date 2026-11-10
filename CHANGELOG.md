@@ -2,6 +2,20 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.5.0]
+
+### Adicionado
+- Aba **Amigos** (precisa de conta): busca por nome (a partir de 3 letras, até 20 resultados), convites (enviar, aceitar, recusar, cancelar), desfazer amizade e bloquear. Cada amigo mostra a moto e os km rodados na semana (de segunda a domingo). Limite de 50 amigos.
+- "Aparecer na busca": pergunta única na primeira vez que você abre a aba e interruptor no Perfil. Desligado, ninguém te acha pelo nome (amigos continuam te vendo).
+- **Rolê em grupo**: crie um rolê com até 9 amigos; cada um informa o próprio orçamento e o app calcula a média, o alcance sugerido (km) pelo custo por km de cada um e avisa quem não tem dados de consumo. Quem aceitou pode sair; o criador remove participantes ou encerra. Rolês expiram em 7 dias (política de TTL no Firestore).
+- Marcador na aba Amigos com convites e rolês pendentes. Sem internet a aba mostra um aviso e o botão "Tentar de novo".
+- Apagar a conta também apaga o que é social (perfil público, atividade, convites, amizades, bloqueios e participação em rolês), com retomada se for interrompido.
+- Pacote `app.hunter.social` no `sync-core` (motor, semana, planejador de rolê, chave de busca) e adaptador `FirestoreSocialStore` no app. Novas regras do Firestore, com testes de emulador por caminho.
+
+### Alterado
+- Sem conta (ou sem `google-services.json`) a aba Amigos só mostra o convite para entrar; nada social roda.
+- Regras do Firestore ampliadas: é preciso republicá-las (`firebase deploy --only firestore:rules`) e ativar o TTL de `roles.expiraEm`. Veja [docs/FIREBASE.md](docs/FIREBASE.md).
+
 ## [0.4.0]
 
 ### Adicionado

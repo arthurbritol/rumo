@@ -37,6 +37,30 @@ O roteiro completo, para fazer no aparelho com calma, está em [TESTES-MANUAIS-C
 
 Aviso: a conta de e-mail com o mesmo endereço do Google é vinculada (entrar com Google e com e-mail/senha usando o mesmo endereço resulta na mesma conta).
 
+## Amigos e rolê (versão 0.5)
+
+Depois de atualizar o app para a 0.5, faça **uma vez** no projeto Firebase (sem isso a aba Amigos recebe "permission denied" e os rolês nunca expiram):
+
+1. **Publicar as regras novas** (`firebase/firestore.rules` agora cobre `busca`, `perfisPublicos`, `atividade`, `convites`, `amizades`, `bloqueios` e `roles`):
+
+   ```
+   cd firebase
+   firebase deploy --only firestore:rules
+   ```
+
+2. **Índices:** nenhum índice composto é necessário. As consultas usam só filtros de igualdade (`convites` por `de`/`para`, `amizades` por `a`/`b`, `bloqueios` por `quem`, `roles` por `participantes` com array-contains) ou um intervalo num único campo (`busca`, por prefixo de `displayNameLower`), que o Firestore indexa sozinho. `firebase/firestore.indexes.json` continua vazio. Se algum dia o Logcat (`Rumo/social`) mostrar `FAILED_PRECONDITION ... requires an index`, abra o link da mensagem e crie o índice sugerido, ou acrescente-o a `firestore.indexes.json` e rode `firebase deploy --only firestore:indexes`.
+
+3. **Ativar a política de TTL** do campo `expiraEm` da coleção `roles` (apaga os rolês vencidos, 7 dias depois de criados ou renovados):
+   1. No console do Firebase, abra **Firestore Database**.
+   2. Abra a aba **Time to live** (em versões novas do console pode aparecer como "Políticas de TTL"; também fica no Google Cloud Console, em Firestore > Time-to-live).
+   3. **Criar política**: ID da coleção `roles`, campo de carimbo de data/hora `expiraEm`.
+   4. Salve. A política leva alguns minutos para ficar ativa, e a exclusão pode atrasar até cerca de 24 horas depois do vencimento: por isso o app também ignora e fecha rolês vencidos por conta própria.
+   5. O TTL só apaga o documento do rolê; o Firestore não apaga a subcoleção `roles/{id}/membros` em cascata. O app remove os membros ao encerrar um rolê, e o que sobrar fica inacessível (as regras exigem o rolê) e sem dados pessoais além do nome e do orçamento.
+
+4. Para testar com calma, siga [TESTES-MANUAIS-AMIGOS.md](TESTES-MANUAIS-AMIGOS.md).
+
+Testes das regras (inclui o social): dentro de `firebase/`, `npx firebase-tools emulators:exec --only firestore --project demo-rumo "npm test"`.
+
 ## Versões escolhidas
 
 Verificadas com AGP 8.13.2, Kotlin 2.2.20, Gradle 8.14.3 (`./gradlew.bat test :app:assembleRelease` sem `google-services.json`).

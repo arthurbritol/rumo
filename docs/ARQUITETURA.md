@@ -33,7 +33,7 @@ flowchart TD
 | `navigation` | `ValhallaClient` (custo `motorcycle`), `PhotonGeocoder`, `FuelStationFinder` (Overpass), `NavEngine` (projeção na polilinha, fora de rota, recálculo), `NavAnnouncer` (voz), `PodManeuvers` (Valhalla → ícones do Pod) |
 | `trips` | Entidades Room, `TripRecorder`, `TrackingService` (serviço de localização em primeiro plano), `AndroidLocationSource` |
 | `maintenance` | Entidades e DAO de abastecimento, itens de manutenção e hodômetro |
-| `sync-core` | JVM puro: `SyncEngine` (baixa, mescla e sobe), `merge`/`mergeOdometer` (último a escrever vence, sem duplicar), `LocalStore`/`RemoteStore` (interfaces), `OnboardingFlow` (ordem da primeira abertura), `BikeCatalog` |
+| `sync-core` | JVM puro: pacote `app.hunter.social` (amigos e rolê) e `SyncEngine` (baixa, mescla e sobe), `merge`/`mergeOdometer` (último a escrever vence, sem duplicar), `LocalStore`/`RemoteStore` (interfaces), `OnboardingFlow` (ordem da primeira abertura), `BikeCatalog` |
 | `app` | `AppDatabase` (Room v3), `HunterViewModel`, telas Compose, `HunterMap` (MapLibre), `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`) e telas de entrada e perfil |
 
 ## Decisões
@@ -76,6 +76,27 @@ A conta é **opcional**. O `sync-core` não conhece Room nem Firestore: o `app` 
 - **Sem `google-services.json`** o Firebase não é inicializado (`AccountConfig.isAvailable` falso): o app é só
   visitante e o login fica desabilitado.
 
+## Amigos e rolê
+
+Também opcional e só com conta. A lógica mora no `sync-core` (pacote `app.hunter.social`): `SocialStore` (interface),
+`SocialEngine` (busca, convites, amizades, bloqueios, rolês), `RolePlanner` (média, alcance sugerido e avisos),
+`WeekMath` (semana de segunda a domingo no fuso de quem lê) e `SearchKey` (chave de busca sem acento, minúscula).
+O `app` (pacote `app.hunter.app.social`) traz o `FirestoreSocialStore` (adaptador), o `SocialPublisher` (publica
+perfil público e atividade), o `SocialGraph` (ponto único: só cria a sessão com Firebase disponível, usuário logado e
+sem exclusão pendente), o `SocialViewModel`/`SocialUiMapper` e as telas (`FriendsScreen`, `RoleScreens`).
+
+- **Coleções** (Firestore, fora de `usuarios/`): `busca/{uid}` (índice por nome, leitura por qualquer conta, consulta
+  limitada a 20), `perfisPublicos/{uid}` e `atividade/{uid}` (só o dono e amigos leem), `convites/{de_para}`,
+  `amizades/{a_b}` (par ordenado; criada só por quem recebeu o convite, no mesmo lote que apaga o convite),
+  `bloqueios/{quem_bloqueado}` (só quem bloqueia enxerga) e `roles/{id}` com a subcoleção `membros/{uid}`
+  (estado, orçamento e custo por km de cada um).
+- **Segurança só por regras:** não há servidor nem Functions; tudo é validado em `firebase/firestore.rules` e
+  coberto por testes de emulador por caminho. Limites: 50 amigos, 10 pessoas por rolê.
+- **Rolê:** criado num lote único (rolê + membros); o campo `expiraEm` (7 dias) tem política de TTL, e o app também
+  fecha rolês vencidos e renova o do criador ao abri-lo.
+- **Sem internet** a aba mostra o último dado e um aviso; nada social é guardado no Room.
+- **Apagar conta** remove também o conteúdo social, de forma retomável.
+
 ## Pod (BLE)
 
 Dispositivo `RE_DISP`, serviço `01FF0100-BA5E-F4EE-5CA1-EB1E5E4B1CE0`. O celular é cliente GATT e também expõe
@@ -91,7 +112,7 @@ watchdog de ~5 s (ping após 2 s ocioso, tela reenviada a cada 2 s). O protocolo
 | Valhalla (valhalla1.openstreetmap.de) | Rotas para moto, com alternativas e paradas |
 | Photon (photon.komoot.io) | Busca de endereços e lugares |
 | Overpass | Postos de combustível (`amenity=fuel`) |
-| Firebase (Authentication + Firestore, plano gratuito) | Conta e sincronização, só quando o `google-services.json` está no build; sem Storage nem Functions |
+| Firebase (Authentication + Firestore, plano gratuito) | Conta, sincronização e amigos/rolê, só quando o `google-services.json` está no build; sem Storage nem Functions |
 
 Todos são gratuitos e de uso justo; para uso intenso, hospede o seu próprio Valhalla e Photon.
 

@@ -51,6 +51,14 @@ dados ficam guardados na nuvem. Não modifica o Waze.
   `app/google-services.json` o app compila e roda normalmente, só sem login.
 - Roteiro de teste no aparelho: [docs/TESTES-MANUAIS-CONTA.md](docs/TESTES-MANUAIS-CONTA.md).
 
+**Amigos e rolê (precisa de conta)**
+- Aba Amigos: busque pelo nome, convide, aceite e veja a moto e os km da semana de cada amigo. Dá para desfazer a
+  amizade ou bloquear, e escolher se você aparece na busca (Perfil).
+- Rolê em grupo: até 10 pessoas, cada uma informa quanto quer gastar; o app mostra a média e até onde o grupo
+  vai com o custo por km de cada um. O rolê some sozinho em 7 dias.
+- Exige publicar as regras e o TTL no Firebase: [docs/FIREBASE.md](docs/FIREBASE.md). Roteiro de teste com duas
+  contas: [docs/TESTES-MANUAIS-AMIGOS.md](docs/TESTES-MANUAIS-AMIGOS.md).
+
 **Tripper Pod**
 - Conexão Bluetooth, PIN no primeiro uso, reconexão automática e bússola.
 - Na navegação, o Pod mostra a manobra, a distância e a chegada, o tempo ou a distância restantes.
@@ -85,7 +93,7 @@ APIs), as estatísticas de viagem, combustível, manutenção, lembretes e a sin
 ## Versões e releases
 
 Cada push na `main` que altera o app publica uma release nova: `0.3.1`, `0.3.2`, `0.3.3`… O número do meio vem de
-[`version.txt`](version.txt). Para uma mudança grande, edite esse arquivo (`0.4`) e a contagem recomeça em `0.4.1`.
+[`version.txt`](version.txt). Para uma mudança grande, edite esse arquivo (`0.5`) e a contagem recomeça em `0.5.1`.
 
 ## Arquitetura
 
