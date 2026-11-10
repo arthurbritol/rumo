@@ -1,6 +1,7 @@
 package app.hunter.social
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /** Perfil público de um usuário (o que os amigos e a busca enxergam). */
 data class PublicProfile(
@@ -98,6 +99,27 @@ interface SocialStore {
     suspend fun member(roleId: String, uid: String): Member?
 
     suspend fun deleteAllSocial(uid: String)
+
+    /** Concede permissão para [friendUid] ver a localização do usuário logado. */
+    suspend fun grantLocationPermission(friendUid: String) {}
+
+    /** Revoga permissão para [friendUid] ver a localização do usuário logado. */
+    suspend fun revokeLocationPermission(friendUid: String) {}
+
+    /** Observa conjunto de UIDs para os quais [myUid] concedeu permissão de localização. */
+    fun observeGrantedPermissions(myUid: String): Flow<Set<String>> = emptyFlow()
+
+    /** Observa conjunto de UIDs que concederam permissão de localização para [myUid]. */
+    fun observeReceivedPermissions(myUid: String): Flow<Set<String>> = emptyFlow()
+
+    /** Publica a coordenada ativa do usuário logado em `localizacoes/{uid}`. */
+    suspend fun publishLocation(loc: LiveLocation) {}
+
+    /** Remove a coordenada ativa do usuário logado ao desconectar do Pod. */
+    suspend fun clearLocation() {}
+
+    /** Observa em tempo real a coordenada de [friendUid], se houver autorização. */
+    fun observeFriendLocation(friendUid: String): Flow<LiveLocation?> = emptyFlow()
 }
 
 /** Resultado de uma operação que pode ser recusada por regra de negócio. */

@@ -38,3 +38,32 @@ data class RolePlan(
     val noReach: NoReach?,
     val members: List<MemberPlan>,
 )
+
+/** Coordenada geográfica em tempo real com metadados de deslocamento e atualização. */
+data class LiveLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val bearing: Float? = null,
+    val speedKmh: Float? = null,
+    val updatedAtMs: Long = System.currentTimeMillis(),
+) {
+    fun isExpired(nowMs: Long = System.currentTimeMillis(), maxAgeMs: Long = 5 * 60 * 1000L): Boolean =
+        nowMs - updatedAtMs > maxAgeMs
+
+    fun isValid(): Boolean =
+        latitude in -90.0..90.0 && longitude in -180.0..180.0
+
+    fun isValidCoordinates(): Boolean = isValid()
+}
+
+/** Concessão de permissão de visualização de localização em tempo real de [de] para [para]. */
+data class LocationPermission(
+    val de: String,
+    val para: String,
+    val criadoEm: Long = System.currentTimeMillis(),
+) {
+    companion object {
+        fun docId(de: String, para: String): String = "${de}_$para"
+    }
+}
+
