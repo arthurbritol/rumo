@@ -16,14 +16,18 @@ import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.Source
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.map
@@ -52,8 +56,16 @@ class FirestoreSocialStore(
 
     private suspend fun Query.fetch(): QuerySnapshot = get(Source.SERVER).await()
 
+    /** Dados do documento com cada `Timestamp` convertido em milissegundos (ver [secondsNanosToMillis]). */
     private fun DocumentSnapshot.map(): Map<String, Any?> =
-        data.orEmpty().mapValues { (_, v) -> if (v is Timestamp) v.toDate().time else v }
+        data.orEmpty().mapValues { (_, v) -> if (v is Timestamp) secondsNanosToMillis(v.seconds, v.nanoseconds) else v }
+
+    private fun millisToTimestamp(ms: Long): Timestamp =
+        millisToSecondsNanos(ms).let { (s, n) -> Timestamp(s, n) }
+
+    /** Convites de [de] para [para] que existem (0 ou 1 documento); a consulta já prova a regra (`de`/`para`). */
+    private suspend fun inviteRefs(de: String, para: String): List<DocumentReference> =
+        db.collection("convites").whereEqualTo("de", de).whereEqualTo("para", para).fetch().documents.map { it.reference }
 
     // ---------------------------------------------------------------- perfil, atividade, busca
 
@@ -99,12 +111,12 @@ class FirestoreSocialStore(
 
     /** Quem convidou apaga o convite (se ainda existir). */
     override suspend fun cancelInvite(from: String, to: String) {
-        deleteAll(sentInvitesQuery(from).fetch().documents.filter { it.getString("para") == to }.map { it.reference })
+        deleteAll(inviteRefs(from, to))
     }
 
     /** O destinatário recusa (apaga) o convite de [from] (se ainda existir). */
     override suspend fun declineInvite(from: String, to: String) {
-        deleteAll(receivedInvitesQuery(to).fetch().documents.filter { it.getString("de") == from }.map { it.reference })
+        deleteAll(inviteRefs(from, to))
     }
 
     /** Lote: cria `amizades/{par}` e apaga `convites/{from_to}`; as regras conferem com `existsAfter`. */
@@ -141,7 +153,11 @@ class FirestoreSocialStore(
     override suspend fun friendUids(uid: String): Set<String> =
         friendsQueries(uid).flatMap { q -> q.fetch().documents.mapNotNull { otherOf(uid, it) } }.toSet()
 
-    /** Perfil público e atividade de cada amigo, lidos em paralelo (no máximo [FRIEND_READ_PARALLELISM] de cada vez). */
+    /**
+     * Perfil público e atividade de cada amigo, lidos em paralelo (no máximo [FRIEND_READ_PARALLELISM] de cada vez).
+     * Um amigo cuja leitura falha (por exemplo PERMISSION_DENIED logo depois de desfazer a amizade) é pulado em vez
+     * de derrubar a lista inteira; perfil ausente vira "Amigo". Cancelamento sempre propaga.
+     */
     override suspend fun friends(uid: String): List<Friend> = loadFriends(friendUids(uid))
 
     private suspend fun loadFriends(uids: Set<String>): List<Friend> = coroutineScope {
@@ -149,26 +165,30 @@ class FirestoreSocialStore(
         uids.sorted().map { f ->
             async {
                 gate.withPermit {
-                    val profile = ref("perfisPublicos/$f").get(Source.SERVER).await().let { d ->
-                        d.takeIf { it.exists() }?.let { mapToPublicProfile(f, it.map()) }
-                    } ?: PublicProfile(f, "Amigo", null, null, null, false)
-                    val activity = ref("atividade/$f").get(Source.SERVER).await().let { d ->
-                        d.takeIf { it.exists() }?.let { mapToActivity(it.map()) }
+                    try {
+                        val profileDoc = ref("perfisPublicos/$f").get(Source.SERVER).await()
+                        val profile = profileDoc.takeIf { it.exists() }?.let { mapToPublicProfile(f, it.map()) }
+                            ?: PublicProfile(f, "Amigo", null, null, null, false)
+                        val activityDoc = ref("atividade/$f").get(Source.SERVER).await()
+                        Friend(profile, activityDoc.takeIf { it.exists() }?.let { mapToActivity(it.map()) })
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
                     }
-                    Friend(profile, activity)
                 }
             }
-        }.awaitAll()
+        }.awaitAll().filterNotNull()
     }
 
-    /** Apaga a amizade (se existir): o id do par decide em qual das duas consultas ela aparece. */
+    /** Apaga a amizade (se existir). */
     override suspend fun unfriend(uid: String, other: String) {
         deleteAll(friendshipRefs(uid, other))
     }
 
     private suspend fun friendshipRefs(uid: String, other: String): List<DocumentReference> {
         val pair = pairId(uid, other)
-        val q = db.collection("amizades").whereEqualTo(if (uid < other) "a" else "b", uid)
+        val q = db.collection("amizades").whereEqualTo("a", minOf(uid, other)).whereEqualTo("b", maxOf(uid, other))
         return q.fetch().documents.filter { it.id == pair }.map { it.reference }
     }
 
@@ -179,9 +199,19 @@ class FirestoreSocialStore(
      * existentes: as regras recusam apagar `convites`/`amizades` inexistentes).
      */
     override suspend fun block(uid: String, other: String) {
-        val doomed = friendshipRefs(uid, other) +
-            sentInvitesQuery(uid).fetch().documents.filter { it.getString("para") == other }.map { it.reference } +
-            receivedInvitesQuery(uid).fetch().documents.filter { it.getString("de") == other }.map { it.reference }
+        try {
+            commitBlock(uid, other)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: FirebaseFirestoreException) {
+            // Corrida: um documento sumiu entre a consulta e o lote (o outro lado cancelou o convite, por exemplo).
+            // Consulta de novo e repete o lote uma vez; se falhar outra vez o erro sobe.
+            commitBlock(uid, other)
+        }
+    }
+
+    private suspend fun commitBlock(uid: String, other: String) {
+        val doomed = friendshipRefs(uid, other) + inviteRefs(uid, other) + inviteRefs(other, uid)
         val batch = db.batch()
         batch.set(ref("bloqueios/${blockId(uid, other)}"), blockToMap(uid, clock()))
         doomed.forEach { batch.delete(it) }
@@ -203,13 +233,19 @@ class FirestoreSocialStore(
 
     // ---------------------------------------------------------------- observação em tempo real
 
-    /** Flow do snapshot da consulta; o ouvinte sai ao cancelar e erros encerram o flow com a exceção. */
+    /**
+     * Flow do snapshot da consulta, com buffer conflated (o snapshot mais novo nunca é descartado por um mais
+     * antigo). O ouvinte sai ao cancelar. Um erro do ouvinte encerra o flow com a exceção
+     * ([FirebaseFirestoreException]): PERMISSION_DENIED quando o rolê foi encerrado ou o usuário saiu dele (as
+     * regras deixam de permitir a leitura), UNAVAILABLE quando está sem rede. Quem coleta (ViewModel) trata e
+     * decide tentar de novo ou mostrar "sem conexão"; este adaptador não reinicia o ouvinte.
+     */
     private fun Query.snapshots(): Flow<QuerySnapshot> = callbackFlow {
         val reg = addSnapshotListener { snap, err ->
             if (err != null) close(err) else if (snap != null) trySend(snap)
         }
         awaitClose { reg.remove() }
-    }
+    }.buffer(Channel.CONFLATED)
 
     override fun observeInvitesReceived(uid: String): Flow<List<Invite>> =
         receivedInvitesQuery(uid).snapshots().map { s -> s.documents.mapNotNull { mapToInvite(it.map()) } }
@@ -236,8 +272,7 @@ class FirestoreSocialStore(
         val now = clock()
         val batch = db.batch()
         // expiraEm vai como Timestamp (e não número) para a política de TTL do Firestore apagar o rolê vencido.
-        val roleMap = roleToMap(role, now) + ("expiraEm" to Timestamp(java.util.Date(role.expiresAtMs)))
-        batch.set(ref("roles/${role.id}"), roleMap)
+        batch.set(ref("roles/${role.id}"), roleToMap(role, now, ::millisToTimestamp))
         batch.set(ref("roles/${role.id}/membros/${creator.uid}"), memberToMap(creator, now))
         invited.forEach { batch.set(ref("roles/${role.id}/membros/${it.uid}"), memberToMap(it, now)) }
         batch.commit().await()
@@ -259,8 +294,9 @@ class FirestoreSocialStore(
     }
 
     /**
-     * Lote (criador): apaga todos os membros e depois o rolê. Os ids dos membros vêm de `participantes` (apagar
-     * documento de membro não exige que ele exista) somados à listagem de `membros`, que é opcional.
+     * Lote (criador): apaga os membros e depois o rolê. Os ids dos membros são os de `participantes` (apagar um
+     * documento de membro não exige que ele exista), sem listar a subcoleção. É o caminho de limpeza de rolês
+     * vencidos: o TTL apaga só o documento do rolê, não os `membros`.
      */
     override suspend fun closeRole(roleId: String) {
         val role = ref("roles/$roleId").get(Source.SERVER).await()
@@ -269,9 +305,7 @@ class FirestoreSocialStore(
     }
 
     private suspend fun closeRoleDoc(role: DocumentSnapshot) {
-        val ids = LinkedHashSet<String>()
-        (role.get("participantes") as? List<*>)?.filterIsInstance<String>()?.let(ids::addAll)
-        runCatching { role.reference.collection("membros").fetch().documents.forEach { ids += it.id } }
+        val ids = (role.get("participantes") as? List<*>)?.filterIsInstance<String>().orEmpty().toSet()
         val batch = db.batch()
         ids.forEach { batch.delete(role.reference.collection("membros").document(it)) }
         batch.delete(role.reference)

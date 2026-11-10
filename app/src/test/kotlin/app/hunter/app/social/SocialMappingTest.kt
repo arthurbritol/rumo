@@ -158,4 +158,23 @@ class SocialMappingTest {
         assertTrue(searchPages(1000).all { it in 1..20 })
         assertEquals(MAX_SEARCH_TOTAL, searchPages(1000).sum())
     }
+
+    @Test
+    fun `rolê com nome em branco e recusado e expiraEm passa pelo conversor`() {
+        val role = Role("r1", "Serra", "u1", listOf("u1"), 5_000L)
+        assertFailsWith<IllegalArgumentException> { roleToMap(role.copy(name = "   "), 1L) }
+        assertEquals("T5000", roleToMap(role, 1L) { "T$it" }["expiraEm"])
+        assertEquals(5_000L, roleToMap(role, 1L)["expiraEm"])
+    }
+
+    @Test
+    fun `conversao de milissegundos para segundos e nanos e volta`() {
+        assertEquals(1_700_000_000L to 123_000_000, millisToSecondsNanos(1_700_000_000_123L))
+        assertEquals(1_700_000_000_123L, secondsNanosToMillis(1_700_000_000L, 123_000_000))
+        val now = System.currentTimeMillis()
+        val (s, n) = millisToSecondsNanos(now)
+        assertEquals(now, secondsNanosToMillis(s, n))
+        assertEquals(-2L to 999_000_000, millisToSecondsNanos(-1_001L))
+        assertEquals(-1_001L, secondsNanosToMillis(-2L, 999_000_000))
+    }
 }

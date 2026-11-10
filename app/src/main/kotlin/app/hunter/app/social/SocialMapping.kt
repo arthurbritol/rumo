@@ -199,16 +199,29 @@ fun mapToMember(uid: String, data: Map<String, Any?>): Member? {
     )
 }
 
-/** Mapa de `roles/{id}`: lança [IllegalArgumentException] se as regras o recusariam (1..10 participantes distintos). */
-fun roleToMap(r: Role, nowMs: Long): Map<String, Any?> {
+/** Milissegundos para (segundos, nanos) de um `Timestamp`, com divisão pelo piso (nanos sempre em 0..999_999_999). */
+fun millisToSecondsNanos(ms: Long): Pair<Long, Int> =
+    Math.floorDiv(ms, 1000L) to (Math.floorMod(ms, 1000L) * 1_000_000L).toInt()
+
+/** Inverso de [millisToSecondsNanos]. */
+fun secondsNanosToMillis(seconds: Long, nanos: Int): Long = seconds * 1000L + nanos / 1_000_000
+
+/**
+ * Mapa de `roles/{id}`: lança [IllegalArgumentException] se as regras o recusariam (nome vazio, 1..10 participantes
+ * distintos, criador fora da lista). `expiraEm` é o ÚNICO ponto onde o instante é convertido: [expiresAt] recebe os
+ * milissegundos e devolve o valor gravado (o adaptador devolve um `Timestamp` para o TTL; o padrão é o número).
+ */
+fun roleToMap(r: Role, nowMs: Long, expiresAt: (Long) -> Any = { it }): Map<String, Any?> {
+    val name = clampText(r.name)
+    require(name.isNotEmpty()) { "Nome do rolê em branco." }
     require(r.participants.size in 1..MAX_ROLE_PARTICIPANTS) { "Rolê com ${r.participants.size} participantes." }
     require(r.participants.toSet().size == r.participants.size) { "Participantes repetidos." }
     require(r.creatorUid in r.participants) { "O criador precisa participar." }
     return mapOf(
-        "nome" to clampText(r.name),
+        "nome" to name,
         "criadorUid" to r.creatorUid,
         "participantes" to r.participants,
-        "expiraEm" to r.expiresAtMs,
+        "expiraEm" to expiresAt(r.expiresAtMs),
         "criadoEm" to nowMs,
     )
 }
