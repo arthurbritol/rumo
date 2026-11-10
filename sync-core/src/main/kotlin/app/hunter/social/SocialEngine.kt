@@ -2,7 +2,6 @@ package app.hunter.social
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.Locale
 import java.util.UUID
 
 /**
@@ -31,11 +30,11 @@ class SocialEngine(
     private val mutex = Mutex()
 
     /**
-     * Busca por nome: texto aparado e em minúsculas, mínimo de 3 letras; sem eu, bloqueados e amigos; até 20.
+     * Busca por nome: texto normalizado por [SearchKey] (minúsculas, sem acentos), mínimo de 3 letras; sem eu, bloqueados e amigos; até 20.
      * Pede ao store hits suficientes para sobrarem 20 mesmo que todos os amigos e bloqueados apareçam.
      */
     suspend fun search(text: String): List<SearchHit> {
-        val q = text.trim().lowercase(Locale.ROOT)
+        val q = SearchKey.normalize(text)
         if (q.length < MIN_SEARCH_CHARS) return emptyList()
         val blocked = store.blocked(me)
         val friends = store.friendUids(me)

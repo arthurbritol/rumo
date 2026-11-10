@@ -9,6 +9,7 @@ import app.hunter.app.account.AuthState
 import app.hunter.app.account.FirebaseAuthGateway
 import app.hunter.app.account.SharedPrefsPendingDeletionFlag
 import app.hunter.app.data.AppDatabase
+import app.hunter.app.social.FirestoreSocialStore
 import app.hunter.app.sync.FirestoreRemoteStore
 import app.hunter.app.sync.PerUserRemoteStore
 import app.hunter.app.sync.RoomLocalStore
@@ -68,7 +69,9 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     private val gate = SyncGate(::currentUid)
     private val engine = SyncEngine(
         local,
-        PerUserRemoteStore(::currentUid, { gate.pinnedUid }) { uid -> FirestoreRemoteStore(firestore, uid) },
+        PerUserRemoteStore(::currentUid, { gate.pinnedUid }) { uid ->
+            FirestoreRemoteStore(firestore, uid, deleteSocial = { FirestoreSocialStore(firestore).deleteAllSocial(it) })
+        },
     )
     val repo = AuthRepository(gateway, engine, flag, gate, onSynced = ::afterSync)
 

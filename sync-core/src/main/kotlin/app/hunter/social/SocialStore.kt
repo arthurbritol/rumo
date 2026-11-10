@@ -35,7 +35,7 @@ interface SocialStore {
     suspend fun publishProfile(p: PublicProfile)
     suspend fun publishActivity(uid: String, a: Activity)
 
-    /** Perfis pesquisáveis cujo nome (em minúsculas) começa com [prefixLower], no máximo [limit]. */
+    /** Perfis pesquisáveis cuja chave [SearchKey] do nome começa com [prefixLower], no máximo [limit]. */
     suspend fun search(prefixLower: String, limit: Int): List<SearchHit>
 
     suspend fun sendInvite(from: String, to: String)

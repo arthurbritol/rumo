@@ -32,7 +32,7 @@ class FakeSocialStore : SocialStore {
     override suspend fun publishProfile(p: PublicProfile) { profiles[p.uid] = p }
     override suspend fun publishActivity(uid: String, a: Activity) {}
     override suspend fun search(prefixLower: String, limit: Int): List<SearchHit> =
-        profiles.values.filter { it.searchable && it.displayName.lowercase().startsWith(prefixLower) }
+        profiles.values.filter { it.searchable && SearchKey.normalize(it.displayName).startsWith(prefixLower) }
             .take(limit).map { SearchHit(it.uid, it.displayName, it.brand, it.model) }
     override suspend fun sendInvite(from: String, to: String) { sendCount++; invites += Invite(from, to, 0L); bump() }
     override suspend fun cancelInvite(from: String, to: String) { invites.removeAll { it.fromUid == from && it.toUid == to } }
@@ -105,6 +105,13 @@ class SocialEngineTest {
         val hits = engine.search("  CAR ")
         assertEquals(20, hits.size)
         assertTrue(hits.none { it.uid in setOf("me", "amigo", "bloq") })
+    }
+
+    @Test
+    fun `busca ignora acentos e caixa`() = runTest {
+        store.addProfile("joao", "João Silva")
+        assertEquals(listOf("joao"), engine.search("  JOAO  si").map { it.uid })
+        assertEquals(listOf("joao"), engine.search("joão").map { it.uid })
     }
 
     @Test

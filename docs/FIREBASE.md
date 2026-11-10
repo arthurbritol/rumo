@@ -51,3 +51,11 @@ Verificadas com AGP 8.13.2, Kotlin 2.2.20, Gradle 8.14.3 (`./gradlew.bat test :a
 Com o `google-services.json` presente o plugin é aplicado; **um build COM o arquivo nunca foi verificado** (todos os builds e testes até aqui foram sem ele). Depois de adicioná-lo, o primeiro item a rodar é o "0. Build com o google-services.json" de [TESTES-MANUAIS-CONTA.md](TESTES-MANUAIS-CONTA.md).
 
 O Firestore usa cache só em memória (os documentos da conta não ficam gravados no aparelho depois de sair). Escritas feitas offline não sobrevivem a matar o app; não há perda, porque o banco local (Room) é a fonte da verdade e reenvia o que estiver pendente na próxima sincronização.
+
+## Passos para o social (projeto 2)
+
+Amigos e rolê usam as coleções `busca`, `perfisPublicos`, `atividade`, `convites`, `amizades`, `bloqueios` e `roles` (com a subcoleção `membros`), todas protegidas por `firebase/firestore.rules`.
+
+1. **Publique as regras**: dentro de `firebase/`, `firebase deploy --only firestore:rules`. Sem isso, toda operação social é recusada ("permission denied").
+2. **Índices**: a busca por prefixo (`busca` ordenada por `displayNameLower` com `startAt`/`endAt`) usa só um campo e **não precisa de índice composto**. As demais consultas (igualdade em `de`, `para`, `a`, `b` e `array-contains` em `participantes`) também dispensam índice.
+3. **TTL dos rolês** (apaga rolês vencidos sozinho): no console do Firebase, Firestore Database > Time-to-live (TTL) > Criar política, grupo de coleções `roles`, campo de carimbo de data/hora `expiraEm`. O app grava `expiraEm` como carimbo de data/hora (as regras aceitam número ou carimbo), que é o tipo que o TTL exige; a leitura converte de volta para milissegundos. Mesmo antes da política, o app trata o rolê vencido como expirado. Os documentos da subcoleção `membros` **não** são apagados pelo TTL (o TTL só remove o documento do rolê); eles ficam ilegíveis, pois as regras exigem o rolê existente para ler os membros.
