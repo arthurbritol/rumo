@@ -1,26 +1,32 @@
 package app.hunter.app.social
 
 import android.util.Log
+import app.hunter.podble.PodPhase
+import app.hunter.podble.PodStatus
 import app.hunter.social.SocialEngine
 import app.hunter.social.SocialStore
 import app.hunter.social.TripSlice
 import app.hunter.sync.UserProfile
+import app.hunter.trips.recording.LocationSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.ZoneId
 
-/** Tudo o que o social precisa para a conta [uid]: o store, as regras ([engine]) e o [publisher]. */
+/** Tudo o que o social precisa para a conta [uid]: o store, as regras ([engine]), o [publisher] e o [liveLocationPublisher]. */
 class SocialSession(
     val uid: String,
     val store: SocialStore,
     val engine: SocialEngine,
     internal val publisher: SocialPublisher,
+    val liveLocationPublisher: LiveLocationPublisher? = null,
 )
 
 /** O que o [SocialViewModel] enxerga do grafo social (uma interface para testar o ViewModel sem Android). */
@@ -54,6 +60,9 @@ class SocialGraph(
     private val readCostPerKm: suspend () -> Double?,
     override val searchPrefs: SearchPrefs,
     private val scope: CoroutineScope,
+    private val locationSource: LocationSource? = null,
+    private val locationSourceFactory: (() -> LocationSource)? = null,
+    private val isPodConnected: Flow<Boolean> = PodStatus.state.map { it.phase == PodPhase.CONNECTED },
     /** Lido a cada cálculo: trocar o fuso com o app aberto muda a semana. */
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     private val clock: () -> Long = System::currentTimeMillis,
@@ -74,14 +83,27 @@ class SocialGraph(
     @Synchronized
     override fun session(uid: String): SocialSession? {
         if (!available || !allowed() || currentUid() != uid) {
+            cached?.liveLocationPublisher?.stop()
             cached = null
             return null
         }
         cached?.takeIf { it.uid == uid }?.let { return it }
+        cached?.liveLocationPublisher?.stop()
         val publisher = SocialPublisher(
             store, uid, readProfile, readTrips, readCostPerKm, searchPrefs, zone, clock,
         )
-        return SocialSession(uid, store, SocialEngine(store, uid, clock), publisher).also { cached = it }
+        val locSource = locationSource ?: locationSourceFactory?.invoke()
+        val livePub = locSource?.let { src ->
+            LiveLocationPublisher(
+                scope = scope,
+                store = store,
+                locationSource = src,
+                isPodConnected = isPodConnected,
+                grantedPermissions = store.observeGrantedPermissions(uid),
+                clock = clock,
+            )
+        }
+        return SocialSession(uid, store, SocialEngine(store, uid, clock), publisher, livePub).also { cached = it }
     }
 
     /**
@@ -100,6 +122,7 @@ class SocialGraph(
      * impedem de publicar de novo.
      */
     suspend fun deleteAllSocial(uid: String) {
+        cached?.liveLocationPublisher?.stop()
         publishLock.withLock { store.deleteAllSocial(uid) }
     }
 
