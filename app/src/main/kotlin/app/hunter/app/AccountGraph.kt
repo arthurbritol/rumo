@@ -25,6 +25,7 @@ import app.hunter.model.FuelMath
 import app.hunter.sync.DeletionPendingException
 import app.hunter.sync.SyncEngine
 import app.hunter.sync.UserProfile
+import app.hunter.trips.recording.AndroidLocationSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -153,6 +154,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
         readCostPerKm = { FuelMath.summarize(database.syncDao().fuelups().map { it.toModel() }).avgCostPerKm },
         searchPrefs = SearchPref(prefs, ::signedUid),
         scope = scope,
+        locationSourceFactory = { AndroidLocationSource(app) },
     )
 
     /** Há algo ainda não enviado à nuvem (a tela de perfil bloqueia "Sair" enquanto houver). */

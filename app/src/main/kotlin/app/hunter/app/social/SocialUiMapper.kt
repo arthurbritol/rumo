@@ -1,6 +1,7 @@
 package app.hunter.app.social
 
 import app.hunter.social.Friend
+import app.hunter.social.LiveLocation
 import app.hunter.social.Member
 import app.hunter.social.MemberState
 import app.hunter.social.MemberWarning
@@ -17,7 +18,16 @@ import java.util.Locale
  */
 
 /** Amigo na lista: [bikeLabel] é "Marca Modelo" e [weekKmLabel] os km da semana atual ("0 km" se a atividade é velha). */
-data class FriendRow(val uid: String, val name: String, val bikeLabel: String, val weekKmLabel: String)
+data class FriendRow(
+    val uid: String,
+    val name: String,
+    val bikeLabel: String,
+    val weekKmLabel: String,
+    val locationSharedWithHim: Boolean = false,
+    val isLiveOnRoad: Boolean = false,
+    val liveLatitude: Double? = null,
+    val liveLongitude: Double? = null,
+)
 
 /** Convite (recebido ou enviado) com o nome da outra pessoa, ou "Alguém" quando não há nome público. */
 data class InviteRow(val uid: String, val name: String)
@@ -55,14 +65,27 @@ fun weekKmLabel(km: Double): String {
 }
 
 /** Amigos do mais para o menos quilômetros na semana e, no empate, por nome. */
-fun friendRows(friends: List<Friend>, nowMs: Long, zone: ZoneId): List<FriendRow> =
+fun friendRows(
+    friends: List<Friend>,
+    nowMs: Long,
+    zone: ZoneId,
+    grantedPermissions: Set<String> = emptySet(),
+    activeFriendsOnRoad: Map<String, LiveLocation> = emptyMap(),
+): List<FriendRow> =
     friends.map { f ->
         val km = WeekMath.visibleWeekKm(f.activity, nowMs, zone)
+        val isShared = f.profile.uid in grantedPermissions
+        val loc = activeFriendsOnRoad[f.profile.uid]
+        val isLive = loc != null && !loc.isExpired(nowMs) && loc.isValid()
         km to FriendRow(
             uid = f.profile.uid,
             name = f.profile.displayName.trim().ifEmpty { UNKNOWN_FRIEND_NAME },
             bikeLabel = bikeLabel(f.profile.brand, f.profile.model),
             weekKmLabel = weekKmLabel(km),
+            locationSharedWithHim = isShared,
+            isLiveOnRoad = isLive,
+            liveLatitude = if (isLive) loc?.latitude else null,
+            liveLongitude = if (isLive) loc?.longitude else null,
         )
     }.sortedWith(compareByDescending<Pair<Double, FriendRow>> { it.first }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.second.name })
         .map { it.second }

@@ -3,6 +3,7 @@ package app.hunter.app.social
 import app.hunter.social.Activity
 import app.hunter.social.Friend
 import app.hunter.social.Invite
+import app.hunter.social.LiveLocation
 import app.hunter.social.Member
 import app.hunter.social.MemberState
 import app.hunter.social.PublicProfile
@@ -170,4 +171,30 @@ class FakeSocialStore : SocialStore {
         return membersByRole[roleId]?.firstOrNull { it.uid == uid } }
     val deletedAll = mutableListOf<String>()
     override suspend fun deleteAllSocial(uid: String) { check(); deletedAll += uid }
+
+    val grantedPermissions = mutableSetOf<String>()
+    val grantedFlow = MutableStateFlow<Set<String>>(emptySet())
+    val receivedFlow = MutableStateFlow<Set<String>>(emptySet())
+    val friendLocations = mutableMapOf<String, MutableStateFlow<LiveLocation?>>()
+    val grantedCalls = mutableListOf<String>()
+    val revokedCalls = mutableListOf<String>()
+
+    override suspend fun grantLocationPermission(friendUid: String) {
+        check()
+        grantedCalls += friendUid
+        grantedPermissions += friendUid
+        grantedFlow.value = grantedPermissions.toSet()
+    }
+
+    override suspend fun revokeLocationPermission(friendUid: String) {
+        check()
+        revokedCalls += friendUid
+        grantedPermissions -= friendUid
+        grantedFlow.value = grantedPermissions.toSet()
+    }
+
+    override fun observeGrantedPermissions(myUid: String): Flow<Set<String>> = grantedFlow.guarded()
+    override fun observeReceivedPermissions(myUid: String): Flow<Set<String>> = receivedFlow.guarded()
+    override fun observeFriendLocation(friendUid: String): Flow<LiveLocation?> =
+        friendLocations.getOrPut(friendUid) { MutableStateFlow(null) }.guarded()
 }

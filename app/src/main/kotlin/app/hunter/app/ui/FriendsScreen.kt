@@ -1,15 +1,21 @@
 package app.hunter.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -21,6 +27,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.social.FriendRow
@@ -63,6 +72,7 @@ fun FriendsRoute(
     myName: () -> String,
     onSignIn: () -> Unit,
     onSubScreen: (Boolean) -> Unit,
+    onFocusFriendOnMap: ((Double, Double) -> Unit)? = null,
 ) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val detail by vm.roleDetail.collectAsStateWithLifecycle()
@@ -143,6 +153,11 @@ fun FriendsRoute(
             onOpenRole = { openRoleId = it },
             onAcceptRole = vm::acceptRole,
             onDeclineRole = { vm.leaveRole(it) },
+            onToggleLocationSharing = vm::toggleLocationSharing,
+            onFocusFriendOnMap = { lat, lng ->
+                vm.focusFriendOnMap(lat, lng)
+                onFocusFriendOnMap?.invoke(lat, lng)
+            },
         )
     }
 }
@@ -169,6 +184,8 @@ fun FriendsScreen(
     onOpenRole: (String) -> Unit,
     onAcceptRole: (String) -> Unit,
     onDeclineRole: (String) -> Unit,
+    onToggleLocationSharing: (String) -> Unit = {},
+    onFocusFriendOnMap: ((Double, Double) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -259,7 +276,7 @@ fun FriendsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        ui.friends.forEach { FriendCard(it, ui.busy, onUnfriend, onBlock) }
+        ui.friends.forEach { FriendCard(it, ui.busy, onUnfriend, onBlock, onToggleLocationSharing, onFocusFriendOnMap) }
 
         SectionTitle("Rolês")
         RolesSection(ui, onCreateRole, onOpenRole, onAcceptRole, onDeclineRole)
@@ -350,7 +367,14 @@ private fun InviteSentCard(row: InviteRow, busy: Boolean, onCancel: (String) -> 
 private enum class FriendAction { UNFRIEND, BLOCK }
 
 @Composable
-private fun FriendCard(row: FriendRow, busy: Boolean, onUnfriend: (String) -> Unit, onBlock: (String) -> Unit) {
+private fun FriendCard(
+    row: FriendRow,
+    busy: Boolean,
+    onUnfriend: (String) -> Unit,
+    onBlock: (String) -> Unit,
+    onToggleLocation: (String) -> Unit = {},
+    onFocusOnMap: ((Double, Double) -> Unit)? = null,
+) {
     var menu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<FriendAction?>(null) }
     HCard {
@@ -365,6 +389,62 @@ private fun FriendCard(row: FriendRow, busy: Boolean, onUnfriend: (String) -> Un
                 DropdownMenuItem(text = { Text("Desfazer amizade") }, onClick = { menu = false; confirm = FriendAction.UNFRIEND })
                 DropdownMenuItem(text = { Text("Bloquear") }, onClick = { menu = false; confirm = FriendAction.BLOCK })
             }
+        }
+
+        if (row.isLiveOnRoad) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(MaterialTheme.colorScheme.primary, shape = CircleShape)
+                        )
+                        Text(
+                            "Na estrada",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                    if (row.liveLatitude != null && row.liveLongitude != null) {
+                        TextButton(
+                            onClick = { onFocusOnMap?.invoke(row.liveLatitude, row.liveLongitude) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text("Ver no mapa", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                "Compartilhar localização",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Switch(
+                checked = row.locationSharedWithHim,
+                onCheckedChange = { onToggleLocation(row.uid) },
+                enabled = !busy,
+            )
         }
     }
     confirm?.let { action ->

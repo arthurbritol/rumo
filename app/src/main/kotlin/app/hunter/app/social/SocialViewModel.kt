@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.hunter.social.Friend
 import app.hunter.social.Invite
+import app.hunter.social.LiveLocation
 import app.hunter.social.Member
 import app.hunter.social.MemberState
 import app.hunter.social.Refusal
@@ -22,8 +23,11 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -89,6 +93,18 @@ class SocialViewModel(
     private val _state = MutableStateFlow(SocialUi(signedIn = backend.uid.value != null))
     val state: StateFlow<SocialUi> = _state.asStateFlow()
 
+    private val _grantedPermissions = MutableStateFlow<Set<String>>(emptySet())
+    val grantedPermissions: StateFlow<Set<String>> = _grantedPermissions.asStateFlow()
+
+    private val _activeFriendsOnRoad = MutableStateFlow<Map<String, LiveLocation>>(emptyMap())
+    val activeFriendsOnRoad: StateFlow<Map<String, LiveLocation>> = _activeFriendsOnRoad.asStateFlow()
+
+    private val _focusFriendOnMapEvent = MutableSharedFlow<Pair<Double, Double>>(replay = 1, extraBufferCapacity = 1)
+    val focusFriendOnMapEvent: SharedFlow<Pair<Double, Double>> = _focusFriendOnMapEvent.asSharedFlow()
+    val focusMapEvents: SharedFlow<Pair<Double, Double>> get() = focusFriendOnMapEvent
+
+    private val locationJobs = mutableMapOf<String, Job>()
+
     private val _detail = MutableStateFlow<RoleDetailUi?>(null)
 
     /** Rolê aberto na tela de detalhe (nulo: nenhum aberto, ou ainda carregando os participantes). */
@@ -147,6 +163,10 @@ class SocialViewModel(
         searchJob?.cancel()
         friendsJob?.cancel()
         friendsJob = null
+        locationJobs.values.forEach { it.cancel() }
+        locationJobs.clear()
+        _grantedPermissions.value = emptySet()
+        _activeFriendsOnRoad.value = emptyMap()
         loadedFriendUids = null
         lastFriendsLoadAtMs = 0L
         searchResolved = false
@@ -164,6 +184,8 @@ class SocialViewModel(
             launch { resolveSearch(s) }
             launch { observe("convites", { s.store.observeInvitesReceived(s.uid) }) { onInvites(s, it) } }
             launch { observe("roles", { s.store.observeRoles(s.uid) }) { onRoles(s, it) } }
+            launch { observe("permissoes-concedidas", { s.store.observeGrantedPermissions(s.uid) }) { onGrantedPermissions(it) } }
+            launch { observe("permissoes-recebidas", { s.store.observeReceivedPermissions(s.uid) }) { onReceivedPermissions(s, it) } }
             launch { loadSent(s) }
             launch { closeExpiredRoles(s) }
             awaitCancellation()
@@ -212,6 +234,45 @@ class SocialViewModel(
                 else -> cur.message
             },
         )
+    }
+
+    private fun onGrantedPermissions(granted: Set<String>) {
+        _grantedPermissions.value = granted
+        rebuildFriends()
+    }
+
+    private fun onReceivedPermissions(s: SocialSession, received: Set<String>) {
+        val removed = locationJobs.keys - received
+        for (uid in removed) {
+            locationJobs.remove(uid)?.cancel()
+        }
+        if (removed.isNotEmpty()) {
+            _activeFriendsOnRoad.update { current -> current - removed }
+        }
+        for (friendUid in received) {
+            if (friendUid !in locationJobs) {
+                val job = scope.launch {
+                    try {
+                        s.store.observeFriendLocation(friendUid).collect { loc ->
+                            _activeFriendsOnRoad.update { current ->
+                                if (loc == null || !loc.isValid()) {
+                                    current - friendUid
+                                } else {
+                                    current + (friendUid to loc)
+                                }
+                            }
+                            rebuildFriends()
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // erro individual de um amigo não derruba o fluxo
+                    }
+                }
+                locationJobs[friendUid] = job
+            }
+        }
+        rebuildFriends()
     }
 
     private fun onFriends(friends: List<Friend>) {
@@ -289,7 +350,17 @@ class SocialViewModel(
         }
     }
 
-    private fun rebuildFriends() = _state.update { it.copy(friends = friendRows(rawFriends, clock(), zone())) }
+    private fun rebuildFriends() = _state.update {
+        it.copy(
+            friends = friendRows(
+                friends = rawFriends,
+                nowMs = clock(),
+                zone = zone(),
+                grantedPermissions = _grantedPermissions.value,
+                activeFriendsOnRoad = _activeFriendsOnRoad.value,
+            )
+        )
+    }
 
     /** Volta do app para a frente: recalcula a semana na tela (ela pode ter virado) e publica respeitando o intervalo. */
     fun onForeground() {
@@ -511,6 +582,23 @@ class SocialViewModel(
         s.engine.block(uid).also {
             if (it == SocialResult.Ok) _state.update { u -> u.copy(searchResults = u.searchResults.filter { h -> h.uid != uid }) }
         }
+    }
+
+    fun toggleLocationSharing(friendUid: String) = act { s ->
+        val granted = friendUid in _grantedPermissions.value
+        if (granted) {
+            s.store.revokeLocationPermission(friendUid)
+            _grantedPermissions.update { it - friendUid }
+        } else {
+            s.store.grantLocationPermission(friendUid)
+            _grantedPermissions.update { it + friendUid }
+        }
+        rebuildFriends()
+        null
+    }
+
+    fun focusFriendOnMap(lat: Double, lng: Double) {
+        _focusFriendOnMapEvent.tryEmit(lat to lng)
     }
 
     /** Cria o rolê com [friendUids]; [myFigures] são meu orçamento e custo por km iniciais. */
