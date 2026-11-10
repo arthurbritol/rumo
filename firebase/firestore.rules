@@ -110,13 +110,20 @@ service cloud.firestore {
       return d[campo] is string && d[campo].size() >= 1 && d[campo].size() <= 60;
     }
 
+    // Chave de busca normalizada pelo cliente (sem acento, minúscula): a regra só
+    // confere o formato (string 1..60, sem maiúscula ASCII).
+    function chaveBuscaValida(k) {
+      return k is string && k.size() >= 1 && k.size() <= 60
+        && !k.matches('.*[A-Z].*');
+    }
+
     // busca/{uid}: índice de busca por nome; qualquer conta lê.
     function buscaValida(d) {
       return d.keys().hasOnly(['displayName', 'displayNameLower', 'brand', 'model'])
         && d.keys().hasAll(['displayName', 'displayNameLower'])
         && nomeValido(d, 'displayName')
         && d.displayNameLower is string
-        && d.displayNameLower == d.displayName.lower()
+        && chaveBuscaValida(d.displayNameLower)
         && textoOpcional(d, 'brand', 60)
         && textoOpcional(d, 'model', 60);
     }
@@ -127,8 +134,7 @@ service cloud.firestore {
         ])
         && d.keys().hasAll(['displayName', 'searchable'])
         && nomeValido(d, 'displayName')
-        && (!('displayNameLower' in d)
-            || (d.displayNameLower is string && d.displayNameLower == d.displayName.lower()))
+        && (!('displayNameLower' in d) || chaveBuscaValida(d.displayNameLower))
         && textoOpcional(d, 'brand', 60)
         && textoOpcional(d, 'model', 60)
         && (!('year' in d) || d.year == null

@@ -444,3 +444,34 @@ test('timestamps reais (Date.now e +7 dias) são aceitos; valor absurdo é negad
   await assertFails(db(BETO).doc(`roles/rt/membros/${BETO}`).update({ atualizadoEm: 1e14 }));
   await assertFails(da.doc('roles/rx').set(roleDoc(ANA, [ANA], { expiraEm: 1e14 })));
 });
+
+// ---------- rodada 3: chave de busca normalizada ----------
+test('busca: chave normalizada sem acento é aceita; maiúscula, longa ou ausente é negada', async () => {
+  const ref = db(ANA).doc(`busca/${ANA}`);
+  await assertSucceeds(ref.set({ displayName: 'Ágata', displayNameLower: 'agata', brand: 'Honda' }));
+  await assertSucceeds(ref.set({ displayName: 'ÉRICA', displayNameLower: 'erica' }));
+  await assertSucceeds(ref.set({ displayName: 'João Silva', displayNameLower: 'joao silva' }));
+  await assertFails(ref.set({ displayName: 'João Silva', displayNameLower: 'Joao silva' }));
+  await assertFails(ref.set({ displayName: 'Ágata', displayNameLower: 'x'.repeat(61) }));
+  await assertFails(ref.set({ displayName: 'Ágata', displayNameLower: '' }));
+  await assertFails(ref.set({ displayName: 'Ágata' }));
+  await assertFails(ref.set({ displayName: 'Ágata', displayNameLower: 5 }));
+});
+
+test('perfisPublicos: chave normalizada opcional, mesma validação', async () => {
+  const ref = db(ANA).doc(`perfisPublicos/${ANA}`);
+  await assertSucceeds(ref.set({ displayName: 'Ágata', displayNameLower: 'agata', searchable: true }));
+  await assertSucceeds(ref.set({ displayName: 'Ágata', searchable: true }));
+  await assertFails(ref.set({ displayName: 'Ágata', displayNameLower: 'Agata', searchable: true }));
+});
+
+test('criadoEm absurdo (>= 1e14) é negado em bloqueios, amizades e roles', async () => {
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1e14 }));
+  await semear((d) => d.doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO }));
+  const db_ = db(BETO);
+  const b = db_.batch();
+  b.set(db_.doc(`amizades/${par(ANA, BETO)}`), { ...amizade(ANA, BETO), criadoEm: 1e14 });
+  b.delete(db_.doc(`convites/${ANA}_${BETO}`));
+  await assertFails(b.commit());
+  await assertFails(db(ANA).doc('roles/rz').set(roleDoc(ANA, [ANA], { criadoEm: 1e14 })));
+});
