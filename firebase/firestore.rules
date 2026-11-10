@@ -238,10 +238,14 @@ service cloud.firestore {
 
     // Bloqueio: id "quemBloqueia_bloqueado"; só quem bloqueia enxerga.
     match /bloqueios/{id} {
-      allow read, delete: if logado() && idComecaCom(id, request.auth.uid);
+      allow get, delete: if logado() && idComecaCom(id, request.auth.uid);
+      // Listagem por where quem == uid (id não existe em regras de list).
+      allow list: if logado() && resource.data.quem == request.auth.uid;
       allow create: if logado() && idComecaCom(id, request.auth.uid)
         && request.auth.uid.size() <= 128 && id.size() <= request.auth.uid.size() + 129
-        && request.resource.data.keys().hasOnly(['criadoEm'])
+        && request.resource.data.keys().hasOnly(['criadoEm', 'quem'])
+        && request.resource.data.keys().hasAll(['quem'])
+        && request.resource.data.quem == request.auth.uid
         && epochMsOpcional(request.resource.data, 'criadoEm');
     }
 

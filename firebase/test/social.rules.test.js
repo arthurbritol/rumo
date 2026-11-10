@@ -153,12 +153,12 @@ test('amizade: sem convite prévio é negada; lê e apaga só os membros', async
 
 // ---------- bloqueios ----------
 test('bloqueio: só quem bloqueia lê, cria e apaga', async () => {
-  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1 }));
+  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: ANA, criadoEm: 1 }));
   await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).get());
   await assertFails(db(BETO).doc(`bloqueios/${ANA}_${BETO}`).get());
   await assertFails(db(BETO).doc(`bloqueios/${ANA}_${BETO}`).delete());
-  await assertFails(db(BETO).doc(`bloqueios/${ANA}_${CAIO}`).set({ criadoEm: 1 }));
-  await assertFails(db(BETO).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1 }));
+  await assertFails(db(BETO).doc(`bloqueios/${ANA}_${CAIO}`).set({ quem: BETO, criadoEm: 1 }));
+  await assertFails(db(BETO).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: BETO, criadoEm: 1 }));
   await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).delete());
 });
 
@@ -274,7 +274,7 @@ test('exclusão de conta: o dono apaga tudo que é seu em cada caminho', async (
     await d.doc(`convites/${BETO}_${DUDA}`).set({ de: BETO, para: DUDA });
     await d.doc(`convites/${DUDA}_${BETO}`).set({ de: DUDA, para: BETO });
     await d.doc(`amizades/${par(ANA, BETO)}`).set(amizade(ANA, BETO));
-    await d.doc(`bloqueios/${BETO}_${DUDA}`).set({ criadoEm: 1 });
+    await d.doc(`bloqueios/${BETO}_${DUDA}`).set({ quem: BETO, criadoEm: 1 });
   });
   const d = db(BETO);
   for (const p of [
@@ -400,8 +400,8 @@ test('M4: convite e bloqueio só com campos esperados e textos curtos', async ()
   const longo = 'u'.repeat(129);
   await assertFails(db(longo).doc(`convites/${longo}_${BETO}`).set({ de: longo, para: BETO }));
   await assertFails(db(ANA).doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO, a: 1, b: 2 }));
-  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1, extra: 'x' }));
-  await assertFails(db(longo).doc(`bloqueios/${longo}_${BETO}`).set({ criadoEm: 1 }));
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: ANA, criadoEm: 1, extra: 'x' }));
+  await assertFails(db(longo).doc(`bloqueios/${longo}_${BETO}`).set({ quem: longo, criadoEm: 1 }));
   await assertSucceeds(db(ANA).doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO, criadoEm: 1 }));
 });
 
@@ -429,7 +429,7 @@ test('timestamps reais (Date.now e +7 dias) são aceitos; valor absurdo é negad
   await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: 1e14, weekKm: 1 }));
   await assertSucceeds(db(ANA).doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO, criadoEm: agora }));
   await assertFails(db(ANA).doc(`convites/${ANA}_${CAIO}`).set({ de: ANA, para: CAIO, criadoEm: 1e14 }));
-  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: agora }));
+  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: ANA, criadoEm: agora }));
   await semearAmizade(ANA, BETO);
   const da = db(ANA);
   const b = da.batch();
@@ -466,7 +466,7 @@ test('perfisPublicos: chave normalizada opcional, mesma validação', async () =
 });
 
 test('criadoEm absurdo (>= 1e14) é negado em bloqueios, amizades e roles', async () => {
-  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1e14 }));
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: ANA, criadoEm: 1e14 }));
   await semear((d) => d.doc(`convites/${ANA}_${BETO}`).set({ de: ANA, para: BETO }));
   const db_ = db(BETO);
   const b = db_.batch();
@@ -474,4 +474,30 @@ test('criadoEm absurdo (>= 1e14) é negado em bloqueios, amizades e roles', asyn
   b.delete(db_.doc(`convites/${ANA}_${BETO}`));
   await assertFails(b.commit());
   await assertFails(db(ANA).doc('roles/rz').set(roleDoc(ANA, [ANA], { criadoEm: 1e14 })));
+});
+
+// ---------- rodada 4: bloqueios listáveis (campo quem) ----------
+test('bloqueios: quem obrigatório e igual ao chamador; lista por where quem == eu', async () => {
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ criadoEm: 1 }));
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: BETO, criadoEm: 1 }));
+  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).set({ quem: ANA, criadoEm: 1 }));
+  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${CAIO}`).set({ quem: ANA }));
+  await assertFails(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).update({ criadoEm: 2 }));
+  const lista = db(ANA).collection('bloqueios').where('quem', '==', ANA);
+  const snap = await assertSucceeds(lista.get());
+  if (snap.size !== 2) throw new Error(`esperava 2 bloqueios, veio ${snap.size}`);
+  await assertFails(db(ANA).collection('bloqueios').get());
+  await assertFails(db(ANA).collection('bloqueios').where('quem', '==', BETO).get());
+  // o bloqueado não lista nem lê
+  await assertFails(db(BETO).collection('bloqueios').where('quem', '==', ANA).get());
+  const dele = await assertSucceeds(db(BETO).collection('bloqueios').where('quem', '==', BETO).get());
+  if (dele.size !== 0) throw new Error('bloqueado enxergou bloqueio');
+  await assertFails(db(BETO).doc(`bloqueios/${ANA}_${BETO}`).get());
+  await assertSucceeds(db(ANA).doc(`bloqueios/${ANA}_${BETO}`).delete());
+});
+
+test('apagar ou ler convite/amizade inexistente é negado (o cliente consulta antes)', async () => {
+  await assertFails(db(ANA).doc(`convites/${ANA}_${BETO}`).get());
+  await assertFails(db(ANA).doc(`convites/${ANA}_${BETO}`).delete());
+  await assertFails(db(ANA).doc(`amizades/${par(ANA, BETO)}`).delete());
 });
