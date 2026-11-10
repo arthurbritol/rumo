@@ -10,38 +10,53 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import app.hunter.app.R
+
+const val SQUIRCLE_DEFAULT_SIZE_DP = 44
+const val SQUIRCLE_DEFAULT_CORNER_DP = 12
+const val RUMO_PRIMARY_BUTTON_HEIGHT_DP = 54
+const val RUMO_SECONDARY_BUTTON_HEIGHT_DP = 50
+const val RUMO_SEARCH_HEIGHT_DP = 48
 
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
@@ -54,18 +69,350 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** Cartão padrão das telas de lista. */
+/** Cartão padrão das telas de lista com micro-borda suave e cantos 22dp. */
 @Composable
 fun HCard(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     val body: @Composable () -> Unit = {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
     }
     val shape = RoundedCornerShape(22.dp)
-    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
     if (onClick != null) {
         Surface(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = shape, color = MaterialTheme.colorScheme.surface, border = border) { body() }
     } else {
         Surface(modifier = modifier.fillMaxWidth(), shape = shape, color = MaterialTheme.colorScheme.surface, border = border) { body() }
+    }
+}
+
+/** Container quadrado arredondado (squircle) para ícones Font Awesome ou Material com fundo colorido. */
+@Composable
+fun SquircleIcon(
+    iconRes: Int,
+    backgroundColor: Color,
+    tintColor: Color,
+    contentDescription: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(SQUIRCLE_DEFAULT_SIZE_DP.dp)
+            .background(backgroundColor, RoundedCornerShape(SQUIRCLE_DEFAULT_CORNER_DP.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = contentDescription,
+            tint = tintColor,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+fun SquircleIcon(
+    icon: ImageVector,
+    backgroundColor: Color,
+    tintColor: Color,
+    contentDescription: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(SQUIRCLE_DEFAULT_SIZE_DP.dp)
+            .background(backgroundColor, RoundedCornerShape(SQUIRCLE_DEFAULT_CORNER_DP.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tintColor,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+/** Cartão hero para grandes instrumentos (hodômetro, resumo do rolê, etc.). */
+@Composable
+fun HeroMetricCard(
+    title: String,
+    unit: String,
+    value: String,
+    trendText: String? = null,
+    trendPositive: Boolean = true,
+    actionText: String? = null,
+    onAction: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    HCard(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                letterSpacing = 1.2.sp,
+            )
+            if (trendText != null) {
+                StatusPill(text = trendText, active = trendPositive)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (unit.isNotBlank()) {
+                Text(
+                    text = if (unit.startsWith(" ")) unit else " $unit",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(bottom = 6.dp)
+                        .weight(1f, fill = false),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            if (actionText != null && onAction != null) {
+                TextButton(
+                    onClick = onAction,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = actionText,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Campo de busca estilizado de 48dp com cantos de 14dp e ícone de lupa Font Awesome integrado. */
+@Composable
+fun RumoSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String = "Buscar...",
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(RUMO_SEARCH_HEIGHT_DP.dp),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.fa_magnifying_glass),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = placeholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (value.isNotEmpty()) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Limpar busca",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { onValueChange("") },
+                )
+            }
+        }
+    }
+}
+
+/** Botão primário oficial Rumo com altura 54dp, cantos 16dp e gradiente Novare (#FF7A1A -> #EA580C). */
+@Composable
+fun RumoPrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    leadingIconRes: Int? = null,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val gradient = if (enabled) {
+        Brush.horizontalGradient(listOf(Color(0xFFFF7A1A), Color(0xFFEA580C)))
+    } else {
+        Brush.horizontalGradient(listOf(Color(0xFFFF7A1A).copy(alpha = 0.35f), Color(0xFFEA580C).copy(alpha = 0.35f)))
+    }
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(RUMO_PRIMARY_BUTTON_HEIGHT_DP.dp),
+        shape = shape,
+        color = Color.Transparent,
+        contentColor = Color.White,
+        shadowElevation = if (enabled) 4.dp else 0.dp,
+    ) {
+        Box(
+            modifier = Modifier.background(gradient, shape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                if (leadingIconRes != null) {
+                    Icon(
+                        painter = painterResource(leadingIconRes),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                }
+                Text(
+                    text = text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (enabled) Color.White else Color.White.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+/** Botão secundário refinado com outline e cantos 16dp. */
+@Composable
+fun RumoSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    leadingIconRes: Int? = null,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(RUMO_SECONDARY_BUTTON_HEIGHT_DP.dp),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (leadingIconRes != null) {
+                Icon(
+                    painter = painterResource(leadingIconRes),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+/** Pílula de status viva para "Na estrada", tendências ou badges ativos. */
+@Composable
+fun StatusPill(text: String, active: Boolean = true, modifier: Modifier = Modifier) {
+    val dotColor = if (active) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = if (active) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+    val bgColor = if (active) NovareSuccess.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = bgColor,
+        border = BorderStroke(0.5.dp, dotColor.copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .background(dotColor, CircleShape)
+            )
+            Text(
+                text = text,
+                color = textColor,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+/** Badge com cor semântica e fundo translúcido para destaques. */
+@Composable
+fun RumoBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = color.copy(alpha = 0.15f),
+        border = BorderStroke(0.5.dp, color.copy(alpha = 0.35f)),
+    ) {
+        Text(
+            text = text,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -94,8 +441,8 @@ fun PrimaryButton(
     content: Color = MaterialTheme.colorScheme.onPrimary,
 ) {
     val shape = RoundedCornerShape(20.dp)
-    val bg = if (enabled) androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(container.copy(alpha = 0.82f).compositeOver(Color.White), container))
-    else androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(container.copy(alpha = 0.3f), container.copy(alpha = 0.3f)))
+    val bg = if (enabled) Brush.horizontalGradient(listOf(container.copy(alpha = 0.82f).compositeOver(Color.White), container))
+    else Brush.horizontalGradient(listOf(container.copy(alpha = 0.3f), container.copy(alpha = 0.3f)))
     Surface(
         onClick = onClick,
         enabled = enabled,
@@ -153,6 +500,7 @@ fun SelectChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: M
         shape = RoundedCornerShape(50),
         color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
         contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
     ) {
         Text(text, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
