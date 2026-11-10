@@ -43,12 +43,14 @@ import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
 import app.hunter.app.account.accountViewModelFactory
 import app.hunter.app.social.SocialViewModel
+import app.hunter.app.social.UNKNOWN_FRIEND_NAME
 import app.hunter.app.social.friendsBadge
 import app.hunter.app.social.pendingCount
 import app.hunter.app.social.socialViewModelFactory
 import app.hunter.app.sync.ProfilePrefs
 import app.hunter.app.sync.safeDisplayName
 import app.hunter.app.ui.AccountNotice
+import app.hunter.app.ui.FriendMarker
 import app.hunter.app.ui.FriendsRoute
 import app.hunter.app.ui.GarageScreen
 import app.hunter.app.ui.HunterTheme
@@ -58,6 +60,7 @@ import app.hunter.app.ui.ProfileRoute
 import app.hunter.app.ui.Tab
 import app.hunter.app.ui.TripsScreen
 import app.hunter.app.ui.UpdateBanner
+import app.hunter.app.ui.formatFriendElapsed
 import app.hunter.app.ui.onboarding.AppBikeSaver
 import app.hunter.app.ui.onboarding.BikeSetupScreen
 import app.hunter.app.ui.onboarding.EXISTING_USER_NOTICE_KEY
@@ -71,6 +74,7 @@ import app.hunter.app.ui.onboarding.resolveEntry
 import app.hunter.sync.OnboardingFlow
 import app.hunter.sync.Step
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -262,6 +266,41 @@ private fun HunterRoot(
     val badge = friendsBadge(pendingCount(social.invitesReceived.size, social.roles.count { it.pending }))
     var friendsSubOpen by remember { mutableStateOf(false) }
 
+    val activeLocations by socialVm.activeFriendsOnRoad.collectAsStateWithLifecycle()
+    var ticker by remember { mutableStateOf(0L) }
+    LaunchedEffect(tab == Tab.Map) {
+        if (tab == Tab.Map) {
+            while (true) {
+                delay(30_000L)
+                ticker = System.currentTimeMillis()
+            }
+        }
+    }
+    val friendMarkers = remember(social.friends, activeLocations, tab == Tab.Map, ticker) {
+        if (tab != Tab.Map) return@remember emptyList()
+        val now = System.currentTimeMillis()
+        activeLocations.mapNotNull { (uid, loc) ->
+            val timeAgo = formatFriendElapsed(loc.updatedAtMs, now) ?: return@mapNotNull null
+            val friend = social.friends.firstOrNull { it.uid == uid }
+            val name = friend?.name ?: UNKNOWN_FRIEND_NAME
+            FriendMarker(
+                uid = uid,
+                name = name,
+                lat = loc.latitude,
+                lon = loc.longitude,
+                bearing = loc.bearing,
+                timeAgoText = timeAgo,
+            )
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        socialVm.focusFriendOnMapEvent.collect { (lat, lon) ->
+            tabIndex = Tab.Map.ordinal
+            vm.focusOn(lat, lon)
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
@@ -296,7 +335,7 @@ private fun HunterRoot(
         Box(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
             // O mapa fica SEMPRE montado por baixo: trocar de aba não recria o mapa nem recarrega os tiles
             // (era a maior causa de lentidão). As outras abas aparecem por cima, opacas.
-            MapScreen(vm)
+            MapScreen(vm, friends = friendMarkers)
             Crossfade(targetState = tab, animationSpec = tween(160), label = "tab") { t ->
                 if (t != Tab.Map) {
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -311,6 +350,10 @@ private fun HunterRoot(
                                     myName = myName,
                                     onSignIn = onCreateAccount,
                                     onSubScreen = { friendsSubOpen = it },
+                                    onFocusFriendOnMap = { lat, lon ->
+                                        tabIndex = Tab.Map.ordinal
+                                        vm.focusOn(lat, lon)
+                                    },
                                 )
                                 Tab.Pod -> PodScreen(vm)
                                 Tab.Map -> {}

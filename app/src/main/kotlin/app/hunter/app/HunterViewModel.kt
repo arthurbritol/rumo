@@ -134,6 +134,22 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     val live: StateFlow<TrackPoint?> = _live.asStateFlow()
     private var locationJob: Job? = null
 
+    private val _focusTarget = MutableStateFlow<LatLon?>(null)
+    /** Coordenadas solicitadas para focar no mapa (ex.: amigo na estrada). */
+    val focusTarget: StateFlow<LatLon?> = _focusTarget.asStateFlow()
+
+    private val _focusNonce = MutableStateFlow(0)
+    val focusNonce: StateFlow<Int> = _focusNonce.asStateFlow()
+
+    fun focusOn(lat: Double, lon: Double) {
+        _focusTarget.value = LatLon(lat, lon)
+        _focusNonce.update { it + 1 }
+    }
+
+    fun clearFocus() {
+        _focusTarget.value = null
+    }
+
     // ---------- conexão ----------
 
     private val _online = MutableStateFlow(true)

@@ -81,7 +81,10 @@ private val REC_CAMERA = MapCamera.Follow(zoom = 16.0)
 private val IDLE_CAMERA = MapCamera.Follow(zoom = 15.0)
 
 @Composable
-fun MapScreen(vm: HunterViewModel) {
+fun MapScreen(
+    vm: HunterViewModel,
+    friends: List<FriendMarker> = emptyList(),
+) {
     val context = LocalContext.current
     val live by vm.live.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
@@ -89,11 +92,20 @@ fun MapScreen(vm: HunterViewModel) {
     val preview by vm.preview.collectAsStateWithLifecycle()
     val attention by vm.attention.collectAsStateWithLifecycle()
     val online by vm.online.collectAsStateWithLifecycle()
+    val focusTarget by vm.focusTarget.collectAsStateWithLifecycle()
+    val focusNonce by vm.focusNonce.collectAsStateWithLifecycle()
 
     var searching by remember { mutableStateOf(false) }
     var follow by remember { mutableStateOf(true) }
     var nonce by remember { mutableIntStateOf(0) }
     var locationOk by remember { mutableStateOf(false) }
+
+    LaunchedEffect(focusNonce) {
+        if (focusTarget != null) {
+            follow = false
+            nonce++
+        }
+    }
 
     val hasLocation = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
     val askLocation = rememberPermissionAction(ridePerms(), listOf(Manifest.permission.ACCESS_FINE_LOCATION)) { locationOk = true }
@@ -144,6 +156,7 @@ fun MapScreen(vm: HunterViewModel) {
     val fitCamera = remember(fitPoints) { MapCamera.Fit(fitPoints) }
     val camera: MapCamera = when {
         preview != null -> fitCamera
+        focusTarget != null && !follow -> MapCamera.Target(focusTarget!!.lat, focusTarget!!.lon)
         !follow -> MapCamera.Free
         navigating -> NAV_CAMERA
         else -> if (rec.isRecording) REC_CAMERA else IDLE_CAMERA
@@ -156,6 +169,7 @@ fun MapScreen(vm: HunterViewModel) {
         HunterMap(
             modifier = Modifier.fillMaxSize(),
             me = live,
+            friends = friends,
             route = if (navigating) nav.route?.shape else preview?.route?.shape,
             altRoutes = altRoutes,
             destination = if (navigating) nav.destination?.latLon else preview?.place?.latLon,
@@ -164,7 +178,12 @@ fun MapScreen(vm: HunterViewModel) {
             paddingTopDp = if (navigating) 200 else if (preview != null) 110 else 0,
             paddingBottomDp = if (navigating) 120 else if (preview != null) 440 else 0,
             onLongPress = { if (!navigating) vm.previewAt(it) },
-            onUserGesture = { if (preview == null) follow = false },
+            onUserGesture = {
+                if (preview == null) {
+                    follow = false
+                    vm.clearFocus()
+                }
+            },
         )
 
         // ----- Navegação -----
@@ -173,7 +192,7 @@ fun MapScreen(vm: HunterViewModel) {
             NavBottom(vm, Modifier.align(Alignment.BottomCenter).padding(12.dp), onStop = { TrackingService.stop(context); vm.stopNavigationNow() })
             if (!follow) {
                 CircleButton(
-                    Icons.Default.LocationOn, "Centralizar", { follow = true; nonce++ },
+                    Icons.Default.LocationOn, "Centralizar", { follow = true; nonce++; vm.clearFocus() },
                     Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 190.dp),
                     container = MaterialTheme.colorScheme.primary, tint = MaterialTheme.colorScheme.onPrimary,
                 )
@@ -221,7 +240,7 @@ fun MapScreen(vm: HunterViewModel) {
             ) {
                 if (!follow) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        CircleButton(Icons.Default.LocationOn, "Centralizar", { follow = true; nonce++ })
+                        CircleButton(Icons.Default.LocationOn, "Centralizar", { follow = true; nonce++; vm.clearFocus() })
                     }
                 }
                 if (!hasLocation && !locationOk) {

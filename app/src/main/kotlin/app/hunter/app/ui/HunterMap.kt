@@ -47,12 +47,43 @@ import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineJoin
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
+import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.textAnchor
+import org.maplibre.android.style.layers.PropertyFactory.textColor
+import org.maplibre.android.style.layers.PropertyFactory.textField
+import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
+import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
+import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.textOffset
+import org.maplibre.android.style.layers.PropertyFactory.textSize
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
+
+/** Marcador de um amigo na estrada exibido no mapa. */
+data class FriendMarker(
+    val uid: String,
+    val name: String,
+    val lat: Double,
+    val lon: Double,
+    val bearing: Float? = null,
+    val timeAgoText: String = "",
+)
+
+/**
+ * Formata o tempo decorrido desde a última atualização de localização de um amigo.
+ * Retorna null se expirado (> 5 minutos), "agora" se < 30s, "há 1 min", "há 3 min", etc.
+ */
+fun formatFriendElapsed(updatedAtMs: Long, nowMs: Long = System.currentTimeMillis()): String? {
+    val diff = nowMs - updatedAtMs
+    if (diff > 5 * 60_000L) return null
+    if (diff < 30_000L) return "agora"
+    val minutes = maxOf(1L, diff / 60_000L)
+    return "há $minutes min"
+}
 
 /** Como a câmera se comporta. */
 sealed interface MapCamera {
@@ -64,6 +95,9 @@ sealed interface MapCamera {
 
     /** Enquadra todos os [points] (pré-visualização de rota, detalhe de viagem). */
     data class Fit(val points: List<LatLon>) : MapCamera
+
+    /** Foca em coordenadas específicas (ex.: amigo no mapa). */
+    data class Target(val lat: Double, val lon: Double, val zoom: Double = 16.0) : MapCamera
 }
 
 // "positron" é bem mais leve que o "liberty" (sem prédios 3D nem centenas de ícones): rola sem travar.
@@ -75,18 +109,20 @@ private const val SRC_ALT = "alt-src"
 private const val SRC_ROUTE = "route-src"
 private const val SRC_TRAIL = "trail-src"
 private const val SRC_DEST = "dest-src"
+private const val SRC_FRIENDS = "friends-src"
 private const val SRC_ME = "me-src"
 
 /**
  * Mapa (MapLibre + OpenFreeMap, sem chave de API). Desenha: rota principal, rotas alternativas, trilha
- * gravada colorida por velocidade, destino e a posição do motociclista. Tudo é redesenhado quando os
- * parâmetros mudam; a câmera obedece a [camera].
+ * gravada colorida por velocidade, destino, amigos na estrada e a posição do motociclista. Tudo é redesenhado
+ * quando os parâmetros mudam; a câmera obedece a [camera].
  */
 @Composable
 fun HunterMap(
     modifier: Modifier = Modifier,
     dark: Boolean = LocalDark.current,
     me: TrackPoint? = null,
+    friends: List<FriendMarker> = emptyList(),
     route: List<LatLon>? = null,
     altRoutes: List<List<LatLon>> = emptyList(),
     trail: List<TrackPoint>? = null,
@@ -191,6 +227,10 @@ fun HunterMap(
                 ?: FeatureCollection.fromFeatures(emptyList<Feature>()),
         )
     }
+    LaunchedEffect(style, friends) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
+        src.setGeoJson(friendsFeatures(friends))
+    }
     LaunchedEffect(style, me?.timeMs, me?.latitude, me?.longitude) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_ME) ?: return@LaunchedEffect
         val f = me?.let {
@@ -207,6 +247,15 @@ fun HunterMap(
         if (style == null) return@LaunchedEffect
         val c = camera
         if (c is MapCamera.Fit && c.points.size >= 2) fit(m, c.points, density)
+    }
+
+    // Focar em coordenadas específicas (ex.: amigo).
+    LaunchedEffect(map, style, camera, cameraNonce) {
+        val m = map ?: return@LaunchedEffect
+        if (style == null) return@LaunchedEffect
+        val c = camera as? MapCamera.Target ?: return@LaunchedEffect
+        val pos = CameraPosition.Builder().target(LatLng(c.lat, c.lon)).zoom(c.zoom).build()
+        m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 700)
     }
 
     // Seguir o motociclista.
@@ -271,9 +320,26 @@ private fun trailFeatures(points: List<TrackPoint>?): FeatureCollection {
     return FeatureCollection.fromFeatures(out)
 }
 
+private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
+    if (friends.isEmpty()) return FeatureCollection.fromFeatures(emptyList())
+    val features = friends.map { f ->
+        val label = if (f.timeAgoText.isNotBlank()) "${f.name} · ${f.timeAgoText}" else f.name
+        val feat = Feature.fromGeometry(Point.fromLngLat(f.lon, f.lat))
+        feat.addStringProperty("id", f.uid)
+        feat.addStringProperty("name", f.name)
+        feat.addStringProperty("timeAgo", f.timeAgoText)
+        feat.addStringProperty("label", label)
+        if (f.bearing != null) {
+            feat.addNumberProperty("b", f.bearing.toDouble())
+        }
+        feat
+    }
+    return FeatureCollection.fromFeatures(features)
+}
+
 private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addImage("me", meBitmap(density))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_ME).forEach { st.addSource(GeoJsonSource(it)) }
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -301,6 +367,33 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addLayer(
         CircleLayer("dest-circle", SRC_DEST).withProperties(
             circleRadius(11f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(4f),
+        ),
+    )
+    st.addLayer(
+        CircleLayer("friends-halo", SRC_FRIENDS).withProperties(
+            circleRadius(16f),
+            circleColor(if (dark) "#3300B4D8" else "#260284C7"),
+        ),
+    )
+    st.addLayer(
+        CircleLayer("friends-circle", SRC_FRIENDS).withProperties(
+            circleRadius(9f),
+            circleColor(if (dark) "#00E5FF" else "#0284C7"),
+            circleStrokeColor("#FFFFFF"),
+            circleStrokeWidth(2.5f),
+        ),
+    )
+    st.addLayer(
+        SymbolLayer("friends-label", SRC_FRIENDS).withProperties(
+            textField(Expression.get("label")),
+            textSize(11f),
+            textColor(if (dark) "#FFFFFF" else "#0F172A"),
+            textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
+            textHaloWidth(2f),
+            textAnchor("top"),
+            textOffset(arrayOf(0f, 1.1f)),
+            textAllowOverlap(true),
+            textIgnorePlacement(false),
         ),
     )
     st.addLayer(
