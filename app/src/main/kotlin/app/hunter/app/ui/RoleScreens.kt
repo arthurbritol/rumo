@@ -206,7 +206,9 @@ private fun BudgetEditor(current: Double?, busy: Boolean, onSave: (Double?) -> U
         ),
         modifier = Modifier.fillMaxWidth(),
     )
-    PrimaryButton("Salvar orçamento", { onSave(parsed) }, enabled = parsed != null && !busy)
+    // Vazio limpa o orçamento (só quando já havia um); valor inválido não salva.
+    val canClear = text.isBlank() && current != null
+    PrimaryButton("Salvar orçamento", { onSave(parsed) }, enabled = (parsed != null || canClear) && !busy)
 }
 
 @Composable
@@ -217,7 +219,7 @@ private fun ParticipantCard(p: ParticipantRow, busy: Boolean, onRemove: (String)
             Column(Modifier.weight(1f)) {
                 Text(p.name, style = MaterialTheme.typography.titleMedium)
                 Text(p.budgetLabel, style = MaterialTheme.typography.bodyMedium)
-                p.warning?.let {
+                p.warnings.forEach {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
             }

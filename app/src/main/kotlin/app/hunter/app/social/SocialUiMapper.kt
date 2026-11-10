@@ -196,7 +196,7 @@ data class ParticipantRow(
     val isMe: Boolean,
     val invited: Boolean,
     val budgetLabel: String,
-    val warning: String?,
+    val warnings: List<String>,
     val canRemove: Boolean,
 )
 
@@ -219,7 +219,7 @@ const val NO_AVERAGE_LABEL = "Sem orçamentos ainda"
 /** Monta a tela do rolê a partir dos membros lidos; o planejamento é o do [RolePlanner]. */
 fun roleDetailUi(role: RoleRow, members: List<Member>, me: String): RoleDetailUi {
     val plan = RolePlanner.plan(members)
-    val warnings = plan.members.associate { it.uid to it.warning }
+    val warnings = plan.members.associate { it.uid to it.warnings }
     val rows = members
         .sortedWith(compareByDescending<Member> { it.uid == me }.thenBy { it.state != MemberState.ACCEPTED }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
@@ -236,7 +236,7 @@ fun roleDetailUi(role: RoleRow, members: List<Member>, me: String): RoleDetailUi
                     m.budget == null -> "Sem orçamento"
                     else -> moneyLabel(m.budget!!)
                 },
-                warning = if (invited) null else warningLabel(warnings[m.uid], isMe),
+                warnings = if (invited) emptyList() else warnings[m.uid].orEmpty().mapNotNull { warningLabel(it, isMe) },
                 canRemove = role.isCreator && !isMe,
             )
         }

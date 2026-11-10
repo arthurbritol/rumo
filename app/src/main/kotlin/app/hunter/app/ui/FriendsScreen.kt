@@ -59,7 +59,8 @@ private const val WEEK_RECALC_MS = 60_000L
 fun FriendsRoute(
     vm: SocialViewModel,
     accountAvailable: Boolean,
-    myName: String,
+    accountSignedIn: Boolean,
+    myName: () -> String,
     onSignIn: () -> Unit,
     onSubScreen: (Boolean) -> Unit,
 ) {
@@ -70,7 +71,15 @@ fun FriendsRoute(
 
     val sub = openRoleId != null || creating
     LaunchedEffect(sub) { onSubScreen(sub) }
-    DisposableEffect(Unit) { onDispose { onSubScreen(false) } }
+    // Os amigos só são carregados com a aba na tela; ao sair, o rolê aberto deixa de ser observado.
+    LaunchedEffect(Unit) { vm.showTab(true) }
+    DisposableEffect(Unit) {
+        onDispose {
+            vm.showTab(false)
+            vm.closeRoleDetail()
+            onSubScreen(false)
+        }
+    }
     // A semana pode virar com a tela aberta: recalcula a cada minuto.
     LaunchedEffect(Unit) {
         while (true) {
@@ -92,7 +101,7 @@ fun FriendsRoute(
                 busy = ui.busy,
                 message = messageToShow(ui.offline, ui.message),
                 onCreate = { name, uids, budget ->
-                    vm.createRole(name, uids, Member("", myName, MemberState.ACCEPTED, budget, null)) { creating = false }
+                    vm.createRole(name, uids, Member("", myName(), MemberState.ACCEPTED, budget, null)) { creating = false }
                 },
                 onBack = { creating = false },
             )
@@ -117,7 +126,9 @@ fun FriendsRoute(
         else -> FriendsScreen(
             ui = ui,
             accountAvailable = accountAvailable,
+            accountSignedIn = accountSignedIn,
             onSignIn = onSignIn,
+            onRefresh = vm::refresh,
             onAnswerSearchPrompt = vm::answerSearchPrompt,
             onSearch = vm::search,
             onInvite = vm::invite,
@@ -141,7 +152,9 @@ fun FriendsRoute(
 fun FriendsScreen(
     ui: SocialUi,
     accountAvailable: Boolean,
+    accountSignedIn: Boolean,
     onSignIn: () -> Unit,
+    onRefresh: () -> Unit,
     onAnswerSearchPrompt: (Boolean) -> Unit,
     onSearch: (String) -> Unit,
     onInvite: (String) -> Unit,
@@ -162,8 +175,23 @@ fun FriendsScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Amigos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Amigos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+            if (ui.signedIn) TextButton(onClick = onRefresh) { Text("Atualizar") }
+        }
 
+        if (!ui.signedIn && accountSignedIn) {
+            // Há conta, mas o social ainda não pode rodar (preparando a sessão ou exclusão em andamento): nada de "Entrar".
+            HCard {
+                Text("Amigos não está disponível agora", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Estamos preparando sua conta. Se demorar, confira a internet e volte em instantes.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@Column
+        }
         if (!ui.signedIn) {
             HCard {
                 Text("Entre para usar amigos", style = MaterialTheme.typography.titleLarge)
@@ -210,11 +238,11 @@ fun FriendsScreen(
             }
         }
 
-        SearchSection(ui, onSearch, onInvite)
+        SearchSection(ui, onSearch, onInvite, onBlock)
 
         if (ui.invitesReceived.isNotEmpty()) {
             SectionTitle("Convites recebidos")
-            ui.invitesReceived.forEach { InviteReceivedCard(it, ui.busy, onAcceptInvite, onDeclineInvite) }
+            ui.invitesReceived.forEach { InviteReceivedCard(it, ui.busy, onAcceptInvite, onDeclineInvite, onBlock) }
         }
         if (ui.invitesSent.isNotEmpty()) {
             SectionTitle("Convites enviados")
@@ -222,7 +250,9 @@ fun FriendsScreen(
         }
 
         SectionTitle("Amigos")
-        if (ui.friends.isEmpty()) {
+        if (!ui.friendsLoaded) {
+            Text("Carregando…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (ui.friends.isEmpty()) {
             Text(
                 "Você ainda não tem amigos por aqui. Busque pelo nome para convidar.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -239,7 +269,7 @@ fun FriendsScreen(
 }
 
 @Composable
-private fun SearchSection(ui: SocialUi, onSearch: (String) -> Unit, onInvite: (String) -> Unit) {
+private fun SearchSection(ui: SocialUi, onSearch: (String) -> Unit, onInvite: (String) -> Unit, onBlock: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     SectionTitle("Buscar amigo")
     OutlinedTextField(
@@ -251,11 +281,12 @@ private fun SearchSection(ui: SocialUi, onSearch: (String) -> Unit, onInvite: (S
         modifier = Modifier.fillMaxWidth(),
     )
     if (ui.searching) Text("Buscando…", style = MaterialTheme.typography.bodySmall)
-    ui.searchResults.forEach { SearchHitCard(it, ui.busy, onInvite) }
+    ui.searchResults.forEach { SearchHitCard(it, ui.busy, onInvite, onBlock) }
 }
 
 @Composable
-private fun SearchHitCard(hit: SearchHit, busy: Boolean, onInvite: (String) -> Unit) {
+private fun SearchHitCard(hit: SearchHit, busy: Boolean, onInvite: (String) -> Unit, onBlock: (String) -> Unit) {
+    var confirmBlock by remember { mutableStateOf(false) }
     HCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -265,11 +296,32 @@ private fun SearchHitCard(hit: SearchHit, busy: Boolean, onInvite: (String) -> U
             }
             OutlinedButton(onClick = { onInvite(hit.uid) }, enabled = !busy) { Text("Convidar") }
         }
+        TextButton(onClick = { confirmBlock = true }, enabled = !busy) { Text("Bloquear", color = MaterialTheme.colorScheme.error) }
     }
+    if (confirmBlock) BlockDialog(hit.displayName, onConfirm = { confirmBlock = false; onBlock(hit.uid) }, onDismiss = { confirmBlock = false })
+}
+
+/** Confirmação de bloqueio (o mesmo texto para amigo, convite recebido e resultado de busca). */
+@Composable
+private fun BlockDialog(name: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Bloquear $name?") },
+        text = { Text("Vocês deixam de ser amigos, os convites entre vocês somem e $name não consegue convidar você de novo.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Bloquear", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
 }
 
 @Composable
-private fun InviteReceivedCard(row: InviteRow, busy: Boolean, onAccept: (String) -> Unit, onDecline: (String) -> Unit) {
+private fun InviteReceivedCard(
+    row: InviteRow,
+    busy: Boolean,
+    onAccept: (String) -> Unit,
+    onDecline: (String) -> Unit,
+    onBlock: (String) -> Unit,
+) {
+    var confirmBlock by remember { mutableStateOf(false) }
     HCard {
         Text(row.name, style = MaterialTheme.typography.titleMedium)
         Text("quer ser seu amigo", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -277,7 +329,9 @@ private fun InviteReceivedCard(row: InviteRow, busy: Boolean, onAccept: (String)
             OutlinedButton(onClick = { onAccept(row.uid) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Aceitar") }
             OutlinedButton(onClick = { onDecline(row.uid) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Recusar") }
         }
+        TextButton(onClick = { confirmBlock = true }, enabled = !busy) { Text("Bloquear", color = MaterialTheme.colorScheme.error) }
     }
+    if (confirmBlock) BlockDialog(row.name, onConfirm = { confirmBlock = false; onBlock(row.uid) }, onDismiss = { confirmBlock = false })
 }
 
 @Composable
@@ -343,7 +397,9 @@ private fun RolesSection(
     onAccept: (String) -> Unit,
     onDecline: (String) -> Unit,
 ) {
-    if (ui.roles.isEmpty()) {
+    if (!ui.rolesLoaded) {
+        Text("Carregando…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else if (ui.roles.isEmpty()) {
         Text(
             "Nenhum rolê por enquanto. Crie um e chame seus amigos para combinar quanto cada um quer gastar.",
             style = MaterialTheme.typography.bodyMedium,

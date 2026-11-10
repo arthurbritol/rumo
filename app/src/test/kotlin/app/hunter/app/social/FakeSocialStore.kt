@@ -13,16 +13,27 @@ import app.hunter.social.SocialStore
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
-/** Chamada de [SocialStore.setMemberFigures] registrada pelo [FakeSocialStore]. */
+/** Chamada de [SocialStore.setMemberBudget] (custo nulo) ou [SocialStore.setMemberCost] (orçamento nulo) registrada pelo [FakeSocialStore]. */
 data class FigureCall(val roleId: String, val uid: String, val budget: Double?, val costPerKm: Double?)
 
 /**
  * [SocialStore] em memória para os testes do app. Com [failure] definido, toda operação (e todo flow observado)
  * lança essa exceção, para simular rede fora do ar, permissão negada etc.
  */
+/** [SearchPrefs] em memória para os testes. */
+class MemorySearchPrefs(var asked: Boolean = false, var searchable: Boolean = true) : SearchPrefs {
+    override fun asked() = asked
+    override fun searchable() = searchable
+    override fun set(searchable: Boolean) {
+        this.searchable = searchable
+        asked = true
+    }
+}
+
 class FakeSocialStore : SocialStore {
     var failure: Exception? = null
     private fun check() { failure?.let { throw it } }
@@ -88,7 +99,8 @@ class FakeSocialStore : SocialStore {
     override suspend fun unblock(uid: String, other: String) { check(); blockedUids -= other }
     override suspend fun invitesReceived(uid: String): List<Invite> { check(); return invitesFlow.value }
     override suspend fun invitesSent(uid: String): List<Invite> { check(); return sentList.toList() }
-    override suspend fun friends(uid: String): List<Friend> { check(); return friendsFlow.value }
+    var friendsCalls = 0
+    override suspend fun friends(uid: String): List<Friend> { check(); friendsCalls++; return friendsFlow.value }
     override suspend fun blocked(uid: String): Set<String> { check(); return blockedUids.toSet() }
     override suspend fun friendUids(uid: String): Set<String> { check(); return friendsFlow.value.map { it.profile.uid }.toSet() }
 
@@ -97,11 +109,11 @@ class FakeSocialStore : SocialStore {
         collect { emit(it) }
     }
     override fun observeInvitesReceived(uid: String): Flow<List<Invite>> = invitesFlow.guarded()
-    override fun observeFriends(uid: String): Flow<List<Friend>> = flow {
+    override fun observeFriendUids(uid: String): Flow<Set<String>> = flow {
         observeFriendsStarts++
         if (friendObserverFailures > 0) { friendObserverFailures--; throw java.io.IOException("sem rede") }
         check()
-        friendsFlow.collect { emit(it) }
+        friendsFlow.map { l -> l.map { it.profile.uid }.toSet() }.distinctUntilChanged().collect { emit(it) }
     }
     override fun observeRoles(uid: String): Flow<List<Role>> = rolesFlow.guarded()
     override fun observeMembers(roleId: String): Flow<List<Member>> =
@@ -132,9 +144,22 @@ class FakeSocialStore : SocialStore {
         renewed += roleId
         rolesById[roleId]?.let { rolesById[roleId] = it.copy(expiresAtMs = newExpiresAtMs) }
     }
-    override suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?) {
+    override suspend fun setMemberBudget(roleId: String, uid: String, budget: Double?) {
         check()
-        figureCalls += FigureCall(roleId, uid, budget, costPerKm)
+        figureCalls += FigureCall(roleId, uid, budget, null)
+    }
+    override suspend fun setMemberCost(roleId: String, uid: String, costPerKm: Double?) {
+        check()
+        figureCalls += FigureCall(roleId, uid, null, costPerKm)
+    }
+    /** Chamadas de [publishedSearchable]; [publishedSearchableFailure] faz a leitura falhar (sem rede). */
+    var publishedSearchableCalls = 0
+    var publishedSearchableFailure: Exception? = null
+    override suspend fun publishedSearchable(uid: String): Boolean? {
+        publishedSearchableCalls++
+        publishedSearchableFailure?.let { throw it }
+        check()
+        return profiles[uid]?.searchable
     }
     override suspend fun roles(uid: String): List<Role> { check(); rolesCalls++; return rolesById.values.filter { uid in it.participants } }
     override suspend fun members(roleId: String): List<Member> { check(); return membersByRole[roleId].orEmpty().toList() }
@@ -143,5 +168,6 @@ class FakeSocialStore : SocialStore {
         memberCalls += roleId
         if (roleId in memberFailureRoles) throw IOException("sem rede")
         return membersByRole[roleId]?.firstOrNull { it.uid == uid } }
-    override suspend fun deleteAllSocial(uid: String) { check() }
+    val deletedAll = mutableListOf<String>()
+    override suspend fun deleteAllSocial(uid: String) { check(); deletedAll += uid }
 }

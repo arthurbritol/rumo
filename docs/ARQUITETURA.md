@@ -95,7 +95,37 @@ sem exclusão pendente), o `SocialViewModel`/`SocialUiMapper` e as telas (`Frien
 - **Rolê:** criado num lote único (rolê + membros); o campo `expiraEm` (7 dias) tem política de TTL, e o app também
   fecha rolês vencidos e renova o do criador ao abri-lo.
 - **Sem internet** a aba mostra o último dado e um aviso; nada social é guardado no Room.
-- **Apagar conta** remove também o conteúdo social, de forma retomável.
+- **Apagar conta** remove também o conteúdo social, de forma retomável. A marca de exclusão
+  (`usuarios/{uid}/config/exclusao`) é permanente e as regras negam escrever `busca`, `perfisPublicos` e `atividade`
+  depois dela; no aparelho, a limpeza espera a publicação em andamento terminar (trinco do `SocialGraph`).
+- **Busca por nome:** a fonte da verdade da escolha é `perfisPublicos.searchable`. Ao abrir (e antes de publicar) o
+  aparelho confere a nuvem: se já existe, vale a da nuvem; se não, vale a resposta local. Só depois a pergunta é feita.
+- **Custo de leituras:** na partida só convites e rolês são observados (o marcador precisa deles). Os amigos
+  (2 consultas mais 2 leituras por amigo) só carregam com a aba na tela e são relidos ao voltar ao app ou reabrir a aba,
+  no mínimo a cada 60 s; a busca usa os amigos em memória e um cache de bloqueados.
+
+### Limitações conhecidas do social
+
+Decisões adiadas de propósito (backlog); nenhuma expõe dados que as regras não permitam.
+
+- **Validade do rolê (M2):** o rolê vencido mostra "abra para renovar", mas o app o encerra na próxima abertura; e a
+  validade conta da criação ou da última abertura do criador, não de "7 dias sem atividade".
+- **Custo por km (M6):** é a média histórica de R$/km dos abastecimentos (`avgCostPerKm`), não o consumo km/l com o
+  preço do último abastecimento.
+- **Dados órfãos (M7):** quando o TTL do Firestore apaga um rolê, os documentos de `membros` (orçamento e custo) ficam
+  órfãos, inclusive de quem apagou a conta. Hoje são ilegíveis pelas regras; a limpeza exigiria uma Cloud Function.
+- **Desbloquear (M8):** não há tela para desbloquear. Bloquear quem já está bloqueado faz `set` em documento existente
+  (um update que as regras negam), e o app mostra "Não deu para concluir".
+- **Bloqueio e rolês em comum (M10):** bloquear não tira ninguém dos rolês em comum; o bloqueado continua vendo o que
+  os participantes publicaram ali.
+- **Nome do membro (M13):** o próprio membro pode mudar `nome` no rolê para qualquer texto (as regras só validam
+  tamanho); só o criador deveria gravá-lo.
+- **Criação de rolê (M14):** `createRole` lê os perfis dos amigos (`friends()`, 2 leituras por amigo) só para pegar nomes
+  que o `SocialViewModel` já tem em memória.
+- **Convite de quem não está na busca (M9):** aparece como "Alguém quer ser seu amigo"; mostrar o nome exigiria um
+  campo `deNome` no convite e mudar a regra.
+- **Escolha da busca sem data:** a nuvem manda ao abrir; duas respostas quase simultâneas em aparelhos diferentes
+  ficam com a última a publicar.
 
 ## Pod (BLE)
 

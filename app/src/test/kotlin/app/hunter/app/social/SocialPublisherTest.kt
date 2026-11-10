@@ -4,6 +4,7 @@ import app.hunter.model.FuelMath
 import app.hunter.model.Fuelup
 import app.hunter.social.Activity
 import app.hunter.social.Member
+import app.hunter.social.PublicProfile
 import app.hunter.social.MemberState
 import app.hunter.social.Role
 import app.hunter.social.TripSlice
@@ -33,7 +34,7 @@ class SocialPublisherTest {
         trips: List<TripSlice> = emptyList(),
         cost: Double? = null,
         searchable: Boolean = true,
-    ) = SocialPublisher(store, "me", { profile }, { trips }, { cost }, { searchable }, { zone }, { now })
+    ) = SocialPublisher(store, "me", { profile }, { trips }, { cost }, MemorySearchPrefs(asked = true, searchable = searchable), { zone }, { now })
 
     private fun fuelup(id: Long, odo: Double, liters: Double, cost: Double, full: Boolean = true) =
         Fuelup(id, now, odo, liters, cost, full)
@@ -55,7 +56,7 @@ class SocialPublisherTest {
         publisher(trips = finishedSlices(entities), cost = summary.avgCostPerKm).publishAll()
 
         assertEquals(Activity(monday, 15.5), store.activities["me"])
-        assertEquals(listOf(FigureCall("r1", "me", 150.0, summary.avgCostPerKm)), store.figureCalls)
+        assertEquals(listOf(FigureCall("r1", "me", null, summary.avgCostPerKm)), store.figureCalls) // só o custo: orçamento fica
     }
 
     @Test
@@ -107,7 +108,7 @@ class SocialPublisherTest {
         store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me", "ana"), now + 1000)
         store.membersByRole["r1"] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 150.0, 0.5))
         publisher(cost = null).publishAll()
-        assertEquals(listOf(FigureCall("r1", "me", 150.0, null)), store.figureCalls)
+        assertEquals(listOf(FigureCall("r1", "me", null, null)), store.figureCalls)
     }
 
     @Test
@@ -166,7 +167,7 @@ class SocialPublisherTest {
         var cost: Double? = null
         store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me"), now + 1000)
         store.membersByRole["r1"] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 150.0, null))
-        val p = SocialPublisher(store, "me", { current }, { emptyList() }, { cost }, { true }, { zone }, { now })
+        val p = SocialPublisher(store, "me", { current }, { emptyList() }, { cost }, MemorySearchPrefs(asked = true), { zone }, { now })
         p.publishAll()
         p.publishAll(force = true)
         assertEquals(2, store.profileWrites)
@@ -181,11 +182,11 @@ class SocialPublisherTest {
 
     @Test
     fun `busca só liga na transição e desliga apagando uma vez`() = runTest {
-        var on = true
-        val p = SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, { on }, { zone }, { now })
+        val prefs = MemorySearchPrefs(asked = true, searchable = true)
+        val p = SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, prefs, { zone }, { now })
         p.publishAll()
         assertTrue("me" in store.searchIndex)
-        on = false
+        prefs.searchable = false
         p.publishAll()
         p.publishAll()
         assertEquals(listOf("me"), store.removedFromSearch)
@@ -194,16 +195,77 @@ class SocialPublisherTest {
 
     @Test
     fun `quem nunca respondeu a pergunta não entra na busca`() = runTest {
-        val prefs = object : SearchPrefs {
-            override fun asked() = false
-            override fun searchable() = true
-            override fun set(searchable: Boolean) {}
-        }
-        val p = SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, prefs::appearsInSearch, { zone }, { now })
+        val prefs = MemorySearchPrefs(asked = false)
+        val p = SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, prefs, { zone }, { now })
         p.publishAll()
         assertTrue(store.searchIndex.isEmpty())
         assertFalse(store.profiles.getValue("me").searchable)
         assertTrue("me" in store.activities) // perfil público e atividade seguem para os amigos
+    }
+
+    private fun publisherWith(prefs: MemorySearchPrefs) =
+        SocialPublisher(store, "me", { profile }, { emptyList() }, { null }, prefs, { zone }, { now })
+
+    private fun cloudProfile(searchable: Boolean) {
+        store.profiles["me"] = PublicProfile("me", "Ana Souza", "Honda", "CG 160", 2022, searchable)
+    }
+
+    @Test
+    fun `aparelho sem resposta local adota a escolha publicada e não desfaz a busca`() = runTest {
+        cloudProfile(searchable = true) // outro aparelho respondeu "Sim"
+        store.searchIndex += "me"
+        val prefs = MemorySearchPrefs(asked = false)
+        publisherWith(prefs).publishAll()
+        assertTrue(prefs.asked())
+        assertTrue(prefs.searchable())
+        assertTrue(store.profiles.getValue("me").searchable)
+        assertTrue("me" in store.searchIndex)
+        assertTrue(store.removedFromSearch.isEmpty())
+    }
+
+    @Test
+    fun `a escolha publicada vale mais que um Sim velho guardado neste aparelho`() = runTest {
+        cloudProfile(searchable = false) // o outro aparelho disse "Não"
+        val prefs = MemorySearchPrefs(asked = true, searchable = true) // este ainda guarda o Sim antigo
+        publisherWith(prefs).publishAll()
+        assertFalse(prefs.searchable())
+        assertFalse(store.profiles.getValue("me").searchable)
+        assertFalse("me" in store.searchIndex)
+    }
+
+    @Test
+    fun `sem nada publicado vale a resposta local, e a conferência acontece uma vez por sessão`() = runTest {
+        val prefs = MemorySearchPrefs(asked = true, searchable = true)
+        val p = publisherWith(prefs)
+        p.publishAll()
+        p.publishAll(force = true)
+        assertTrue(prefs.searchable())
+        assertTrue("me" in store.searchIndex)
+        assertEquals(1, store.publishedSearchableCalls)
+    }
+
+    @Test
+    fun `resposta dada agora não é trocada pela da nuvem`() = runTest {
+        cloudProfile(searchable = false)
+        val prefs = MemorySearchPrefs(asked = false)
+        val p = publisherWith(prefs)
+        prefs.set(true) // o usuário respondeu "Sim" antes de a conferência terminar
+        p.localChoiceWins()
+        p.publishAll(force = true)
+        assertTrue(store.profiles.getValue("me").searchable)
+        assertEquals(0, store.publishedSearchableCalls)
+    }
+
+    @Test
+    fun `sem rede a conferência falha, nada é publicado e a próxima tentativa confere de novo`() = runTest {
+        store.publishedSearchableFailure = IOException("sem rede")
+        val prefs = MemorySearchPrefs(asked = true, searchable = true)
+        val p = publisherWith(prefs)
+        assertFailsWith<IOException> { p.publishAll() }
+        assertEquals(0, store.profileWrites)
+        store.publishedSearchableFailure = null
+        p.publishAll()
+        assertEquals(1, store.profileWrites)
     }
 
     @Test
@@ -213,7 +275,7 @@ class SocialPublisherTest {
         store.membersByRole["r1"] = mutableListOf(Member("me", "Ana", MemberState.ACCEPTED, 150.0, null))
         assertFailsWith<IOException> { publisher(cost = 0.2).publishAll() }
         assertTrue("me" in store.activities)
-        assertEquals(listOf(FigureCall("r1", "me", 150.0, 0.2)), store.figureCalls)
+        assertEquals(listOf(FigureCall("r1", "me", null, 0.2)), store.figureCalls)
     }
 
     @Test

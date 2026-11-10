@@ -77,7 +77,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     private val engine = SyncEngine(
         local,
         PerUserRemoteStore(::currentUid, { gate.pinnedUid }) { uid ->
-            FirestoreRemoteStore(firestore, uid, deleteSocial = { FirestoreSocialStore(firestore).deleteAllSocial(it) })
+            FirestoreRemoteStore(firestore, uid, deleteSocial = { social.deleteAllSocial(it) })
         },
     )
     val repo = AuthRepository(gateway, engine, flag, gate, onSynced = ::afterSync)

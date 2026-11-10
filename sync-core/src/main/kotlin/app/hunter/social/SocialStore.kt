@@ -33,6 +33,9 @@ data class Role(
 /** Persistência social (Firestore no app, fake nos testes). Operações em "lote" devem ser atômicas. */
 interface SocialStore {
     suspend fun publishProfile(p: PublicProfile)
+
+    /** O `searchable` já publicado no perfil público de [uid]; nulo se ele nunca publicou (a pessoa nunca respondeu). */
+    suspend fun publishedSearchable(uid: String): Boolean?
     suspend fun publishActivity(uid: String, a: Activity)
 
     /** Apaga o índice de busca de [uid] (quem não quer aparecer na busca por nome); o perfil público continua. */
@@ -66,7 +69,9 @@ interface SocialStore {
 
     /** Observação em tempo real (as leituras pontuais acima continuam valendo). */
     fun observeInvitesReceived(uid: String): Flow<List<Invite>>
-    fun observeFriends(uid: String): Flow<List<Friend>>
+
+    /** Os ids dos amigos, só quando o conjunto muda (sem ler perfis); quem usa relê [friends] ao mudar. */
+    fun observeFriendUids(uid: String): Flow<Set<String>>
     fun observeRoles(uid: String): Flow<List<Role>>
     fun observeMembers(roleId: String): Flow<List<Member>>
 
@@ -77,7 +82,12 @@ interface SocialStore {
 
     /** O criador estende a validade do rolê: grava o novo instante de expiração. */
     suspend fun renewRole(roleId: String, newExpiresAtMs: Long)
-    suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?)
+
+    /** Só o orçamento do próprio membro (o custo por km não é tocado). */
+    suspend fun setMemberBudget(roleId: String, uid: String, budget: Double?)
+
+    /** Só o custo por km do próprio membro (o orçamento não é tocado). */
+    suspend fun setMemberCost(roleId: String, uid: String, costPerKm: Double?)
     suspend fun roles(uid: String): List<Role>
     suspend fun members(roleId: String): List<Member>
 

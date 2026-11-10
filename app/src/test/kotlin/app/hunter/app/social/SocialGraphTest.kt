@@ -14,6 +14,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SocialGraphTest {
@@ -25,6 +27,7 @@ class SocialGraphTest {
     private var allowed = true
     private val base = 1_000_000L
     private val logged = mutableListOf<String>()
+    private var tripsGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
     private object Prefs : SearchPrefs {
         override fun asked() = true
@@ -39,7 +42,7 @@ class SocialGraphTest {
         uid = MutableStateFlow(signedUid),
         storeProvider = { storeCreated++; store },
         readProfile = { profileReads++; UserProfile("Ana", null, null, null) },
-        readTrips = { emptyList() },
+        readTrips = { tripsGate?.await(); emptyList() },
         readCostPerKm = { null },
         searchPrefs = Prefs,
         scope = backgroundScope,
@@ -114,6 +117,23 @@ class SocialGraphTest {
         runCurrent()
         assertEquals(2, profileReads)
         assertEquals(1, store.profileWrites)
+    }
+
+    @Test
+    fun `apagar os dados sociais espera a publicação em andamento terminar`() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        tripsGate = gate
+        val g = graph()
+        g.publishSoon()
+        runCurrent() // a publicação segura o trinco, parada na leitura das viagens
+        val deleting = launch { g.deleteAllSocial("me") }
+        runCurrent()
+        assertTrue(store.deletedAll.isEmpty())
+        gate.complete(Unit)
+        runCurrent()
+        deleting.join()
+        assertEquals(listOf("me"), store.deletedAll)
+        assertTrue("me" in store.activities) // a publicação terminou ANTES da limpeza
     }
 
     @Test

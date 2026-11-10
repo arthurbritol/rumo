@@ -177,9 +177,14 @@ fun memberToMap(m: Member, nowMs: Long): Map<String, Any?> = buildMap {
 /** Atualização do próprio membro ao aceitar o convite. */
 fun acceptMemberUpdate(nowMs: Long): Map<String, Any?> = mapOf("estado" to STATE_ACCEPTED, "atualizadoEm" to nowMs)
 
-/** Atualização do orçamento e do custo por km do próprio membro. */
-fun figuresUpdate(budget: Double?, costPerKm: Double?, nowMs: Long): Map<String, Any?> = mapOf(
+/** Atualização só do orçamento do próprio membro (o custo por km não entra: quem o publica é outro caminho). */
+fun budgetUpdate(budget: Double?, nowMs: Long): Map<String, Any?> = mapOf(
     "orcamento" to numOrNull(budget),
+    "atualizadoEm" to nowMs,
+)
+
+/** Atualização só do custo por km do próprio membro (o orçamento não entra). */
+fun costUpdate(costPerKm: Double?, nowMs: Long): Map<String, Any?> = mapOf(
     "custoPorKm" to numOrNull(costPerKm),
     "atualizadoEm" to nowMs,
 )

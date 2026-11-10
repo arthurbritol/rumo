@@ -29,9 +29,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -80,6 +80,12 @@ class FirestoreSocialStore(
 
     override suspend fun publishActivity(uid: String, a: Activity) {
         ref("atividade/$uid").set(activityToMap(a)).await()
+    }
+
+    /** `get` de `perfisPublicos/{uid}` (o dono lê o próprio): o `searchable` publicado, ou nulo se nunca publicou. */
+    override suspend fun publishedSearchable(uid: String): Boolean? {
+        val d = ref("perfisPublicos/$uid").get(Source.SERVER).await()
+        return if (d.exists()) d.getBoolean("searchable") else null
     }
 
     /** Apaga `busca/{uid}` (as regras permitem ao dono; apagar documento inexistente é aceito). */
@@ -261,11 +267,15 @@ class FirestoreSocialStore(
     override fun observeInvitesReceived(uid: String): Flow<List<Invite>> =
         receivedInvitesQuery(uid).snapshots().map { s -> s.documents.mapNotNull { mapToInvite(it.map()) } }
 
-    /** Qualquer mudança nas amizades recarrega perfis e atividades (os ouvintes só avisam; a leitura é pontual). */
-    override fun observeFriends(uid: String): Flow<List<Friend>> =
-        merge(*friendsQueries(uid).map { it.snapshots() }.toTypedArray())
-            .conflate()
-            .map { friends(uid) }
+    /**
+     * O conjunto de uids dos amigos, a partir dos snapshots das duas consultas (`a == uid` e `b == uid`); só emite
+     * quando o conjunto muda. Quem usa relê [friends] ao mudar (um carregamento por mudança, não um por consulta).
+     */
+    override fun observeFriendUids(uid: String): Flow<Set<String>> {
+        val (qa, qb) = friendsQueries(uid)
+        fun ids(s: QuerySnapshot) = s.documents.mapNotNull { otherOf(uid, it) }.toSet()
+        return combine(qa.snapshots().map(::ids), qb.snapshots().map(::ids)) { a, b -> a + b }.distinctUntilChanged()
+    }
 
     override fun observeRoles(uid: String): Flow<List<Role>> =
         rolesQuery(uid).snapshots().map { s -> s.documents.mapNotNull { mapToRole(it.id, it.map()) } }
@@ -328,8 +338,12 @@ class FirestoreSocialStore(
         ref("roles/$roleId").update("expiraEm", millisToTimestamp(newExpiresAtMs)).await()
     }
 
-    override suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?) {
-        ref("roles/$roleId/membros/$uid").update(figuresUpdate(budget, costPerKm, clock())).await()
+    override suspend fun setMemberBudget(roleId: String, uid: String, budget: Double?) {
+        ref("roles/$roleId/membros/$uid").update(budgetUpdate(budget, clock())).await()
+    }
+
+    override suspend fun setMemberCost(roleId: String, uid: String, costPerKm: Double?) {
+        ref("roles/$roleId/membros/$uid").update(costUpdate(costPerKm, clock())).await()
     }
 
     override suspend fun roles(uid: String): List<Role> =

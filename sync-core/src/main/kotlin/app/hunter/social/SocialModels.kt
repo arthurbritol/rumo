@@ -22,7 +22,10 @@ data class Member(
 enum class MemberWarning { OVER_BUDGET, NO_CONSUMPTION_DATA }
 
 /** Linha do planejamento para um participante que aceitou. */
-data class MemberPlan(val uid: String, val budget: Double?, val costPerKm: Double?, val warning: MemberWarning?)
+data class MemberPlan(val uid: String, val budget: Double?, val costPerKm: Double?, val warnings: List<MemberWarning>) {
+    /** O aviso mais importante (passar do orçamento vem antes de faltar dado de consumo); nulo sem avisos. */
+    val warning: MemberWarning? get() = warnings.firstOrNull()
+}
 
 /** Motivo de não haver alcance sugerido. */
 enum class NoReach { NO_ACCEPTED_MEMBERS, NO_BUDGETS, NO_CONSUMPTION_DATA }

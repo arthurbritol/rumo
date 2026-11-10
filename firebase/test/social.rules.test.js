@@ -95,6 +95,34 @@ test('perfisPublicos e atividade: estranho não lê, amigo lê, dono escreve', a
   await assertFails(db(BETO).doc(`atividade/${ANA}`).set(atividade()));
 });
 
+test('I4: com a marca de exclusão de conta, busca, perfil público e atividade não podem ser escritos, mas podem ser apagados', async () => {
+  // antes da marca, tudo é escrito normalmente
+  await assertSucceeds(db(ANA).doc(`busca/${ANA}`).set(buscaDoc()));
+  await assertSucceeds(db(ANA).doc(`perfisPublicos/${ANA}`).set(perfilPub()));
+  await assertSucceeds(db(ANA).doc(`atividade/${ANA}`).set(atividade()));
+  await assertSucceeds(db(ANA).doc(`usuarios/${ANA}/config/exclusao`).set({ pending: true }));
+  // publicação atrasada (create ou update) é negada
+  await assertFails(db(ANA).doc(`busca/${ANA}`).set(buscaDoc('Ana Maria')));
+  await assertFails(db(ANA).doc(`perfisPublicos/${ANA}`).set({ ...perfilPub(), displayName: 'Ana Maria' }));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set({ weekStartMs: 2000, weekKm: 1 }));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).update({ weekKm: 2 }));
+  // a limpeza continua permitida
+  await assertSucceeds(db(ANA).doc(`busca/${ANA}`).delete());
+  await assertSucceeds(db(ANA).doc(`perfisPublicos/${ANA}`).delete());
+  await assertSucceeds(db(ANA).doc(`atividade/${ANA}`).delete());
+  // e ainda negada depois de apagar (o documento não volta)
+  await assertFails(db(ANA).doc(`busca/${ANA}`).set(buscaDoc()));
+  await assertFails(db(ANA).doc(`perfisPublicos/${ANA}`).set(perfilPub()));
+  await assertFails(db(ANA).doc(`atividade/${ANA}`).set(atividade()));
+});
+
+test('I4: a marca de uma conta não bloqueia a publicação de outra', async () => {
+  await semear((d) => d.doc(`usuarios/${ANA}/config/exclusao`).set({ pending: true }));
+  await assertSucceeds(db(BETO).doc(`busca/${BETO}`).set(buscaDoc('Beto')));
+  await assertSucceeds(db(BETO).doc(`perfisPublicos/${BETO}`).set({ ...perfilPub(), displayName: 'Beto', displayNameLower: 'beto' }));
+  await assertSucceeds(db(BETO).doc(`atividade/${BETO}`).set(atividade()));
+});
+
 test('perfisPublicos e atividade: formato inválido é negado', async () => {
   await assertFails(db(ANA).doc(`perfisPublicos/${ANA}`).set({ ...perfilPub(), extra: 1 }));
   await assertFails(db(ANA).doc(`perfisPublicos/${ANA}`).set({ ...perfilPub(), searchable: 'sim' }));

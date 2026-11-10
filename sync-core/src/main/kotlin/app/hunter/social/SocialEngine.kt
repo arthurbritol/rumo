@@ -25,6 +25,7 @@ class SocialEngine(
         /** Máximo de amigos convidados (10 pessoas com o criador). */
         const val MAX_ROLE_FRIENDS = 9
         const val ROLE_TTL_MS = 7L * 24 * 3600 * 1000
+        const val BLOCKED_CACHE_MS = 5L * 60 * 1000
     }
 
     private val mutex = Mutex()
@@ -32,15 +33,36 @@ class SocialEngine(
     /**
      * Busca por nome: texto normalizado por [SearchKey] (minúsculas, sem acentos), mínimo de 3 letras; sem eu, bloqueados e amigos; até 20.
      * Pede ao store hits suficientes para sobrarem 20 mesmo que todos os amigos e bloqueados apareçam.
+     *
+     * [friendNames] (uid para nome dos amigos que quem chama já tem em memória) evita reler as amizades a cada
+     * busca e reduz a margem pedida aos amigos cujo nome começa com o texto; sem ele, as amizades são lidas.
+     * Os bloqueados ficam em cache por [BLOCKED_CACHE_MS] (e são refeitos ao bloquear).
      */
-    suspend fun search(text: String): List<SearchHit> {
+    suspend fun search(text: String, friendNames: Map<String, String>? = null): List<SearchHit> {
         val q = SearchKey.normalize(text)
         if (q.length < MIN_SEARCH_CHARS) return emptyList()
-        val blocked = store.blocked(me)
-        val friends = store.friendUids(me)
-        return store.search(q, SEARCH_LIMIT + friends.size + blocked.size + 1)
+        val blocked = cachedBlocked()
+        val friends: Set<String>
+        val margin: Int
+        if (friendNames != null) {
+            friends = friendNames.keys
+            margin = friendNames.values.count { SearchKey.normalize(it).startsWith(q) }
+        } else {
+            friends = store.friendUids(me)
+            margin = friends.size
+        }
+        return store.search(q, SEARCH_LIMIT + margin + blocked.size + 1)
             .filter { it.uid != me && it.uid !in blocked && it.uid !in friends }
             .take(SEARCH_LIMIT)
+    }
+
+    private var blockedCache: Set<String>? = null
+    private var blockedCacheAtMs = 0L
+
+    private suspend fun cachedBlocked(): Set<String> {
+        val now = clock()
+        blockedCache?.let { if (now >= blockedCacheAtMs && now - blockedCacheAtMs < BLOCKED_CACHE_MS) return it }
+        return store.blocked(me).also { blockedCache = it; blockedCacheAtMs = now }
     }
 
     /** Convida [to]. Convite cruzado aceita o recebido; repetido devolve Ok sem duplicar. */
@@ -83,6 +105,7 @@ class SocialEngine(
     suspend fun block(other: String): SocialResult = mutex.withLock {
         if (other == me) return SocialResult.Refused(Refusal.SELF)
         store.block(me, other)
+        blockedCache = null
         SocialResult.Ok
     }
 

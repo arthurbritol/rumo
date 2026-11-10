@@ -29,7 +29,7 @@ class SocialPublisher(
     private val readProfile: () -> UserProfile?,
     private val readTrips: suspend () -> List<TripSlice>,
     private val readCostPerKm: suspend () -> Double?,
-    private val searchable: () -> Boolean,
+    private val prefs: SearchPrefs,
     private val zone: () -> ZoneId,
     private val clock: () -> Long,
 ) {
@@ -39,6 +39,27 @@ class SocialPublisher(
     private var costPublished = false
     private var lastCost: Double? = null
 
+    // A escolha da busca já foi conferida com a nuvem nesta sessão (ver [reconcileSearch]).
+    private var searchReconciled = false
+
+    /**
+     * A fonte da verdade da escolha de busca é `perfisPublicos.searchable`, na nuvem. Uma vez por sessão (antes de
+     * publicar e ao abrir a aba), traz essa escolha para o aparelho: se já existe publicada, ela vale (conta como
+     * respondida) e a resposta local velha é substituída; se nunca foi publicada, vale a resposta local, se houver.
+     * Assim um aparelho que nunca perguntou não desfaz a escolha feita em outro. Lança sem rede (nada é decidido).
+     */
+    suspend fun reconcileSearch() {
+        if (searchReconciled) return
+        val published = store.publishedSearchable(uid)
+        if (published != null && !searchReconciled) prefs.set(published)
+        searchReconciled = true
+    }
+
+    /** O usuário respondeu agora (pergunta ou Perfil): essa resposta é a mais nova e não será trocada pela da nuvem. */
+    fun localChoiceWins() {
+        searchReconciled = true
+    }
+
     /** No máximo uma publicação por minuto; relógio que voltou para trás não bloqueia. */
     fun shouldPublish(lastPublishedAtMs: Long, nowMs: Long): Boolean =
         nowMs < lastPublishedAtMs || nowMs - lastPublishedAtMs >= MIN_INTERVAL_MS
@@ -46,7 +67,7 @@ class SocialPublisher(
     /**
      * 1) Perfil público para os amigos, sempre; `busca/{uid}` só com [searchable] (senão o documento é apagado, uma
      *    vez, na transição). 2) `atividade/{uid}` com os km da semana atual das viagens terminadas. 3) O custo por km
-     *    em cada rolê em que já aceitei, mantendo o orçamento; rolê vencido, convite pendente e custo já publicado
+     *    em cada rolê em que já aceitei (só o custo, sem tocar no orçamento); rolê vencido, convite pendente e custo já publicado
      *    ficam de fora, e os rolês só são consultados quando o custo mudou.
      * Só escreve o que mudou desde a última publicação bem-sucedida; [force] regrava tudo (ex.: entrei num rolê
      * agora). As etapas são independentes: uma falha não impede as outras e a primeira é relançada no fim.
@@ -54,6 +75,7 @@ class SocialPublisher(
      */
     suspend fun publishAll(force: Boolean = false) {
         val profile = readProfile() ?: return
+        reconcileSearch()
         var failure: Exception? = null
         suspend fun step(block: suspend () -> Unit) {
             try {
@@ -65,7 +87,7 @@ class SocialPublisher(
             }
         }
 
-        val inSearch = searchable()
+        val inSearch = prefs.appearsInSearch()
         val pub = PublicProfile(uid, profile.displayName, profile.brand, profile.model, profile.year, inSearch)
         step {
             if (force || pub != lastProfile) {
@@ -96,7 +118,7 @@ class SocialPublisher(
                 try {
                     val me = store.member(role.id, uid) ?: continue
                     if (me.state != MemberState.ACCEPTED || me.costPerKm == cost) continue
-                    store.setMemberFigures(role.id, uid, me.budget, cost)
+                    store.setMemberCost(role.id, uid, cost) // só o custo: o orçamento é de quem o edita
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

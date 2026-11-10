@@ -198,10 +198,11 @@ class SocialUiMapperTest {
         val byUid = d.participants.associateBy { it.uid }
         assertEquals("Você", byUid.getValue("me").name)
         assertEquals("R$ 100,00", byUid.getValue("me").budgetLabel)
-        assertNull(byUid.getValue("me").warning)
-        assertEquals("Passa do que esta pessoa pode gastar", byUid.getValue("ana").warning)
-        assertEquals("Sem dados de consumo", byUid.getValue("bia").warning)
-        assertNull(byUid.getValue("caio").warning)
+        assertEquals(emptyList(), byUid.getValue("me").warnings)
+        assertEquals(listOf("Passa do que esta pessoa pode gastar"), byUid.getValue("ana").warnings)
+        // sem dados de consumo, bia é medida pelo custo médio do grupo (83,33 de média contra 50 informados)
+        assertEquals(listOf("Passa do que esta pessoa pode gastar", "Sem dados de consumo"), byUid.getValue("bia").warnings)
+        assertEquals(emptyList(), byUid.getValue("caio").warnings)
         assertEquals(listOf("ana", "bia", "caio"), d.participants.filter { it.canRemove }.map { it.uid })
     }
 
@@ -216,7 +217,7 @@ class SocialUiMapperTest {
         assertTrue(!d.hasReach)
         assertEquals(noReachMessage(NoReach.NO_CONSUMPTION_DATA), d.reachText)
         assertEquals("R$ 100,00", d.averageLabel)
-        assertEquals("Sem dados de consumo", d.participants.first { it.uid == "me" }.warning)
+        assertEquals(listOf("Sem dados de consumo"), d.participants.first { it.uid == "me" }.warnings)
         assertEquals("Sem orçamento", d.participants.first { it.uid == "ana" }.budgetLabel)
         assertEquals("Aguardando resposta", d.participants.first { it.uid == "bia" }.budgetLabel)
         assertTrue(d.participants.none { it.canRemove })

@@ -70,6 +70,17 @@ class RolePlannerTest {
     }
 
     @Test
+    fun `membro sem consumo com orçamento abaixo da média recebe os dois avisos`() {
+        // média de custo 1,0 (só a tem dados); média de orçamento (100+40)/2 = 70 => alcance 70 km
+        val p = RolePlanner.plan(listOf(m("a", 100.0, 1.0), m("b", 40.0, null)))
+        val b = p.members.first { it.uid == "b" }
+        // b gastaria 70 * 1,0 = 70 > 40
+        assertEquals(listOf(MemberWarning.OVER_BUDGET, MemberWarning.NO_CONSUMPTION_DATA), b.warnings)
+        assertEquals(MemberWarning.OVER_BUDGET, b.warning)
+        assertNull(p.members.first { it.uid == "a" }.warning) // a gasta 70 <= 100
+    }
+
+    @Test
     fun `ninguém aceitou - NO_ACCEPTED_MEMBERS`() {
         val p = RolePlanner.plan(listOf(m("a", 100.0, 1.0, MemberState.INVITED)))
         assertEquals(NoReach.NO_ACCEPTED_MEMBERS, p.noReach)

@@ -79,7 +79,7 @@ class SocialGraph(
         }
         cached?.takeIf { it.uid == uid }?.let { return it }
         val publisher = SocialPublisher(
-            store, uid, readProfile, readTrips, readCostPerKm, searchPrefs::appearsInSearch, zone, clock,
+            store, uid, readProfile, readTrips, readCostPerKm, searchPrefs, zone, clock,
         )
         return SocialSession(uid, store, SocialEngine(store, uid, clock), publisher).also { cached = it }
     }
@@ -92,6 +92,15 @@ class SocialGraph(
      */
     override fun publishSoon(force: Boolean) {
         scope.launch { publishNow(force) }
+    }
+
+    /**
+     * Apaga todos os dados sociais de [uid] (exclusão de conta) esperando qualquer publicação em andamento terminar:
+     * assim ela não regrava perfil, atividade ou busca depois da limpeza. Depois a marca de exclusão (e as regras) a
+     * impedem de publicar de novo.
+     */
+    suspend fun deleteAllSocial(uid: String) {
+        publishLock.withLock { store.deleteAllSocial(uid) }
     }
 
     /** Volta do app para a frente: publica (respeitando o intervalo) para refletir a semana que pode ter virado. */

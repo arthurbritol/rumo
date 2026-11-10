@@ -43,6 +43,8 @@ import java.time.ZoneId
  * - [offline]: alguma leitura ou ação falhou por rede/permissão; as listas mostram o último dado carregado.
  * - [message]: aviso curto em pt-BR para exibir (recusa de regra, falha, valor inválido); `clearMessage` o limpa.
  * - [busy]: uma ação (convidar, aceitar, criar rolê...) está em andamento.
+ * - [searchVisible]: a pessoa aparece na busca por nome (o valor que o Perfil e a pergunta mostram).
+ * - [friendsLoaded]/[rolesLoaded]: a primeira leitura da lista já terminou (antes disso a tela diz "Carregando…").
  */
 data class SocialUi(
     val signedIn: Boolean = false,
@@ -56,6 +58,9 @@ data class SocialUi(
     val offline: Boolean = false,
     val message: String? = null,
     val busy: Boolean = false,
+    val searchVisible: Boolean = false,
+    val friendsLoaded: Boolean = false,
+    val rolesLoaded: Boolean = false,
 )
 
 const val OFFLINE_MESSAGE = "Sem conexão. Mostrando o que já foi carregado."
@@ -95,6 +100,15 @@ class SocialViewModel(
     private var session: SocialSession? = null
     private var searchJob: Job? = null
 
+    /** A aba Amigos está na tela: só então os amigos (leituras caras) são carregados. */
+    private var tabVisible = false
+    private var friendsJob: Job? = null
+    private var lastFriendsLoadAtMs = 0L
+    private var loadedFriendUids: Set<String>? = null
+
+    /** A escolha da busca já foi conferida com a nuvem nesta sessão. */
+    private var searchResolved = false
+
     /** Observadores que estão falhando agora; com algum, o estado é offline. */
     private val failing = mutableSetOf<String>()
     private var actionFailed = false
@@ -131,6 +145,11 @@ class SocialViewModel(
         rawRoles = emptyList()
         roleStates = emptyMap()
         searchJob?.cancel()
+        friendsJob?.cancel()
+        friendsJob = null
+        loadedFriendUids = null
+        lastFriendsLoadAtMs = 0L
+        searchResolved = false
         closeRoleDetail()
         val s = uid?.let { backend.session(it) }
         session = s
@@ -138,13 +157,11 @@ class SocialViewModel(
             _state.value = SocialUi()
             return
         }
-        _state.value = SocialUi(
-            signedIn = true,
-            searchPromptNeeded = SearchPrompt.shouldAsk(backend.searchPrefs.asked(), signedIn = true),
-        )
+        _state.value = SocialUi(signedIn = true, searchVisible = backend.searchPrefs.appearsInSearch())
         backend.publishSoon() // abrir a aba publica perfil e atividade (respeitando o intervalo mínimo)
+        startFriendsIfNeeded()
         coroutineScope {
-            launch { observe("amigos", { s.store.observeFriends(s.uid) }) { onFriends(it) } }
+            launch { resolveSearch(s) }
             launch { observe("convites", { s.store.observeInvitesReceived(s.uid) }) { onInvites(s, it) } }
             launch { observe("roles", { s.store.observeRoles(s.uid) }) { onRoles(s, it) } }
             launch { loadSent(s) }
@@ -200,8 +217,76 @@ class SocialViewModel(
     private fun onFriends(friends: List<Friend>) {
         rawFriends = friends
         friendNames = friends.associate { it.profile.uid to it.profile.displayName }
+        _state.update { it.copy(friendsLoaded = true) }
         rebuildFriends()
         rebuildRoles()
+    }
+
+    /**
+     * A aba Amigos apareceu ou saiu da tela. Os amigos (2 consultas mais 2 leituras por amigo) só são carregados e
+     * observados depois que a aba é aberta; ao reaparecer, relê respeitando o intervalo mínimo.
+     */
+    fun showTab(visible: Boolean) {
+        tabVisible = visible
+        if (!visible || session == null) return
+        if (friendsJob == null) startFriendsIfNeeded() else refreshFriends()
+    }
+
+    private fun startFriendsIfNeeded() {
+        val s = session ?: return
+        if (!tabVisible || friendsJob != null) return
+        friendsJob = scope.launch {
+            observe("amigos", { s.store.observeFriendUids(s.uid) }) { uids ->
+                if (uids != loadedFriendUids) loadFriends(s)
+            }
+        }
+    }
+
+    private suspend fun loadFriends(s: SocialSession) {
+        val list = s.store.friends(s.uid)
+        lastFriendsLoadAtMs = clock()
+        loadedFriendUids = list.map { it.profile.uid }.toSet()
+        onFriends(list)
+        loadSent(s) // convite meu que o outro aceitou deixa de ser "enviado"
+    }
+
+    /** Relê km e perfis dos amigos (a atividade deles muda sem que a lista de amizades mude); no mínimo 60 s entre leituras. */
+    private fun refreshFriends(force: Boolean = false) {
+        val s = session ?: return
+        if (!tabVisible || friendsJob == null) return
+        val since = clock() - lastFriendsLoadAtMs
+        if (!force && since in 0 until FRIENDS_MIN_REFRESH_MS) return
+        scope.launch {
+            try {
+                loadFriends(s)
+                markFailing(FRIENDS_RELOAD, false)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                markFailing(FRIENDS_RELOAD, true)
+            }
+        }
+    }
+
+    /**
+     * Confere a escolha da busca com a nuvem (a nuvem manda: `perfisPublicos.searchable`) e só então decide perguntar.
+     * Sem rede não pergunta (a resposta pode já existir em outro aparelho): tenta de novo em [refresh]/[onForeground].
+     */
+    private suspend fun resolveSearch(s: SocialSession) {
+        try {
+            s.publisher.reconcileSearch()
+            searchResolved = true
+            _state.update {
+                it.copy(
+                    searchPromptNeeded = SearchPrompt.shouldAsk(backend.searchPrefs.asked(), signedIn = true),
+                    searchVisible = backend.searchPrefs.appearsInSearch(),
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // tenta de novo depois
+        }
     }
 
     private fun rebuildFriends() = _state.update { it.copy(friends = friendRows(rawFriends, clock(), zone())) }
@@ -211,6 +296,10 @@ class SocialViewModel(
         if (session == null) return
         recalcWeek()
         backend.publishSoon()
+        val s = session ?: return
+        refreshFriends()
+        scope.launch { loadSent(s) }
+        if (!searchResolved) scope.launch { resolveSearch(s) }
     }
 
     /** Refaz as listas com o relógio de agora: a semana (ou a validade de um rolê) pode ter virado com a tela aberta. */
@@ -264,6 +353,7 @@ class SocialViewModel(
         }
         roleStates = states
         rawRoles = roles
+        _state.update { it.copy(rolesLoaded = true) }
         rebuildRoles()
     }
 
@@ -292,7 +382,8 @@ class SocialViewModel(
         rawMembers = null
         _detail.value = null
         detailJob = scope.launch {
-            if (rawRoles.firstOrNull { it.id == id }?.creatorUid == s.uid) {
+            val role = rawRoles.firstOrNull { it.id == id }
+            if (role?.creatorUid == s.uid && role.expiresAtMs - clock() < RENEW_BELOW_MS) {
                 try {
                     s.engine.renewRole(id)
                 } catch (e: CancellationException) {
@@ -363,7 +454,9 @@ class SocialViewModel(
         actionFailed = false
         syncOffline()
         refreshTick.update { it + 1 }
+        refreshFriends(force = true)
         scope.launch { loadSent(s) }
+        if (!searchResolved) scope.launch { resolveSearch(s) }
     }
 
     fun clearMessage() = _state.update { it.copy(message = null) }
@@ -380,7 +473,7 @@ class SocialViewModel(
             delay(searchDebounceMs)
             _state.update { it.copy(searching = true) }
             try {
-                val hits = s.engine.search(text)
+                val hits = s.engine.search(text, friendNames)
                 actionFailed = false
                 _state.update { it.copy(searchResults = hits, searching = false) }
                 syncOffline()
@@ -414,7 +507,11 @@ class SocialViewModel(
         null
     }
 
-    fun block(uid: String) = act { it.engine.block(uid) }
+    fun block(uid: String) = act { s ->
+        s.engine.block(uid).also {
+            if (it == SocialResult.Ok) _state.update { u -> u.copy(searchResults = u.searchResults.filter { h -> h.uid != uid }) }
+        }
+    }
 
     /** Cria o rolê com [friendUids]; [myFigures] são meu orçamento e custo por km iniciais. */
     fun createRole(name: String, friendUids: List<String>, myFigures: Member, onCreated: () -> Unit = {}) = act(onCreated) { s ->
@@ -423,7 +520,14 @@ class SocialViewModel(
 
     /** Aceita o convite do rolê e já publica meu custo por km nele. */
     fun acceptRole(id: String) = act { s ->
-        s.engine.acceptRole(id).also { if (it == SocialResult.Ok) backend.publishSoon(force = true) }
+        s.engine.acceptRole(id).also {
+            if (it == SocialResult.Ok) {
+                // Só o documento do membro mudou (o ouvinte de rolês não dispara): marca aqui para a linha deixar de ser pendente.
+                roleStates = roleStates + (id to MemberState.ACCEPTED)
+                rebuildRoles()
+                backend.publishSoon(force = true)
+            }
+        }
     }
 
     fun leaveRole(id: String, onDone: () -> Unit = {}) = act(onDone, alsoOnNull = true) { s ->
@@ -446,7 +550,7 @@ class SocialViewModel(
             if (me == null || me.state != MemberState.ACCEPTED) {
                 _state.update { it.copy(message = BUDGET_NOT_ACCEPTED_MESSAGE) }
             } else {
-                s.store.setMemberFigures(roleId, s.uid, budget, me.costPerKm)
+                s.store.setMemberBudget(roleId, s.uid, budget)
             }
             null
         }
@@ -455,7 +559,9 @@ class SocialViewModel(
     /** Resposta da pergunta única da busca: guarda a escolha e publica já (sem esperar o intervalo mínimo). */
     fun answerSearchPrompt(searchable: Boolean) {
         backend.searchPrefs.set(searchable)
-        _state.update { it.copy(searchPromptNeeded = false) }
+        session?.publisher?.localChoiceWins() // a resposta de agora vale mais que a conferida na abertura
+        searchResolved = true
+        _state.update { it.copy(searchPromptNeeded = false, searchVisible = backend.searchPrefs.appearsInSearch()) }
         backend.publishSoon(force = true)
     }
 
@@ -496,6 +602,13 @@ class SocialViewModel(
 }
 
 private const val DETAIL_OBSERVER = "membros"
+private const val FRIENDS_RELOAD = "amigos-km"
+
+/** Mínimo entre duas leituras dos amigos disparadas por abrir a aba ou voltar para o app. */
+private const val FRIENDS_MIN_REFRESH_MS = 60_000L
+
+/** O criador só renova o rolê quando falta menos que isto (evita gravar a cada abertura). */
+private const val RENEW_BELOW_MS = 3L * 24 * 3600 * 1000
 
 /** Uso: `viewModel<SocialViewModel>(factory = socialViewModelFactory(app.account.social))`. */
 fun socialViewModelFactory(backend: SocialBackend): ViewModelProvider.Factory = viewModelFactory {

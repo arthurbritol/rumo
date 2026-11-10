@@ -56,11 +56,15 @@ class FakeSocialStore : SocialStore {
     }
     override suspend fun friendUids(uid: String): Set<String> = friendships.filter { it.first == uid }.map { it.second }.toSet()
     override fun observeInvitesReceived(uid: String): Flow<List<Invite>> = changes.map { invites.filter { it.toUid == uid } }
-    override fun observeFriends(uid: String): Flow<List<Friend>> =
-        changes.map { friendships.filter { it.first == uid }.map { Friend(profiles.getValue(it.second), null) } }
+    override fun observeFriendUids(uid: String): Flow<Set<String>> =
+        changes.map { friendships.filter { it.first == uid }.map { it.second }.toSet() }
     override fun observeRoles(uid: String): Flow<List<Role>> = changes.map { rolesById.values.filter { uid in it.participants } }
     override fun observeMembers(roleId: String): Flow<List<Member>> = changes.map { membersByRole[roleId].orEmpty().toList() }
-    override suspend fun blocked(uid: String) = blocks.filter { it.first == uid }.map { it.second }.toSet()
+    var blockedReads = 0
+    override suspend fun blocked(uid: String): Set<String> {
+        blockedReads++
+        return blocks.filter { it.first == uid }.map { it.second }.toSet()
+    }
     override suspend fun createRole(role: Role, creator: Member, invited: List<Member>) {
         rolesById[role.id] = role
         membersByRole[role.id] = (listOf(creator) + invited).toMutableList()
@@ -77,7 +81,9 @@ class FakeSocialStore : SocialStore {
         rolesById[roleId]?.let { rolesById[roleId] = it.copy(participants = it.participants - uid) }
     }
     override suspend fun closeRole(roleId: String) { closed += roleId; rolesById.remove(roleId); membersByRole.remove(roleId); bump() }
-    override suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?) {}
+    override suspend fun setMemberBudget(roleId: String, uid: String, budget: Double?) {}
+    override suspend fun setMemberCost(roleId: String, uid: String, costPerKm: Double?) {}
+    override suspend fun publishedSearchable(uid: String): Boolean? = profiles[uid]?.searchable
     override suspend fun roles(uid: String) = rolesById.values.filter { uid in it.participants }
     override suspend fun members(roleId: String) = membersByRole[roleId].orEmpty().toList()
     override suspend fun deleteAllSocial(uid: String) {}
@@ -270,6 +276,26 @@ class SocialEngineTest {
         val hits = engine.search("zec")
         assertEquals(20, hits.size)
         assertTrue(hits.all { it.uid.startsWith("v") })
+    }
+
+    @Test
+    fun `busca com amigos conhecidos filtra sem reler amizades e refaz o cache de bloqueados ao bloquear`() = runTest {
+        for (i in 1..3) { store.addProfile("f$i", "Zeca a$i"); store.befriend("me", "f$i") }
+        for (i in 1..30) store.addProfile("v$i", "Zeca v$i")
+        val names = mapOf("f1" to "Zeca a1", "f2" to "Zeca a2", "f3" to "Zeca a3")
+        val hits = engine.search("zec", names)
+        assertEquals(20, hits.size)
+        assertTrue(hits.none { it.uid.startsWith("f") })
+        assertEquals(0, store.friendsCalls)
+        assertEquals(1, store.blockedReads)
+        engine.search("zeca", names)
+        assertEquals(1, store.blockedReads) // cache
+        engine.block("v1")
+        assertTrue(engine.search("zec", names).none { it.uid == "v1" })
+        assertEquals(2, store.blockedReads)
+        now += SocialEngine.BLOCKED_CACHE_MS
+        engine.search("zec", names)
+        assertEquals(3, store.blockedReads)
     }
 
     @Test

@@ -91,6 +91,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Marca permanente de exclusão de conta (usuarios/{uid}/config/exclusao): depois dela nada público
+    // (busca, perfil público, atividade) pode ser escrito de novo por esse uid — uma publicação atrasada, ou de
+    // outro aparelho com o token ainda válido, não ressuscita dados de uma conta que está sendo apagada.
+    // Apagar continua permitido (é a limpeza). 1 chamada exists().
+    function semExclusao(uid) {
+      return !exists(/databases/$(database)/documents/usuarios/$(uid)/config/exclusao);
+    }
+
     // Id do par de amigos: os dois uids em ordem alfabética, ligados por "_".
     function parId(a, b) {
       return a < b ? a + '_' + b : b + '_' + a;
@@ -175,7 +183,7 @@ service cloud.firestore {
       allow get: if logado();
       // Só consulta limitada (o cliente busca por prefixo de displayNameLower).
       allow list: if logado() && request.query.limit <= 20;
-      allow create, update: if dono(uid) && buscaValida(request.resource.data);
+      allow create, update: if dono(uid) && semExclusao(uid) && buscaValida(request.resource.data);
       allow delete: if dono(uid);
     }
 
@@ -184,13 +192,13 @@ service cloud.firestore {
     // comum, que o documento não tem (limitado a dono + amigos).
     match /perfisPublicos/{uid} {
       allow read: if dono(uid) || (logado() && amigos(request.auth.uid, uid));
-      allow create, update: if dono(uid) && perfilPublicoValido(request.resource.data);
+      allow create, update: if dono(uid) && semExclusao(uid) && perfilPublicoValido(request.resource.data);
       allow delete: if dono(uid);
     }
 
     match /atividade/{uid} {
       allow read: if dono(uid) || (logado() && amigos(request.auth.uid, uid));
-      allow create, update: if dono(uid) && atividadeValida(request.resource.data);
+      allow create, update: if dono(uid) && semExclusao(uid) && atividadeValida(request.resource.data);
       allow delete: if dono(uid);
     }
 

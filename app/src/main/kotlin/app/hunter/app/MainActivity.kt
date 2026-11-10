@@ -43,11 +43,11 @@ import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
 import app.hunter.app.account.accountViewModelFactory
 import app.hunter.app.social.SocialViewModel
-import app.hunter.app.social.appearsInSearch
 import app.hunter.app.social.friendsBadge
 import app.hunter.app.social.pendingCount
 import app.hunter.app.social.socialViewModelFactory
 import app.hunter.app.sync.ProfilePrefs
+import app.hunter.app.sync.safeDisplayName
 import app.hunter.app.ui.AccountNotice
 import app.hunter.app.ui.FriendsRoute
 import app.hunter.app.ui.GarageScreen
@@ -121,8 +121,7 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
     val signedIn = authState is AuthState.SignedIn
     // Um só SocialViewModel para o app: a aba, o marcador de pendências e o Perfil enxergam o mesmo estado.
     val socialVm: SocialViewModel = viewModel(factory = socialViewModelFactory(account.social))
-    var searchable by remember { mutableStateOf(account.social.searchPrefs.appearsInSearch()) }
-    LaunchedEffect(signedIn) { searchable = account.social.searchPrefs.appearsInSearch() }
+    val socialState by socialVm.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         if (route == null) {
@@ -184,7 +183,7 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                 prefs = prefs,
                 socialVm = socialVm,
                 signedIn = signedIn,
-                myName = (authState as? AuthState.SignedIn)?.name.orEmpty(),
+                myName = { safeDisplayName(ProfilePrefs.read(prefs)?.displayName.orEmpty()) },
                 accountAvailable = account.available,
                 onOpenProfile = { overlay = Overlay.PROFILE.name },
                 onCreateAccount = { overlay = Overlay.LOGIN.name },
@@ -209,11 +208,8 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             onBack = { overlay = Overlay.NONE.name },
                             updateCheck = vmProvider().updateCheck.collectAsStateWithLifecycle().value,
                             onCheckUpdate = { vmProvider().checkUpdate(force = true) },
-                            searchable = searchable,
-                            onSearchableChange = { on ->
-                                socialVm.answerSearchPrompt(on)
-                                searchable = on
-                            },
+                            searchable = socialState.searchVisible,
+                            onSearchableChange = socialVm::answerSearchPrompt,
                         )
                     }
                     BackHandler { overlay = Overlay.NONE.name }
@@ -247,7 +243,7 @@ private fun HunterRoot(
     prefs: SharedPreferences,
     socialVm: SocialViewModel,
     signedIn: Boolean,
-    myName: String,
+    myName: () -> String,
     accountAvailable: Boolean,
     onOpenProfile: () -> Unit,
     onCreateAccount: () -> Unit,
@@ -311,6 +307,7 @@ private fun HunterRoot(
                                 Tab.Friends -> FriendsRoute(
                                     vm = socialVm,
                                     accountAvailable = accountAvailable,
+                                    accountSignedIn = signedIn,
                                     myName = myName,
                                     onSignIn = onCreateAccount,
                                     onSubScreen = { friendsSubOpen = it },

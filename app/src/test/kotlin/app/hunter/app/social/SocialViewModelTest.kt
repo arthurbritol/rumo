@@ -34,23 +34,14 @@ class SocialViewModelTest {
 
     private val store = FakeSocialStore()
 
-    private class MemoryPrefs(var asked: Boolean = false, var searchable: Boolean = true) : SearchPrefs {
-        override fun asked() = asked
-        override fun searchable() = searchable
-        override fun set(searchable: Boolean) {
-            this.searchable = searchable
-            asked = true
-        }
-    }
-
     private inner class FakeBackend(initialUid: String? = "me") : SocialBackend {
         override val uid = MutableStateFlow(initialUid)
-        override val searchPrefs = MemoryPrefs()
+        override val searchPrefs = MemorySearchPrefs()
         var sessionCalls = 0
         val publishCalls = mutableListOf<Boolean>()
         override fun session(uid: String): SocialSession {
             sessionCalls++
-            val publisher = SocialPublisher(store, uid, { null }, { emptyList() }, { null }, { true }, { zone }) { now }
+            val publisher = SocialPublisher(store, uid, { null }, { emptyList() }, { null }, searchPrefs, { zone }) { now }
             return SocialSession(uid, store, SocialEngine(store, uid, clock = { now }, idGen = { "role-x" }), publisher)
         }
         override fun publishSoon(force: Boolean) { publishCalls += force }
@@ -58,8 +49,9 @@ class SocialViewModelTest {
 
     private val backend = FakeBackend()
 
+    /** A aba Amigos já está na tela (sem isso os amigos não são carregados). */
     private fun TestScope.vm(b: SocialBackend = backend) =
-        SocialViewModel(b, backgroundScope, clock = { now }, zone = { zone })
+        SocialViewModel(b, backgroundScope, clock = { now }, zone = { zone }).also { it.showTab(true) }
 
     private fun friend(uid: String, name: String, km: Double? = null) =
         Friend(PublicProfile(uid, name, "Honda", "CG 160", null, true), km?.let { Activity(thisWeek, it) })
@@ -233,7 +225,7 @@ class SocialViewModelTest {
         runCurrent()
         vm.setBudget("r1", 300.0)
         runCurrent()
-        assertEquals(listOf(FigureCall("r1", "me", 300.0, 0.25)), store.figureCalls)
+        assertEquals(listOf(FigureCall("r1", "me", 300.0, null)), store.figureCalls) // só o orçamento
         vm.setBudget("r1", -5.0)
         runCurrent()
         assertEquals(1, store.figureCalls.size) // valor inválido não grava
@@ -336,6 +328,7 @@ class SocialViewModelTest {
         var cur = now
         store.friendsFlow.value = listOf(friend("ana", "Ana", 12.34))
         val vm = SocialViewModel(backend, backgroundScope, clock = { cur }, zone = { zone })
+        vm.showTab(true)
         runCurrent()
         assertEquals("12,3 km", vm.state.value.friends.single().weekKmLabel)
         cur += 7L * 24 * 3600 * 1000
@@ -343,6 +336,140 @@ class SocialViewModelTest {
         assertEquals("0 km", vm.state.value.friends.single().weekKmLabel)
         assertEquals(false, backend.publishCalls.last())
         assertEquals(2, backend.publishCalls.size)
+    }
+
+    @Test
+    fun `aceitar o convite do rolê tira a linha de pendente e libera o detalhe`() = runTest {
+        store.rolesById["r1"] = Role("r1", "Praia", "ana", listOf("ana", "me"), now + 1000)
+        store.rolesFlow.value = store.rolesById.values.toList()
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.INVITED, null, null))
+        val vm = vm()
+        runCurrent()
+        assertTrue(vm.state.value.roles.single().pending)
+        vm.acceptRole("r1")
+        runCurrent()
+        assertFalse(vm.state.value.roles.single().pending) // o ouvinte de rolês não dispara: o ViewModel marca
+    }
+
+    @Test
+    fun `escolha de busca já publicada em outro aparelho não pergunta de novo e aparece ligada`() = runTest {
+        store.profiles["me"] = PublicProfile("me", "Eu", null, null, null, true)
+        val vm = vm()
+        runCurrent()
+        assertFalse(vm.state.value.searchPromptNeeded)
+        assertTrue(vm.state.value.searchVisible)
+        assertTrue(backend.searchPrefs.asked())
+    }
+
+    @Test
+    fun `sem rede não pergunta a busca e pergunta quando a conferência funciona`() = runTest {
+        store.publishedSearchableFailure = IOException("sem rede")
+        val vm = vm()
+        runCurrent()
+        assertFalse(vm.state.value.searchPromptNeeded)
+        store.publishedSearchableFailure = null
+        vm.refresh()
+        runCurrent()
+        assertTrue(vm.state.value.searchPromptNeeded)
+        assertFalse(vm.state.value.searchVisible)
+    }
+
+    @Test
+    fun `responder a pergunta atualiza o valor mostrado no Perfil`() = runTest {
+        val vm = vm()
+        runCurrent()
+        assertFalse(vm.state.value.searchVisible)
+        vm.answerSearchPrompt(true)
+        assertTrue(vm.state.value.searchVisible)
+        vm.answerSearchPrompt(false)
+        assertFalse(vm.state.value.searchVisible)
+    }
+
+    @Test
+    fun `amigos só carregam com a aba na tela`() = runTest {
+        store.friendsFlow.value = listOf(friend("ana", "Ana", 3.0))
+        val vm = SocialViewModel(backend, backgroundScope, clock = { now }, zone = { zone })
+        runCurrent()
+        assertEquals(0, store.observeFriendsStarts)
+        assertEquals(0, store.friendsCalls)
+        assertFalse(vm.state.value.friendsLoaded)
+        assertTrue(vm.state.value.rolesLoaded) // convites e rolês sim: o marcador precisa deles
+        vm.showTab(true)
+        runCurrent()
+        assertEquals(1, store.observeFriendsStarts)
+        assertTrue(vm.state.value.friendsLoaded)
+        assertEquals(listOf("Ana"), vm.state.value.friends.map { it.name })
+    }
+
+    @Test
+    fun `mudança só de km não recarrega pelo ouvinte, mas voltar ao app depois de 60 s relê os km`() = runTest {
+        var cur = now
+        store.friendsFlow.value = listOf(friend("ana", "Ana", 3.0))
+        val vm = SocialViewModel(backend, backgroundScope, clock = { cur }, zone = { zone })
+        vm.showTab(true)
+        runCurrent()
+        assertEquals(1, store.friendsCalls)
+        store.friendsFlow.value = listOf(friend("ana", "Ana", 9.0)) // mesmos uids: o ouvinte não avisa
+        runCurrent()
+        assertEquals(1, store.friendsCalls)
+        cur += 59_000
+        vm.onForeground()
+        runCurrent()
+        assertEquals(1, store.friendsCalls) // intervalo mínimo
+        cur += 1_000
+        vm.onForeground()
+        runCurrent()
+        assertEquals(2, store.friendsCalls)
+        assertEquals("9,0 km", vm.state.value.friends.single().weekKmLabel)
+        store.friendsFlow.value = listOf(friend("ana", "Ana", 12.0))
+        vm.refresh() // "Atualizar" ignora o intervalo
+        runCurrent()
+        assertEquals("12,0 km", vm.state.value.friends.single().weekKmLabel)
+    }
+
+    @Test
+    fun `convite enviado que o outro aceitou sai da lista de enviados quando a amizade chega`() = runTest {
+        store.sentList += Invite("me", "ana", 1)
+        store.searchData += SearchHit("ana", "Ana", null, null)
+        val vm = vm()
+        runCurrent()
+        assertEquals(listOf("ana"), vm.state.value.invitesSent.map { it.uid })
+        store.sentList.clear() // ana aceitou: o convite sumiu e a amizade nasceu
+        store.friendsFlow.value = listOf(friend("ana", "Ana"))
+        runCurrent()
+        assertTrue(vm.state.value.invitesSent.isEmpty())
+    }
+
+    @Test
+    fun `bloquear um resultado da busca tira ele da lista`() = runTest {
+        store.searchData += SearchHit("zeca", "Zeca", null, null)
+        val vm = vm()
+        runCurrent()
+        vm.search("zec")
+        advanceTimeBy(400); runCurrent()
+        assertEquals(listOf("zeca"), vm.state.value.searchResults.map { it.uid })
+        vm.block("zeca")
+        runCurrent()
+        assertTrue(vm.state.value.searchResults.isEmpty())
+        assertTrue("zeca" in store.blockedUids)
+    }
+
+    @Test
+    fun `criador só renova quando falta menos de 3 dias`() = runTest {
+        val week = 7L * 24 * 3600 * 1000
+        store.rolesById["r1"] = Role("r1", "Praia", "me", listOf("me"), now + week)
+        store.rolesById["r2"] = Role("r2", "Rua", "me", listOf("me"), now + 2L * 24 * 3600 * 1000)
+        store.rolesFlow.value = store.rolesById.values.toList()
+        store.membersByRole["r1"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        store.membersByRole["r2"] = mutableListOf(Member("me", "Eu", MemberState.ACCEPTED, null, null))
+        val vm = vm()
+        runCurrent()
+        vm.openRole("r1")
+        runCurrent()
+        assertTrue(store.renewed.isEmpty())
+        vm.openRole("r2")
+        runCurrent()
+        assertEquals(listOf("r2"), store.renewed)
     }
 
     @Test
