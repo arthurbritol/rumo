@@ -33,6 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
@@ -190,6 +192,8 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             onSignIn = { overlay = Overlay.LOGIN_FROM_PROFILE.name },
                             onReopenIntro = { overlay = Overlay.INTRO.name },
                             onBack = { overlay = Overlay.NONE.name },
+                            updateCheck = vmProvider().updateCheck.collectAsStateWithLifecycle().value,
+                            onCheckUpdate = { vmProvider().checkUpdate(force = true) },
                         )
                     }
                     BackHandler { overlay = Overlay.NONE.name }
@@ -229,6 +233,9 @@ private fun HunterRoot(
     var tabIndex by rememberSaveable { mutableStateOf(0) }
     val tab = Tab.entries[tabIndex]
     val nav by vm.nav.collectAsStateWithLifecycle()
+
+    // Toda vez que o app volta para a frente (o processo pode ficar vivo por dias): procura versão nova.
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.checkUpdate() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

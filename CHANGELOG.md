@@ -5,6 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 ## [0.4.0]
 
 ### Adicionado
+- Aviso de atualização mais esperto: o app procura versão nova toda vez que volta para a frente (no máximo a cada 15 minutos) e o Perfil ganhou "Buscar atualização", com a versão instalada e o resultado da busca.
 - Conta opcional (Firebase): entrar com Google ou e-mail e senha (com confirmação de e-mail e "esqueci a senha"). O app continua funcionando sem conta.
 - Sincronização com a conta: perfil, moto, hodômetro, abastecimentos, manutenção, locais favoritos, resumo das viagens e a preferência de voz. Funciona sem internet (edita offline e sincroniza ao reconectar); a edição mais recente vence e nada é duplicado.
 - Quem usava sem conta e cria uma conta mantém os dados (mesclados, sem duplicar). Reinstalar e entrar recupera tudo, exceto o trajeto completo das viagens, que fica só no aparelho (a viagem volta no histórico, sem mapa).

@@ -62,6 +62,12 @@ data class FuelAdviceUi(
     val stationsError: String? = null,
 )
 
+/** Intervalo mínimo entre consultas automáticas de versão nova (a API do GitHub aceita 60 por hora sem chave). */
+const val UPDATE_CHECK_INTERVAL_MS = 15 * 60_000L
+
+/** Estado da busca de atualização: o Perfil mostra o resultado depois do toque em "Buscar atualização". */
+enum class UpdateCheck { IDLE, CHECKING, UP_TO_DATE, FAILED, FOUND }
+
 /** Aviso de versão nova: [progress] vai de 0 a 1 (ou -1 se o tamanho é desconhecido) durante o download. */
 data class UpdateUi(
     val update: app.hunter.nav.AppUpdate,
@@ -166,14 +172,36 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     val update: StateFlow<UpdateUi?> = _update.asStateFlow()
     private var downloadJob: Job? = null
 
-    /** Consulta o GitHub no máximo a cada 6 h (ou sempre, com [force]). Falha de rede é silenciosa. */
+    private val _updateCheck = MutableStateFlow(UpdateCheck.IDLE)
+    /** Resultado da última consulta (mostrado no Perfil, em "Buscar atualização"). */
+    val updateCheck: StateFlow<UpdateCheck> = _updateCheck.asStateFlow()
+
+    /**
+     * Consulta o GitHub toda vez que o app volta para a frente, com intervalo mínimo de [UPDATE_CHECK_INTERVAL_MS]
+     * (ou sempre, com [force], que também mostra de novo uma versão já dispensada). Falha de rede é silenciosa,
+     * a não ser numa consulta manual.
+     */
     fun checkUpdate(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (_update.value != null || (!force && now - prefs.getLong("update_checked_at", 0L) < 6 * 3_600_000L)) return
+        if (_update.value != null) { if (force) _updateCheck.value = UpdateCheck.FOUND; return }
+        if (!force && now - prefs.getLong("update_checked_at", 0L) < UPDATE_CHECK_INTERVAL_MS) return
         viewModelScope.launch {
-            val found = try { app.hunter.nav.UpdateChecker().check(updater.installedCode()) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return@launch }
+            if (force) _updateCheck.value = UpdateCheck.CHECKING
+            val found = try {
+                app.hunter.nav.UpdateChecker().check(updater.installedCode())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (force) _updateCheck.value = UpdateCheck.FAILED
+                return@launch
+            }
             prefs.edit().putLong("update_checked_at", now).apply()
-            if (found != null && (force || found.versionCode != prefs.getInt("update_skip_build", -1))) _update.value = UpdateUi(found)
+            if (found != null && (force || found.versionCode != prefs.getInt("update_skip_build", -1))) {
+                _update.value = UpdateUi(found)
+                _updateCheck.value = UpdateCheck.FOUND
+            } else {
+                _updateCheck.value = if (found != null) UpdateCheck.FOUND else UpdateCheck.UP_TO_DATE
+            }
         }
     }
 

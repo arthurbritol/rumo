@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableIntStateOf
+import app.hunter.app.UpdateCheck
 import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
 import app.hunter.app.ui.onboarding.BikeForm
@@ -69,8 +70,13 @@ fun ProfileRoute(
     onSignIn: () -> Unit,
     onReopenIntro: () -> Unit,
     onBack: () -> Unit,
+    updateCheck: UpdateCheck = UpdateCheck.IDLE,
+    onCheckUpdate: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val versionName = remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty()
+    }
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -116,7 +122,19 @@ fun ProfileRoute(
         editProfile = (state as? AuthState.SignedIn)?.let { s -> { ProfileEditForm.from(profile, s.name) } },
         profileSummary = profile?.let(::profileSummary),
         onSaveProfile = { onSaveProfile(it); saves++ },
+        versionName = versionName,
+        updateCheck = updateCheck,
+        onCheckUpdate = onCheckUpdate,
     )
+}
+
+/** Texto do resultado da busca de atualização; `null` enquanto ninguém buscou. */
+internal fun updateStatusText(s: UpdateCheck): String? = when (s) {
+    UpdateCheck.IDLE -> null
+    UpdateCheck.CHECKING -> "Buscando…"
+    UpdateCheck.UP_TO_DATE -> "Você está na versão mais recente."
+    UpdateCheck.FAILED -> "Não foi possível buscar agora. Verifique a internet."
+    UpdateCheck.FOUND -> "Há uma versão nova: veja o aviso no topo do mapa."
 }
 
 /** "Ana · Honda CG 160 (2020)" ou "Ana · moto não informada". */
@@ -213,6 +231,9 @@ fun ProfileScreen(
     editProfile: (() -> ProfileEditForm)? = null,
     profileSummary: String? = null,
     onSaveProfile: (ProfileEditForm) -> Unit = {},
+    versionName: String = "",
+    updateCheck: UpdateCheck = UpdateCheck.IDLE,
+    onCheckUpdate: () -> Unit = {},
 ) {
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -267,6 +288,20 @@ fun ProfileScreen(
 
         SectionTitle("Apresentação")
         OutlinedButton(onClick = onReopenIntro, modifier = Modifier.fillMaxWidth()) { Text("Rever apresentação") }
+
+        SectionTitle("Atualização")
+        Text(
+            if (versionName.isBlank()) "Versão desconhecida" else "Versão instalada: $versionName",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        updateStatusText(updateCheck)?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        OutlinedButton(
+            onClick = onCheckUpdate,
+            enabled = updateCheck != UpdateCheck.CHECKING,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Buscar atualização") }
 
         if (ui.showSignOut || ui.showDelete) {
             SectionTitle("Conta")
