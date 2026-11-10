@@ -1,5 +1,6 @@
 package app.hunter.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,13 +9,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,7 +34,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.hunter.app.R
 import app.hunter.app.social.FriendRow
 import app.hunter.app.social.MAX_ROLE_PEOPLE
 import app.hunter.app.social.ParticipantRow
@@ -34,10 +48,11 @@ import app.hunter.app.social.RoleDetailUi
 import app.hunter.app.social.RoleRow
 import app.hunter.app.social.budgetInputText
 import app.hunter.app.social.parseBudget
+import app.hunter.app.social.roleSubtitle
 import app.hunter.app.social.toggleSelection
 import app.hunter.social.SocialEngine
 
-/** Criar rolê: nome, meu orçamento (opcional) e até 9 amigos. */
+/** Criar rolê: nome, meu orçamento (opcional) e até 9 amigos com campos arredondados e squircles Novare. */
 @Composable
 fun CreateRoleScreen(
     friends: List<FriendRow>,
@@ -55,55 +70,142 @@ fun CreateRoleScreen(
     val limitReached = selected.size >= MAX_ROLE_PEOPLE - 1
     val canCreate = name.trim().isNotEmpty() && selected.isNotEmpty() && !budgetInvalid && !busy
 
+    val inputShape = RoundedCornerShape(14.dp)
+    val inputColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+    )
+
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        TextButton(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("‹ Voltar") }
-        Text("Criar rolê", style = MaterialTheme.typography.headlineMedium)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Voltar",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Column {
+                Text(
+                    "Novo Rolê",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp,
+                )
+                Text(
+                    "Criar rolê em grupo",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+
         OutlinedTextField(
             value = name,
             onValueChange = { if (it.length <= SocialEngine.MAX_ROLE_NAME) name = it },
             label = { Text("Nome do rolê") },
+            placeholder = { Text("Ex: Serra da Canastra, Rolê de Domingo") },
             singleLine = true,
+            shape = inputShape,
+            colors = inputColors,
             modifier = Modifier.fillMaxWidth(),
         )
+
         OutlinedTextField(
             value = budgetText,
             onValueChange = { budgetText = it },
             label = { Text("Quanto você quer gastar (R$)") },
+            placeholder = { Text("Ex: 150,00") },
             supportingText = { Text(if (budgetInvalid) "Valor inválido" else "Opcional: dá para informar depois") },
             isError = budgetInvalid,
             singleLine = true,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
-            ),
+            shape = inputShape,
+            colors = inputColors,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             modifier = Modifier.fillMaxWidth(),
         )
+
         SectionTitle("Quem vai (${selected.size} de ${MAX_ROLE_PEOPLE - 1})")
         Text(
             ROLE_LIMIT_NOTICE,
             style = MaterialTheme.typography.bodySmall,
             color = if (limitReached) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (friends.isEmpty()) Text("Você ainda não tem amigos para chamar.", style = MaterialTheme.typography.bodyMedium)
+
+        if (friends.isEmpty()) {
+            HCard {
+                Text(
+                    "Você ainda não tem amigos para chamar. Busque e adicione amigos antes de criar um rolê.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         friends.forEach { f ->
             val on = f.uid in selected
             val enabled = on || !limitReached
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = on,
-                    enabled = enabled,
-                    onCheckedChange = { selected = toggleSelection(selected.toSet(), f.uid).toList() },
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(f.name, style = MaterialTheme.typography.titleMedium)
-                    Text(f.bikeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HCard(
+                onClick = if (enabled) { { selected = toggleSelection(selected.toSet(), f.uid).toList() } } else null,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    SquircleIcon(
+                        iconRes = R.drawable.fa_user,
+                        backgroundColor = if (on) NovareAccent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                        tintColor = if (on) NovareAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = f.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = f.bikeLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Checkbox(
+                        checked = on,
+                        enabled = enabled,
+                        onCheckedChange = { selected = toggleSelection(selected.toSet(), f.uid).toList() },
+                    )
                 }
             }
         }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-        PrimaryButton("Criar rolê", { onCreate(name.trim(), selected, budget) }, enabled = canCreate)
+
+        message?.let {
+            HCard {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
+        RumoPrimaryButton(
+            text = "Criar rolê",
+            onClick = { onCreate(name.trim(), selected, budget) },
+            enabled = canCreate,
+            leadingIconRes = R.drawable.fa_users,
+        )
+
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -127,36 +229,168 @@ fun RoleDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        TextButton(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("‹ Voltar") }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Voltar",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = row?.name ?: "Detalhe do rolê",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (row != null) {
+                    Text(
+                        text = roleSubtitle(row),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         if (row == null) {
-            Text("Este rolê não existe mais.", style = MaterialTheme.typography.titleMedium)
+            HCard {
+                Text(
+                    "Este rolê não existe mais.",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             return@Column
         }
-        Text(row.name, style = MaterialTheme.typography.headlineMedium)
+
         if (offline) {
             HCard {
                 Text("Sem conexão. Mostrando o último dado carregado.", style = MaterialTheme.typography.bodyMedium)
-                OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Tentar de novo") }
+                RumoSecondaryButton(text = "Tentar de novo", onClick = onRetry)
             }
         }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+
+        message?.let {
+            HCard {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
         if (detail == null) {
-            Text("Carregando participantes…", style = MaterialTheme.typography.bodyMedium)
+            HCard {
+                Text(
+                    "Carregando participantes…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             return@Column
         }
 
-        HCard {
-            MetricRow("Média do rolê" to detail.averageLabel, "Alcance sugerido" to if (detail.hasReach) detail.reachText else "—")
-            if (!detail.hasReach) {
-                Text(detail.reachText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Resumo tabular financeiro: Média do Rolê e Alcance Sugerido em mini-cards lado a lado
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SquircleIcon(
+                        iconRes = R.drawable.fa_gas_pump,
+                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
+                        tintColor = NovareAccent,
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Text(
+                        text = "MÉDIA DO ROLÊ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = detail.averageLabel,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SquircleIcon(
+                        iconRes = R.drawable.fa_route,
+                        backgroundColor = NovareSuccess.copy(alpha = 0.15f),
+                        tintColor = NovareSuccess,
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Text(
+                        text = "ALCANCE SUGERIDO",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (detail.hasReach) detail.reachText else "—",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = if (detail.hasReach) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
-        SectionTitle("Participantes")
-        detail.participants.forEach { ParticipantCard(it, busy, onRemove) }
+        if (!detail.hasReach) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = detail.reachText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
+
+        SectionTitle("Participantes (${detail.participants.size})")
+        detail.participants.forEach { p ->
+            ParticipantCard(p, busy, onRemove)
+        }
 
         if (detail.iAccepted) {
             SectionTitle("Seu orçamento")
@@ -164,9 +398,12 @@ fun RoleDetailScreen(
         }
 
         var confirm by remember { mutableStateOf(false) }
-        OutlinedButton(onClick = { confirm = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(if (detail.isCreator) "Encerrar rolê" else "Sair do rolê", color = MaterialTheme.colorScheme.error)
-        }
+        RumoSecondaryButton(
+            text = if (detail.isCreator) "Encerrar rolê" else "Sair do rolê",
+            onClick = { confirm = true },
+            enabled = !busy,
+        )
+
         if (confirm) {
             AlertDialog(
                 onDismissRequest = { confirm = false },
@@ -185,6 +422,7 @@ fun RoleDetailScreen(
                 dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancelar") } },
             )
         }
+
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -194,43 +432,99 @@ private fun BudgetEditor(current: Double?, busy: Boolean, onSave: (Double?) -> U
     var text by rememberSaveable(current) { mutableStateOf(budgetInputText(current)) }
     val parsed = parseBudget(text)
     val invalid = text.isNotBlank() && parsed == null
-    OutlinedTextField(
-        value = text,
-        onValueChange = { text = it },
-        label = { Text("Quanto você quer gastar (R$)") },
-        supportingText = { if (invalid) Text("Valor inválido") },
-        isError = invalid,
-        singleLine = true,
-        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-            keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
-        ),
-        modifier = Modifier.fillMaxWidth(),
+
+    val inputShape = RoundedCornerShape(14.dp)
+    val inputColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
     )
-    // Vazio limpa o orçamento (só quando já havia um); valor inválido não salva.
-    val canClear = text.isBlank() && current != null
-    PrimaryButton("Salvar orçamento", { onSave(parsed) }, enabled = (parsed != null || canClear) && !busy)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Quanto você quer gastar (R$)") },
+            placeholder = { Text("Ex: 100,00") },
+            supportingText = { if (invalid) Text("Valor inválido") },
+            isError = invalid,
+            singleLine = true,
+            shape = inputShape,
+            colors = inputColors,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // Vazio limpa o orçamento (só quando já havia um); valor inválido não salva.
+        val canClear = text.isBlank() && current != null
+        RumoPrimaryButton(
+            text = "Salvar orçamento",
+            onClick = { onSave(parsed) },
+            enabled = (parsed != null || canClear) && !busy,
+        )
+    }
 }
 
 @Composable
 private fun ParticipantCard(p: ParticipantRow, busy: Boolean, onRemove: (String) -> Unit) {
     var confirm by remember { mutableStateOf(false) }
     HCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SquircleIcon(
+                iconRes = R.drawable.fa_user,
+                backgroundColor = if (p.isMe) NovareAccent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                tintColor = if (p.isMe) NovareAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Column(Modifier.weight(1f)) {
-                Text(p.name, style = MaterialTheme.typography.titleMedium)
-                Text(p.budgetLabel, style = MaterialTheme.typography.bodyMedium)
-                p.warnings.forEach {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = p.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (p.isMe) {
+                        RumoBadge(text = "Você", color = NovareAccent)
+                    } else if (p.invited) {
+                        RumoBadge(text = "Aguardando", color = NovareWarning)
+                    }
+                }
+                Text(
+                    text = p.budgetLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (p.invited) MaterialTheme.colorScheme.onSurfaceVariant else NovareAccent,
+                )
+                p.warnings.forEach { warning ->
+                    Text(
+                        text = warning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NovareError,
+                    )
                 }
             }
-            if (p.canRemove) TextButton(onClick = { confirm = true }, enabled = !busy) { Text("Remover") }
+            if (p.canRemove) {
+                TextButton(onClick = { confirm = true }, enabled = !busy) {
+                    Text("Remover", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
     }
     if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Remover ${p.name} do rolê?") },
-            confirmButton = { TextButton(onClick = { confirm = false; onRemove(p.uid) }) { Text("Remover", color = MaterialTheme.colorScheme.error) } },
+            text = { Text("Essa pessoa deixará de fazer parte deste rolê.") },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; onRemove(p.uid) }) {
+                    Text("Remover", color = MaterialTheme.colorScheme.error)
+                }
+            },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancelar") } },
         )
     }

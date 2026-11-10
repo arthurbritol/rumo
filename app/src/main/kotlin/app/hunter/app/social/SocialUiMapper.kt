@@ -27,6 +27,8 @@ data class FriendRow(
     val isLiveOnRoad: Boolean = false,
     val liveLatitude: Double? = null,
     val liveLongitude: Double? = null,
+    val liveSpeedKmh: Float? = null,
+    val liveUpdatedAtMs: Long? = null,
 )
 
 /** Convite (recebido ou enviado) com o nome da outra pessoa, ou "Alguém" quando não há nome público. */
@@ -86,6 +88,8 @@ fun friendRows(
             isLiveOnRoad = isLive,
             liveLatitude = if (isLive) loc?.latitude else null,
             liveLongitude = if (isLive) loc?.longitude else null,
+            liveSpeedKmh = if (isLive) loc?.speedKmh else null,
+            liveUpdatedAtMs = if (isLive) loc?.updatedAtMs else null,
         )
     }.sortedWith(compareByDescending<Pair<Double, FriendRow>> { it.first }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.second.name })
         .map { it.second }

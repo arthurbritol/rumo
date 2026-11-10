@@ -411,6 +411,7 @@ private fun HunterRoot(
                                         tabIndex = Tab.Map.ordinal
                                         vm.focusOn(lat, lon)
                                     },
+                                    onOpenProfile = onOpenProfile,
                                 )
                                 Tab.Pod -> PodScreen(vm)
                                 Tab.Map -> {}

@@ -230,4 +230,27 @@ class SocialUiMapperTest {
         assertEquals("Você criou · 1 pessoa", roleSubtitle(RoleRow("r", "A", null, true, false, 1, 0, false)))
         assertTrue(roleSubtitle(RoleRow("r", "A", null, true, false, 1, 0, true)).startsWith("Expirado"))
     }
+
+    @Test
+    fun `amigo na estrada mapeia velocidade e timestamp de atualizacao`() {
+        val liveLoc = app.hunter.social.LiveLocation(
+            latitude = -8.05,
+            longitude = -34.9,
+            speedKmh = 72.5f,
+            updatedAtMs = now - 15_000L,
+        )
+        val rows = friendRows(
+            friends = listOf(friend("pilot1", "Piloto 1")),
+            nowMs = now,
+            zone = zone,
+            activeFriendsOnRoad = mapOf("pilot1" to liveLoc),
+        )
+        assertEquals(1, rows.size)
+        val row = rows[0]
+        assertTrue(row.isLiveOnRoad)
+        assertEquals(-8.05, row.liveLatitude)
+        assertEquals(-34.9, row.liveLongitude)
+        assertEquals(72.5f, row.liveSpeedKmh)
+        assertEquals(now - 15_000L, row.liveUpdatedAtMs)
+    }
 }
