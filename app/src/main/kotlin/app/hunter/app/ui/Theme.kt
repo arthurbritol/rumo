@@ -17,47 +17,93 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val Ok = Color(0xFF34C77B)
-val Warn = Color(0xFFFFB020)
-val Bad = Color(0xFFFF5A5F)
-val Accent = Color(0xFFFF7A1A)
-val Info = Color(0xFF4DA3FF)
+// Tokens de estado e acento inspirados no Novare Finance
+val NovareAccent = Color(0xFFFF7A1A)
+val NovareSuccess = Color(0xFF10B981)
+val NovareWarning = Color(0xFFF59E0B)
+val NovareError = Color(0xFFEF4444)
+val NovareInfo = Color(0xFF38BDF8)
+
+// Compatibilidade retroativa para código existente
+val Ok = NovareSuccess
+val Warn = NovareWarning
+val Bad = NovareError
+val Accent = NovareAccent
+val Info = NovareInfo
+
+// Paleta Dark Midnight Navy
+val DarkMidnightBackground = Color(0xFF0B111D)
+val DarkMidnightSurface = Color(0xFF141C2B)
+val DarkMidnightSurfaceVariant = Color(0xFF1E2D44)
+val DarkMidnightOutline = Color(0xFF24344D)
+val DarkMidnightOnSurface = Color(0xFFF8FAFC)
+val DarkMidnightOnSurfaceVariant = Color(0xFF94A3B8)
+
+val DarkBackground = DarkMidnightBackground
+val DarkSurface = DarkMidnightSurface
+val DarkSurfaceVariant = DarkMidnightSurfaceVariant
+val DarkOutline = DarkMidnightOutline
+val DarkOnSurface = DarkMidnightOnSurface
+val DarkOnSurfaceVariant = DarkMidnightOnSurfaceVariant
+
+// Paleta Light Clean Slate
+val LightCleanBackground = Color(0xFFF1F5F9)
+val LightCleanSurface = Color(0xFFFFFFFF)
+val LightCleanSurfaceVariant = Color(0xFFE2E8F0)
+val LightCleanOutline = Color(0xFFCBD5E1)
+val LightCleanOnSurface = Color(0xFF0F172A)
+val LightCleanOnSurfaceVariant = Color(0xFF64748B)
+
+val LightBackground = LightCleanBackground
+val LightSurface = LightCleanSurface
+val LightSurfaceVariant = LightCleanSurfaceVariant
+val LightOutline = LightCleanOutline
+val LightOnSurface = LightCleanOnSurface
+val LightOnSurfaceVariant = LightCleanOnSurfaceVariant
 
 /** true quando o tema está escuro (o mapa usa o estilo escuro junto). */
 val LocalDark = staticCompositionLocalOf { true }
 
 private val Dark = darkColorScheme(
-    primary = Accent,
+    primary = NovareAccent,
     onPrimary = Color(0xFF1A0B00),
     primaryContainer = Color(0xFF3A1D08),
     onPrimaryContainer = Color(0xFFFFD9BF),
-    secondary = Info,
-    background = Color(0xFF0B0D10),
-    onBackground = Color(0xFFF1F3F5),
-    surface = Color(0xFF14171B),
-    onSurface = Color(0xFFF1F3F5),
-    surfaceVariant = Color(0xFF1D2227),
-    onSurfaceVariant = Color(0xFF9AA4AE),
-    outline = Color(0xFF2B3138),
-    outlineVariant = Color(0xFF242A30),
-    error = Bad,
+    secondary = NovareInfo,
+    onSecondary = Color(0xFF003355),
+    secondaryContainer = Color(0xFF0C4A6E),
+    onSecondaryContainer = Color(0xFFBAE6FD),
+    background = DarkMidnightBackground,
+    onBackground = DarkMidnightOnSurface,
+    surface = DarkMidnightSurface,
+    onSurface = DarkMidnightOnSurface,
+    surfaceVariant = DarkMidnightSurfaceVariant,
+    onSurfaceVariant = DarkMidnightOnSurfaceVariant,
+    outline = DarkMidnightOutline,
+    outlineVariant = Color(0xFF1A2436),
+    error = NovareError,
+    onError = Color.White,
 )
 
 private val Light = lightColorScheme(
-    primary = Color(0xFFE85D00),
+    primary = Color(0xFFEA580C),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFFFE3D0),
     onPrimaryContainer = Color(0xFF3A1600),
-    secondary = Color(0xFF1F6FD1),
-    background = Color(0xFFF3F1EE),
-    onBackground = Color(0xFF14171B),
-    surface = Color.White,
-    onSurface = Color(0xFF14171B),
-    surfaceVariant = Color(0xFFEAE6E1),
-    onSurfaceVariant = Color(0xFF5E666E),
-    outline = Color(0xFFD5D0C9),
-    outlineVariant = Color(0xFFE3DFD9),
-    error = Bad,
+    secondary = Color(0xFF0284C7),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE0F2FE),
+    onSecondaryContainer = Color(0xFF0369A1),
+    background = LightCleanBackground,
+    onBackground = LightCleanOnSurface,
+    surface = LightCleanSurface,
+    onSurface = LightCleanOnSurface,
+    surfaceVariant = LightCleanSurfaceVariant,
+    onSurfaceVariant = LightCleanOnSurfaceVariant,
+    outline = LightCleanOutline,
+    outlineVariant = Color(0xFFCBD5E1),
+    error = NovareError,
+    onError = Color.White,
 )
 
 private val Sans = FontFamily.SansSerif
