@@ -81,6 +81,13 @@ class FakeSocialStore : SocialStore {
     override suspend fun roles(uid: String) = rolesById.values.filter { uid in it.participants }
     override suspend fun members(roleId: String) = membersByRole[roleId].orEmpty().toList()
     override suspend fun deleteAllSocial(uid: String) {}
+    override suspend fun member(roleId: String, uid: String): Member? = membersByRole[roleId]?.firstOrNull { it.uid == uid }
+    val removedFromSearch = mutableListOf<String>()
+    override suspend fun removeFromSearch(uid: String) { removedFromSearch += uid }
+    override suspend fun renewRole(roleId: String, newExpiresAtMs: Long) {
+        rolesById[roleId]?.let { rolesById[roleId] = it.copy(expiresAtMs = newExpiresAtMs) }
+        bump()
+    }
 }
 
 class SocialEngineTest {
@@ -331,5 +338,36 @@ class SocialEngineTest {
         assertEquals(SocialResult.Refused(Refusal.NOT_CREATOR), engine.closeRole("nada"))
         engine.leaveRole("nada")
         assertEquals(emptyList(), store.closed)
+    }
+
+    @Test
+    fun `criador renova o rolê por mais 7 dias a partir de agora`() = runTest {
+        val id = roleWithAna()
+        now += 3L * 24 * 3600 * 1000
+        assertEquals(SocialResult.Ok, engine.renewRole(id))
+        assertEquals(now + sevenDaysMs, store.rolesById.getValue(id).expiresAtMs)
+    }
+
+    @Test
+    fun `renovar sem ser criador ou rolê ausente devolve NOT_CREATOR`() = runTest {
+        val id = roleWithAna()
+        val before = store.rolesById.getValue(id).expiresAtMs
+        val ana = SocialEngine(store, "ana", clock = { now + 1000 }, idGen = { "r-ana" })
+        assertEquals(SocialResult.Refused(Refusal.NOT_CREATOR), ana.renewRole(id))
+        assertEquals(SocialResult.Refused(Refusal.NOT_CREATOR), engine.renewRole("nada"))
+        assertEquals(before, store.rolesById.getValue(id).expiresAtMs)
+    }
+
+    @Test
+    fun `closeExpiredRoles encerra só os vencidos em que sou criador`() = runTest {
+        users("me", "ana")
+        store.befriend("me", "ana")
+        store.rolesById["velho"] = Role("velho", "Velho", "me", listOf("me", "ana"), now - 1)
+        store.rolesById["vencendo"] = Role("vencendo", "Agora", "me", listOf("me"), now)
+        store.rolesById["novo"] = Role("novo", "Novo", "me", listOf("me"), now + 1)
+        store.rolesById["dela"] = Role("dela", "Dela", "ana", listOf("ana", "me"), now - 1)
+        engine.closeExpiredRoles()
+        assertEquals(setOf("velho", "vencendo"), store.closed.toSet())
+        assertEquals(setOf("novo", "dela"), store.rolesById.keys)
     }
 }

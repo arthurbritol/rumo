@@ -82,6 +82,11 @@ class FirestoreSocialStore(
         ref("atividade/$uid").set(activityToMap(a)).await()
     }
 
+    /** Apaga `busca/{uid}` (as regras permitem ao dono; apagar documento inexistente é aceito). */
+    override suspend fun removeFromSearch(uid: String) {
+        ref("busca/$uid").delete().await()
+    }
+
     /**
      * Consulta `busca` ordenada por `displayNameLower` com `startAt(prefixo)`/`endAt(prefixo + U+F8FF)`. As regras
      * só aceitam `limit` <= 20: pedidos maiores viram páginas sequenciais de 20 (`startAfter` do último
@@ -312,6 +317,11 @@ class FirestoreSocialStore(
         batch.commit().await()
     }
 
+    /** Só o criador: atualiza `expiraEm` como `Timestamp` (continua elegível ao TTL do Firestore). */
+    override suspend fun renewRole(roleId: String, newExpiresAtMs: Long) {
+        ref("roles/$roleId").update("expiraEm", millisToTimestamp(newExpiresAtMs)).await()
+    }
+
     override suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?) {
         ref("roles/$roleId/membros/$uid").update(figuresUpdate(budget, costPerKm, clock())).await()
     }
@@ -321,6 +331,12 @@ class FirestoreSocialStore(
 
     override suspend fun members(roleId: String): List<Member> =
         db.collection("roles/$roleId/membros").fetch().documents.mapNotNull { mapToMember(it.id, it.map()) }
+
+    /** `get` do próprio documento de membro (as regras o permitem ao dono, convidado ou aceito). */
+    override suspend fun member(roleId: String, uid: String): Member? {
+        val d = ref("roles/$roleId/membros/$uid").get(Source.SERVER).await()
+        return if (d.exists()) mapToMember(uid, d.map()) else null
+    }
 
     // ---------------------------------------------------------------- apagar a conta
 

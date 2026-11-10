@@ -10,6 +10,9 @@ import app.hunter.app.account.FirebaseAuthGateway
 import app.hunter.app.account.SharedPrefsPendingDeletionFlag
 import app.hunter.app.data.AppDatabase
 import app.hunter.app.social.FirestoreSocialStore
+import app.hunter.app.social.SearchPref
+import app.hunter.app.social.SocialGraph
+import app.hunter.app.social.finishedSlices
 import app.hunter.app.sync.FirestoreRemoteStore
 import app.hunter.app.sync.PerUserRemoteStore
 import app.hunter.app.sync.RoomLocalStore
@@ -18,12 +21,16 @@ import app.hunter.app.sync.SyncScheduler
 import app.hunter.app.sync.SyncTrigger
 import app.hunter.app.account.defaultProfileFor
 import app.hunter.app.sync.ProfilePrefs
+import app.hunter.model.FuelMath
 import app.hunter.sync.DeletionPendingException
 import app.hunter.sync.SyncEngine
 import app.hunter.sync.UserProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.MemoryCacheSettings
@@ -95,6 +102,9 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
             ProfilePrefs.writeDirty(prefs, created)
             scheduler.requestSync()
         }
+        // Uma sincronização concluída segue todo fim de viagem, abastecimento, hodômetro e edição de perfil:
+        // é o momento de publicar o perfil e os km da semana (respeita o intervalo mínimo; nunca bloqueia).
+        social.publishSoon()
     }
 
     /** "Editar perfil": grava sujo (numa escrita só) e pede sincronização. */
@@ -104,8 +114,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     }
 
     /** Só vira verdadeiro depois de concluir uma exclusão interrompida: nenhuma sincronização antes disso. */
-    @Volatile
-    private var ready = false
+    private val ready = MutableStateFlow(false)
 
     private fun signedUid(): String? = (gateway.state.value as? AuthState.SignedIn)?.uid
 
@@ -122,7 +131,28 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
             }
         },
         onSynced = ::afterSync,
-        isSignedIn = { ready && signedUid() != null && flag.uid() == null },
+        isSignedIn = ::syncAllowed,
+    )
+
+    /** Mesmo critério do agendador: depois da retomada da exclusão, com conta logada e sem exclusão pendente. */
+    private fun syncAllowed(): Boolean = ready.value && signedUid() != null && flag.uid() == null
+
+    /**
+     * Amigos e rolês. Nada social roda sem Firebase, sem conta ou com exclusão pendente ([syncAllowed]); o
+     * [FirestoreSocialStore] só é criado na primeira vez que o social precisa dele.
+     */
+    val social = SocialGraph(
+        available = available,
+        allowed = ::syncAllowed,
+        currentUid = ::signedUid,
+        uid = combine(gateway.state, ready) { s, r -> if (r) (s as? AuthState.SignedIn)?.uid else null }
+            .stateIn(scope, SharingStarted.Eagerly, null),
+        storeProvider = { FirestoreSocialStore(firestore) },
+        readProfile = { ProfilePrefs.read(prefs) },
+        readTrips = { finishedSlices(database.syncDao().finishedTrips()) },
+        readCostPerKm = { FuelMath.summarize(database.syncDao().fuelups().map { it.toModel() }).avgCostPerKm },
+        searchPrefs = SearchPref(prefs),
+        scope = scope,
     )
 
     /** Há algo ainda não enviado à nuvem (a tela de perfil bloqueia "Sair" enquanto houver). */
@@ -147,8 +177,9 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
             } catch (e: Exception) {
                 Log.w("Rumo/sync", "Falha ao retomar exclusão", e)
             }
-            ready = true
+            ready.value = true
             scheduler.requestSync() // nada a fazer se for visitante
+            social.publishSoon() // idem: só publica com conta logada e sem exclusão pendente
         }
         // Entrou numa conta (login novo ou sessão restaurada): sincroniza.
         scope.launch { gateway.state.collect { if (it is AuthState.SignedIn) scheduler.requestSync() } }

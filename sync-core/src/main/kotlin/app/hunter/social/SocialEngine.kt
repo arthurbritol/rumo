@@ -127,4 +127,18 @@ class SocialEngine(
         store.closeRole(roleId)
         SocialResult.Ok
     }
+
+    /** Só o criador renova: a nova validade é agora + 7 dias. Rolê ausente ou de outro criador devolve NOT_CREATOR. */
+    suspend fun renewRole(roleId: String): SocialResult = mutex.withLock {
+        val role = store.roles(me).firstOrNull { it.id == roleId }
+        if (role == null || role.creatorUid != me) return SocialResult.Refused(Refusal.NOT_CREATOR)
+        store.renewRole(roleId, clock() + ROLE_TTL_MS)
+        SocialResult.Ok
+    }
+
+    /** Encerra (apaga membros e rolê) os rolês vencidos em que sou o criador; o TTL do Firestore não apaga os membros. */
+    suspend fun closeExpiredRoles() = mutex.withLock {
+        val now = clock()
+        store.roles(me).filter { it.creatorUid == me && it.expiresAtMs <= now }.forEach { store.closeRole(it.id) }
+    }
 }

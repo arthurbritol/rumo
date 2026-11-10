@@ -35,6 +35,9 @@ interface SocialStore {
     suspend fun publishProfile(p: PublicProfile)
     suspend fun publishActivity(uid: String, a: Activity)
 
+    /** Apaga o índice de busca de [uid] (quem não quer aparecer na busca por nome); o perfil público continua. */
+    suspend fun removeFromSearch(uid: String)
+
     /** Perfis pesquisáveis cuja chave [SearchKey] do nome começa com [prefixLower], no máximo [limit]. */
     suspend fun search(prefixLower: String, limit: Int): List<SearchHit>
 
@@ -68,9 +71,18 @@ interface SocialStore {
     suspend fun acceptRole(roleId: String, uid: String)
     suspend fun leaveRole(roleId: String, uid: String)
     suspend fun closeRole(roleId: String)
+
+    /** O criador estende a validade do rolê: grava o novo instante de expiração. */
+    suspend fun renewRole(roleId: String, newExpiresAtMs: Long)
     suspend fun setMemberFigures(roleId: String, uid: String, budget: Double?, costPerKm: Double?)
     suspend fun roles(uid: String): List<Role>
     suspend fun members(roleId: String): List<Member>
+
+    /**
+     * Só o documento de membro de [uid] (nulo se não existe). Diferente de [members], vale também para quem ainda
+     * está só convidado (as regras só deixam listar os membros a quem já aceitou).
+     */
+    suspend fun member(roleId: String, uid: String): Member?
 
     suspend fun deleteAllSocial(uid: String)
 }
