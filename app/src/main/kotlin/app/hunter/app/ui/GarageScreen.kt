@@ -3,37 +3,33 @@ package app.hunter.app.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import app.hunter.app.OfflineArea
-import app.hunter.app.OfflineMaps
-import app.hunter.app.ReminderWorker
-import app.hunter.model.GeoBox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,57 +43,260 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.HunterViewModel
 import app.hunter.app.MaintenanceRow
+import app.hunter.app.OfflineArea
+import app.hunter.app.OfflineMaps
+import app.hunter.app.R
+import app.hunter.app.ReminderWorker
+import app.hunter.app.sync.ProfilePrefs
 import app.hunter.model.DueState
 import app.hunter.model.FuelMath
 import app.hunter.model.FuelSegment
 import app.hunter.model.Fuelup
+import app.hunter.model.GeoBox
+import app.hunter.podble.PodPhase
 import kotlin.math.max
 
 @Composable
 fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
+    val context = LocalContext.current
     val odo by vm.odometerKm.collectAsStateWithLifecycle()
     val attention by vm.attention.collectAsStateWithLifecycle()
+    val summary by vm.fuelSummary.collectAsStateWithLifecycle()
+    val tank by vm.tankLiters.collectAsStateWithLifecycle()
+    val pod by vm.pod.collectAsStateWithLifecycle()
+
     var section by rememberSaveable { mutableStateOf(0) }
     var editOdo by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Garagem", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-            IconButton(onClick = onOpenProfile) { Icon(Icons.Default.AccountCircle, contentDescription = "Perfil e conta") }
-        }
-
-        HCard {
-            Text("Hodômetro da moto", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                Text(fmtNum(odo, 0), style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
-                Text(" km", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 8.dp).weight(1f))
-                TextButton(onClick = { editOdo = true }) { Text("Ajustar") }
+        // 1. Topo: Cabeçalho com Nome da Moto, badge Pod com fa_bluetooth e Avatar do Perfil
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Garagem",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                val bikeModel = remember {
+                    val p = ProfilePrefs.read(context.getSharedPreferences("app", 0))
+                    listOfNotNull(p?.brand, p?.model).joinToString(" ").ifEmpty { "Hunter 350" }
+                }
+                Text(
+                    bikeModel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                "Cada viagem gravada soma à quilometragem. Se o painel divergir, ajuste aqui.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+
+            // Badge de status do Pod com fa_bluetooth
+            val podConnected = pod.phase == PodPhase.CONNECTED
+            val podColor = if (podConnected) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+            val podBg = if (podConnected) NovareSuccess.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+            val podText = when (pod.phase) {
+                PodPhase.CONNECTED -> "Pod ativo"
+                PodPhase.CONNECTING -> "Conectando"
+                PodPhase.SCANNING -> "Buscando"
+                PodPhase.AWAITING_PIN -> "Pareando"
+                PodPhase.IDLE -> if (pod.pairedName != null) "Pod pareado" else "Pod offline"
+            }
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = podBg,
+                border = BorderStroke(0.5.dp, podColor.copy(alpha = 0.35f)),
+                modifier = Modifier.padding(end = 4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.fa_bluetooth),
+                        contentDescription = null,
+                        tint = podColor,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        text = podText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = podColor,
+                    )
+                }
+            }
+
+            IconButton(onClick = onOpenProfile) {
+                Icon(
+                    painter = painterResource(R.drawable.fa_user),
+                    contentDescription = "Perfil e conta",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 2. Cockpit Fixo Hero: Hodômetro em destaque
+        HeroMetricCard(
+            title = "Hodômetro",
+            unit = "km",
+            value = fmtNum(odo, 0),
+            actionText = "Ajustar",
+            onAction = { editOdo = true },
+        )
+
+        // Grid 2 colunas: Autonomia e Revisão
+        val rangeKm = FuelMath.rangeKm(summary.avgKmPerL, tank)
+        val rangeValue = rangeKm?.let { fmtNum(it, 0) } ?: "—"
+        val rangeUnit = if (rangeKm != null) " km" else ""
+        val avgSubtext = summary.avgKmPerL?.let { "${fmtNum(it)} km/l" } ?: "Sem dados de km/l"
+
+        val firstAtt = attention.firstOrNull()
+        val revValue = when {
+            firstAtt == null -> "Em dia"
+            firstAtt.status.remainingKm != null -> {
+                val rk = firstAtt.status.remainingKm!!
+                if (rk <= 0) "Venceu" else "${fmtNum(rk, 0)} km"
+            }
+            firstAtt.status.remainingDays != null -> {
+                val rd = firstAtt.status.remainingDays!!
+                if (rd <= 0) "Venceu" else "$rd dias"
+            }
+            else -> "Atenção"
+        }
+        val revSubtext = when {
+            firstAtt == null -> "Tudo em dia"
+            else -> firstAtt.item.name
+        }
+        val revColor = when {
+            firstAtt == null -> NovareSuccess
+            firstAtt.status.state == DueState.OVERDUE -> NovareError
+            else -> NovareWarning
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Card 1: Autonomia
+            HCard(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SquircleIcon(
+                        iconRes = R.drawable.fa_gas_pump,
+                        backgroundColor = NovareAccent.copy(alpha = 0.15f),
+                        tintColor = NovareAccent,
+                    )
+                    Text(
+                        "AUTONOMIA",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = rangeValue,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (rangeUnit.isNotEmpty()) {
+                        Text(
+                            text = rangeUnit,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = NovareAccent,
+                            modifier = Modifier.padding(bottom = 3.dp),
+                        )
+                    }
+                }
+                Text(
+                    text = avgSubtext,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+
+            // Card 2: Revisão
+            HCard(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SquircleIcon(
+                        iconRes = R.drawable.fa_wrench,
+                        backgroundColor = revColor.copy(alpha = 0.15f),
+                        tintColor = revColor,
+                    )
+                    Text(
+                        "REVISÃO",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = revValue,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+                Text(
+                    text = revSubtext,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+
+        // 3. Seções alternadas (Chips)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             SelectChip("Combustível", section == 0, { section = 0 })
             SelectChip(if (attention.isNotEmpty()) "Manutenção (${attention.size})" else "Manutenção", section == 1, { section = 1 })
             SelectChip("Mapas offline", section == 2, { section = 2 })
         }
 
+        // 4. Conteúdo da seção selecionada
         when (section) {
             0 -> FuelSection(vm)
             1 -> MaintenanceSection(vm)
             else -> OfflineSection(vm)
         }
-        Box(Modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp))
     }
 
     if (editOdo) NumberDialog("Hodômetro do painel (km)", fmtNum(odo, 0), { editOdo = false }) { vm.setOdometer(it); editOdo = false }
@@ -115,7 +314,11 @@ private fun FuelSection(vm: HunterViewModel) {
     var deleting by remember { mutableStateOf<Fuelup?>(null) }
     var editTank by remember { mutableStateOf(false) }
 
-    PrimaryButton("Registrar abastecimento", { adding = true })
+    RumoPrimaryButton(
+        text = "Registrar abastecimento",
+        onClick = { adding = true },
+        leadingIconRes = R.drawable.fa_gas_pump,
+    )
 
     HCard {
         Text("Consumo médio", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -152,15 +355,35 @@ private fun FuelSection(vm: HunterViewModel) {
         val seg = summary.segments.firstOrNull { it.toKm == f.odometerKm }
         HCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                SquircleIcon(
+                    iconRes = R.drawable.fa_gas_pump,
+                    backgroundColor = NovareAccent.copy(alpha = 0.12f),
+                    tintColor = NovareAccent,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         "${fmtDate(f.dateMs)} · ${fmtKm(f.odometerKm, 0)}" + if (!f.fullTank) " · parcial" else "",
                         style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                    Text("${fmtNum(f.liters, 2)} L · ${fmtMoney(f.totalCost)} · ${fmtMoney(f.pricePerLiter)}/L", style = MaterialTheme.typography.bodyMedium)
-                    seg?.let { Text("${fmtNum(it.kmPerL)} km/l · ${fmtMoney(it.costPerKm)}/km", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge) }
+                    Text(
+                        "${fmtNum(f.liters, 2)} L · ${fmtMoney(f.totalCost)} · ${fmtMoney(f.pricePerLiter)}/L",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    seg?.let {
+                        Text(
+                            "${fmtNum(it.kmPerL)} km/l · ${fmtMoney(it.costPerKm)}/km",
+                            color = NovareAccent,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
-                TextButton(onClick = { deleting = f }) { Text("Excluir", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                TextButton(onClick = { deleting = f }) {
+                    Text("Excluir", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
@@ -259,12 +482,23 @@ private fun MaintenanceSection(vm: HunterViewModel) {
     }
     if (!notifOk) {
         HCard {
-            Text("Receber lembretes", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SquircleIcon(
+                    iconRes = R.drawable.fa_bell,
+                    backgroundColor = NovareAccent.copy(alpha = 0.15f),
+                    tintColor = NovareAccent,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+                Text("Receber lembretes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
             Text(
                 "O app avisa por notificação quando um item estiver perto de vencer ou vencer (verifica a cada 12 horas).",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            PrimaryButton("Ativar lembretes", askNotif)
+            RumoPrimaryButton("Ativar lembretes", askNotif, leadingIconRes = R.drawable.fa_bell)
         }
     } else {
         Text(
@@ -282,7 +516,15 @@ private fun MaintenanceSection(vm: HunterViewModel) {
         }
         HCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(row.item.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                SquircleIcon(
+                    iconRes = R.drawable.fa_wrench,
+                    backgroundColor = color.copy(alpha = 0.15f),
+                    tintColor = color,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(row.item.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
                 Pill(label, color)
             }
             val used = usedFraction(row)
@@ -294,7 +536,7 @@ private fun MaintenanceSection(vm: HunterViewModel) {
             }
         }
     }
-    SecondaryButton("Adicionar item", { addItem = true })
+    RumoSecondaryButton("Adicionar item", { addItem = true }, leadingIconRes = R.drawable.fa_plus)
     Text(
         "Os intervalos iniciais são sugestões genéricas: confira com o manual da Hunter 350.",
         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -326,7 +568,15 @@ private fun OfflineSection(vm: HunterViewModel) {
     LaunchedEffect(Unit) { OfflineMaps.refresh(context) }
 
     HCard {
-        Text("Mapas sem internet", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SquircleIcon(
+                iconRes = R.drawable.fa_map_location_dot,
+                backgroundColor = NovareInfo.copy(alpha = 0.15f),
+                tintColor = NovareInfo,
+                modifier = Modifier.padding(end = 12.dp),
+            )
+            Text("Mapas sem internet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
         Text(
             "Baixe uma região para o mapa continuar aparecendo sem sinal na estrada. Atenção: a busca de endereços e " +
                 "o cálculo de rotas ainda precisam de internet; uma rota já iniciada segue funcionando.",
@@ -341,14 +591,15 @@ private fun OfflineSection(vm: HunterViewModel) {
     val here = live
     val box = here?.let { GeoBox.around(it.latitude, it.longitude, radius.toDouble()) }
     val mb = box?.let { OfflineMaps.estimateMb(it) }
-    PrimaryButton(
-        if (mb != null) "Baixar região (≈ $mb MB)" else "Aguardando sua localização",
-        {
+    RumoPrimaryButton(
+        text = if (mb != null) "Baixar região (≈ $mb MB)" else "Aguardando sua localização",
+        onClick = {
             if (box != null) {
                 OfflineMaps.download(context, "Perto de mim · $radius km · ${fmtDate(System.currentTimeMillis())}", box)
             }
         },
         enabled = box != null && (mb ?: 0) <= MAX_DOWNLOAD_MB,
+        leadingIconRes = R.drawable.fa_map_location_dot,
     )
     if (box == null) Text("Abra a aba Mapa uma vez para obter sua localização.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
@@ -357,11 +608,13 @@ private fun OfflineSection(vm: HunterViewModel) {
         SectionTitle("Rota atual")
         val corridor = GeoBox.enclosing(route.shape.map { it.lat to it.lon }, padKm = 8.0)
         val cmb = OfflineMaps.estimateMb(corridor)
-        SecondaryButton(
-            if (cmb <= MAX_DOWNLOAD_MB) "Baixar a região da rota (≈ $cmb MB)" else "Rota grande demais (≈ $cmb MB)",
-            {
+        RumoSecondaryButton(
+            text = if (cmb <= MAX_DOWNLOAD_MB) "Baixar a região da rota (≈ $cmb MB)" else "Rota grande demais (≈ $cmb MB)",
+            onClick = {
                 if (cmb <= MAX_DOWNLOAD_MB) OfflineMaps.download(context, "Rota para ${nav.destination?.name ?: "destino"}", corridor)
             },
+            enabled = cmb <= MAX_DOWNLOAD_MB,
+            leadingIconRes = R.drawable.fa_route,
         )
     }
 
@@ -374,14 +627,22 @@ private fun OfflineSection(vm: HunterViewModel) {
     areas.forEach { a ->
         HCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(a.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                SquircleIcon(
+                    iconRes = R.drawable.fa_map_location_dot,
+                    backgroundColor = (if (a.complete) Ok else Accent).copy(alpha = 0.15f),
+                    tintColor = if (a.complete) Ok else Accent,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(a.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (a.complete) "${fmtNum(a.bytes / 1_048_576.0, 0)} MB" else "${(a.fraction * 100).toInt()}% · ${fmtNum(a.bytes / 1_048_576.0, 0)} MB",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (a.complete) Pill("Pronto", Ok)
             }
             if (!a.complete) ProgressBar(a.fraction, MaterialTheme.colorScheme.primary)
-            Text(
-                if (a.complete) "${fmtNum(a.bytes / 1_048_576.0, 0)} MB" else "${(a.fraction * 100).toInt()}% · ${fmtNum(a.bytes / 1_048_576.0, 0)} MB",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             a.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
             TextButton(onClick = { deleting = a }) { Text("Excluir", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
