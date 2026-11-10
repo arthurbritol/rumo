@@ -59,6 +59,7 @@ class FakeSocialStore : SocialStore {
         searchCalls++
         return searchData.filter { SearchKey.normalize(it.displayName).startsWith(prefixLower) }.take(limit)
     }
+    override suspend fun searchEntry(uid: String): SearchHit? { check(); return searchData.firstOrNull { it.uid == uid } }
     override suspend fun sendInvite(from: String, to: String) { check(); sentInvites += from to to; sentList += Invite(from, to, 0L) }
     override suspend fun cancelInvite(from: String, to: String) { check(); sentList.removeAll { it.fromUid == from && it.toUid == to } }
     override suspend fun acceptInvite(from: String, to: String) {

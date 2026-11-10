@@ -41,6 +41,9 @@ interface SocialStore {
     /** Perfis pesquisáveis cuja chave [SearchKey] do nome começa com [prefixLower], no máximo [limit]. */
     suspend fun search(prefixLower: String, limit: Int): List<SearchHit>
 
+    /** Entrada de busca de [uid] (nome e moto), ou nulo se a pessoa não aparece na busca; serve para dar nome a um convite. */
+    suspend fun searchEntry(uid: String): SearchHit?
+
     suspend fun sendInvite(from: String, to: String)
     suspend fun cancelInvite(from: String, to: String)
 

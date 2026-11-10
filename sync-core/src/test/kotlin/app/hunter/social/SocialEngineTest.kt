@@ -82,6 +82,8 @@ class FakeSocialStore : SocialStore {
     override suspend fun members(roleId: String) = membersByRole[roleId].orEmpty().toList()
     override suspend fun deleteAllSocial(uid: String) {}
     override suspend fun member(roleId: String, uid: String): Member? = membersByRole[roleId]?.firstOrNull { it.uid == uid }
+    override suspend fun searchEntry(uid: String): SearchHit? =
+        profiles[uid]?.takeIf { it.searchable }?.let { SearchHit(it.uid, it.displayName, it.brand, it.model) }
     val removedFromSearch = mutableListOf<String>()
     override suspend fun removeFromSearch(uid: String) { removedFromSearch += uid }
     override suspend fun renewRole(roleId: String, newExpiresAtMs: Long) {

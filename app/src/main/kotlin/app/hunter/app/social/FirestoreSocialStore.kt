@@ -108,6 +108,12 @@ class FirestoreSocialStore(
         return hits
     }
 
+    /** `get` de `busca/{uid}` (qualquer conta lê; documento ausente = pessoa fora da busca). */
+    override suspend fun searchEntry(uid: String): SearchHit? {
+        val d = ref("busca/$uid").get(Source.SERVER).await()
+        return if (d.exists()) mapToSearchHit(uid, d.map()) else null
+    }
+
     // ---------------------------------------------------------------- convites
 
     override suspend fun sendInvite(from: String, to: String) {
