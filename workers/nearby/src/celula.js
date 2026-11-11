@@ -52,14 +52,18 @@ export class Celula {
       presence: null,
     });
     if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now() + ALARME_MS);
+      await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
     return new Response(null, { status: 101, webSocket: cliente });
   }
 
   async webSocketMessage(ws, mensagem) {
     const a = ws.deserializeAttachment();
-    if (this.expirou(a)) return ws.close(1008, "token expirado");
+    if (this.expirou(a)) {
+      this.fechar(ws, "token expirado");
+      this.mudou();
+      return;
+    }
 
     const r = parseClientMessage(mensagem);
     if (!r.ok) return this.erro(ws, "mensagem_invalida");
@@ -76,7 +80,8 @@ export class Celula {
       this.mudou();
     } else if (msg.t === "posicao") {
       try {
-        this.presence.update(a.connId, msg);
+        // Posição antes do piso de 10 s é ignorada em silêncio (sem guardar nem notificar).
+        if (!this.presence.update(a.connId, msg)) return;
       } catch (e) {
         if (e.message === "posição implausível") return this.erro(ws, "posicao_implausivel");
         if (e.message === "conexão não está procurando") return this.erro(ws, "nao_procurando");
@@ -110,14 +115,14 @@ export class Celula {
     }
     this.mudou();
     if (this.ctx.getWebSockets().length > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + ALARME_MS);
+      await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
   }
 
   // --- auxiliares ---
 
   expirou(a) {
-    return a?.exp != null && Date.now() > a.exp * 1000 + FOLGA_EXP_MS;
+    return a?.exp != null && this.now() > a.exp * 1000 + FOLGA_EXP_MS;
   }
 
   socketDe(connId) {
@@ -185,10 +190,13 @@ export class Celula {
       if (falta <= 0) {
         this.pendentes.delete(connId);
         this.ultimoEnvio.set(connId, agora);
-        this.presence.neighborsFor(connId).then((lista) => {
-          const ws = this.socketDe(connId);
-          if (ws) this.enviar(ws, lista);
-        });
+        this.presence
+          .neighborsFor(connId)
+          .then((lista) => {
+            const ws = this.socketDe(connId);
+            if (ws) this.enviar(ws, lista);
+          })
+          .catch((e) => console.error("falha ao montar a lista de vizinhos", e));
       } else if (espera === null || falta < espera) {
         espera = falta;
       }

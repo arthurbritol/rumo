@@ -119,7 +119,7 @@ describe("Celula", () => {
     a.enviar(ROLE);
     b.enviar(ROLE);
     b.enviar(posMsg(BASE.lat + 0.01, BASE.lon));
-    for (let i = 0; i < 10; i++) a.enviar(posMsg(BASE.lat + i * 1e-5, BASE.lon));
+    for (let i = 0; i < 10; i++) a.enviar(ROLE); // cada procurar muda a presença
     await dormir(800);
     expect(vizinhos(b).length).toBeLessThanOrEqual(1);
     // ...mas o estado final chega depois (envio pendente)
@@ -185,10 +185,60 @@ describe("Celula", () => {
 
     // E de ponta a ponta: despeja a instância da memória e o serviço continua funcionando.
     await evictDurableObject(stub);
-    a.enviar(posMsg(BASE.lat + 0.0001, BASE.lon));
+    a.enviar(ROLE); // muda a presença (posições novas dentro de 10 s seriam ignoradas)
     const antes = vizinhos(b).length;
     expect(await esperar(() => vizinhos(b).length > antes, 4000)).toBe(true);
     expect(ultimaLista(b).length).toBe(1);
+  });
+
+  it("posição antes do piso de 10 s é ignorada em silêncio e não notifica ninguém", async () => {
+    const stub = novaCelula();
+    const a = await conectar(stub, "uid-a");
+    const b = await conectar(stub, "uid-b");
+    a.enviar(ROLE);
+    b.enviar(ROLE);
+    a.enviar(posMsg(BASE.lat, BASE.lon));
+    b.enviar(posMsg(BASE.lat + 0.01, BASE.lon));
+    expect(await esperar(() => ultimaLista(a)?.length === 1)).toBe(true);
+    await dormir(2300); // deixa os envios pendentes saírem
+    const antes = vizinhos(b).length;
+    a.enviar(posMsg(BASE.lat + 0.0001, BASE.lon));
+    await dormir(2500);
+    expect(vizinhos(b).length).toBe(antes);
+    expect(a.recebidas.some((m) => m.t === "erro")).toBe(false);
+  }, 15000);
+
+  it("mensagem com token vencido fecha pelo mesmo caminho e avisa os outros", async () => {
+    const stub = novaCelula();
+    const agora = Math.floor(Date.now() / 1000);
+    const a = await conectar(stub, "uid-a", { "x-rumo-exp": String(agora + 100) });
+    const b = await conectar(stub, "uid-b", { "x-rumo-exp": String(agora + 5000) });
+    a.enviar(ROLE);
+    b.enviar(ROLE);
+    a.enviar(posMsg(BASE.lat, BASE.lon));
+    b.enviar(posMsg(BASE.lat + 0.01, BASE.lon));
+    expect(await esperar(() => ultimaLista(a)?.length === 1 && ultimaLista(b)?.length === 1)).toBe(true);
+
+    await runInDurableObject(stub, (inst) => {
+      const t = Date.now();
+      inst.now = () => t + 450_000; // passou de exp + 300 s para o "a", não para o "b"
+    });
+    a.enviar(ROLE);
+    expect(await esperar(() => a.fechou)).toBe(true);
+    expect(await esperar(() => ultimaLista(b)?.length === 0, 3000)).toBe(true);
+    expect(b.fechou).toBe(false);
+  });
+
+  it("falha ao montar a lista não vira rejeição sem tratamento", async () => {
+    const stub = novaCelula();
+    const a = await conectar(stub, "uid-a");
+    await runInDurableObject(stub, (inst) => {
+      inst.presence.neighborsFor = () => Promise.reject(new Error("falha de teste"));
+    });
+    a.enviar(ROLE);
+    await dormir(300);
+    expect(a.fechou).toBe(false);
+    expect(vizinhos(a).length).toBe(0);
   });
 
   it("sem NEARBY_SECRET a Celula falha com mensagem clara", async () => {

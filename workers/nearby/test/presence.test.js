@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Presence } from "../src/presence.js";
-import { distanceM } from "../src/geo.js";
+import { applyOffset, distanceM, fuzzOffset } from "../src/geo.js";
 
 const SECRET = "segredo-de-teste";
 const ROLE = { ritmo: "moderado", distancia: "50a150", parada: "cafe", raioKm: 5 };
@@ -10,9 +10,9 @@ const BASE = { lat: -20.3, lon: -40.3 };
 const norte = (km) => ({ lat: BASE.lat + km / 111.32, lon: BASE.lon });
 const pos = (p, extra = {}) => ({ lat: p.lat, lon: p.lon, rumo: 90, vel: 40, ...extra });
 
-function criar(t0 = Date.parse("2026-11-11T12:00:00Z")) {
+function criar(t0 = Date.parse("2026-11-11T12:00:00Z"), extra = { minUpdateMs: 0 }) {
   const relogio = { t: t0 };
-  const p = new Presence({ now: () => relogio.t, secret: SECRET });
+  const p = new Presence({ now: () => relogio.t, secret: SECRET, ...extra });
   return { p, relogio };
 }
 
@@ -94,13 +94,97 @@ test("raio: 6 km fora com raioKm 5, 4 km dentro, 6 km entra com raioKm 10", asyn
   assert.equal((await p.neighborsFor("a")).length, 2);
 });
 
-test("a distância usa a posição real, não a aproximada", async () => {
+// Posição aproximada (a que os clientes veem) de um uid no dia do relógio de teste.
+async function aproximada(uid, real, dia = "2026-11-11") {
+  const off = await fuzzOffset(uid, dia, SECRET);
+  return applyOffset(real.lat, real.lon, off);
+}
+
+test("pertencer ao raio compara a posição real de quem pergunta com a posição APROXIMADA do alvo", async () => {
+  // Acha um uid cujo desvio aproxima o alvo (real dentro, aproximada fora) e outro que afasta.
+  const real = norte(5);
+  let uidFora = null;
+  let uidDentro = null;
+  for (let i = 0; i < 200 && !(uidFora && uidDentro); i++) {
+    const uid = `uid-${i}`;
+    const d = distanceM(BASE, await aproximada(uid, real));
+    if (d > 5200 && !uidFora) uidFora = uid; // real 5000 m (dentro de 5,1 km)? ver abaixo
+    if (d < 4800 && !uidDentro) uidDentro = uid;
+  }
+  assert.ok(uidFora && uidDentro);
+
+  // raio de 5,1 km: o alvo "fora" tem real a 5,0 km (dentro), mas aproximada além de 5,2 km.
+  for (const [uid, esperado] of [[uidFora, false], [uidDentro, true]]) {
+    const { p } = criar();
+    p.join("a", "uid-a", { ...ROLE, raioKm: 5.1 });
+    p.join("b", uid, ROLE);
+    p.update("a", pos(BASE));
+    p.update("b", pos(real));
+    assert.equal((await p.neighborsFor("a")).length, esperado ? 1 : 0, uid);
+  }
+});
+
+test("varrer a posição de quem pergunta só vira a lista na distância da posição aproximada", async () => {
+  const real = norte(5);
   const { p } = criar();
-  p.join("a", "uid-a", { ...ROLE, raioKm: 5 });
+  p.join("alvo", "uid-alvo", ROLE);
+  p.update("alvo", pos(real));
+  const f = await aproximada("uid-alvo", real);
+  const raioM = 5000;
+  let viraram = 0;
+  let anterior = null;
+  for (let i = 0; i < 60; i++) {
+    const req = { lat: BASE.lat + (i * 0.0005), lon: BASE.lon }; // passos de ~55 m
+    const id = `r${i}`;
+    p.join(id, "uid-r", { ...ROLE, raioKm: raioM / 1000 });
+    p.update(id, pos(req));
+    const listado = (await p.neighborsFor(id)).length === 1;
+    assert.equal(listado, distanceM(req, f) <= raioM, `passo ${i}`);
+    if (anterior !== null && anterior !== listado) viraram++;
+    anterior = listado;
+    p.leave(id);
+  }
+  assert.equal(viraram, 1);
+});
+
+test("piso de 10 s entre posições aceitas: mais rápido é ignorado em silêncio", async () => {
+  const { p, relogio } = criar(undefined, {});
+  p.join("a", "uid-a", ROLE);
   p.join("b", "uid-b", ROLE);
   p.update("a", pos(BASE));
-  p.update("b", pos(norte(5.1))); // real fora do raio, mesmo que o desvio a aproxime
-  assert.equal((await p.neighborsFor("a")).length, 0);
+  p.update("b", pos(norte(1))); // a primeira depois do join é aceita
+  relogio.t += 5_000;
+  p.update("b", pos(norte(1.2))); // ignorada
+  const [v1] = await p.neighborsFor("a");
+  assert.deepEqual({ lat: v1.lat, lon: v1.lon }, await aproximada("uid-b", norte(1)));
+  relogio.t += 5_000; // 10 s desde a aceita
+  p.update("b", pos(norte(1.2)));
+  const [v2] = await p.neighborsFor("a");
+  assert.deepEqual({ lat: v2.lat, lon: v2.lon }, await aproximada("uid-b", norte(1.2)));
+});
+
+test("velocidade implícita acima de 250 km/h é rejeitada mesmo com vel baixa", () => {
+  const { p, relogio } = criar();
+  p.join("a", "uid-a", ROLE);
+  p.update("a", pos(BASE));
+  relogio.t += 5_000;
+  // 49 km em 5 s com vel declarada de 40 km/h
+  assert.throws(() => p.update("a", pos(norte(49), { vel: 40 })), /posição implausível/);
+  relogio.t += 5_000;
+  p.update("a", pos(norte(0.1), { vel: 40 })); // 100 m em 10 s é normal
+});
+
+test("neighborsFor já exclui quem está sem sinal há mais de 120 s, sem depender do alarme", async () => {
+  const { p, relogio } = criar();
+  p.join("a", "uid-a", ROLE);
+  p.join("b", "uid-b", ROLE);
+  p.update("a", pos(BASE));
+  p.update("b", pos(norte(1)));
+  relogio.t += 120_000;
+  p.update("a", pos(BASE));
+  assert.equal((await p.neighborsFor("a")).length, 1);
+  relogio.t += 1_000;
+  assert.equal((await p.neighborsFor("a")).length, 0); // b: 121 s; expire() nem foi chamado
 });
 
 test("combina vem true/false conforme match.js", async () => {
@@ -168,8 +252,8 @@ test("salto de mais de 50 km em menos de 60 s é rejeitado; em 60 s ou mais pass
   assert.throws(() => p.update("a", pos(norte(60))), /posição implausível/);
   // a posição rejeitada não foi gravada: um salto pequeno depois ainda passa
   p.update("a", pos(norte(1)));
-  relogio.t += 61_000;
-  p.update("a", pos(norte(80)));
+  relogio.t += 20 * 60_000;
+  p.update("a", pos(norte(80))); // 79 km em 20 min (~237 km/h)
 });
 
 test("update sem join é erro; leave de desconhecido é inofensivo", () => {
