@@ -220,10 +220,15 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun getFuelPriceReference(): FuelPriceReference? {
-        val loc = _live.value ?: kotlinx.coroutines.withTimeoutOrNull(2_000L) {
-            kotlinx.coroutines.flow.filterNotNull(_live).first()
+        var loc = _live.value
+        if (loc == null) {
+            val startMs = System.currentTimeMillis()
+            while (loc == null && System.currentTimeMillis() - startMs < 2000L) {
+                kotlinx.coroutines.delay(200L)
+                loc = _live.value
+            }
         }
-        val (lat, lon) = if (loc != null) {
+        val (lat: Double, lon: Double) = if (loc != null) {
             loc.latitude to loc.longitude
         } else {
             val lastSystemLoc = try {
@@ -237,12 +242,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
             if (lastSystemLoc != null) {
                 lastSystemLoc.latitude to lastSystemLoc.longitude
             } else {
-                val lastTrip = try { hunter.tripDao.all().firstOrNull() } catch (_: Exception) { null }
-                if (lastTrip != null && lastTrip.startLat != 0.0) {
-                    lastTrip.startLat to lastTrip.startLon
-                } else {
-                    -23.5505 to -46.6333 // Marco zero de referência SP
-                }
+                -23.5505 to -46.6333 // Marco zero de referência SP
             }
         }
         return fuelRepo.getNearestReferencePrice(lat, lon)
