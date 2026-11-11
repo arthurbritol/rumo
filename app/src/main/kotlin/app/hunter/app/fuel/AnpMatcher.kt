@@ -49,23 +49,62 @@ object AnpMatcher {
         }
     }
 
-    /** O posto da ANP que corresponde a [place] entre [candidates] (todos da mesma cidade), ou null. */
-    fun match(place: Place, candidates: List<AnpStationEntity>): AnpStationEntity? {
+    /** Palavras que não identificam um posto (tipo de negócio, empresa, bandeira): ficam fora do casamento por nome. */
+    private val genericWords = setOf(
+        "posto", "postos", "auto", "combustivel", "combustiveis", "revenda", "rede", "ltda", "eireli", "epp", "sa",
+        "comercio", "derivados", "petroleo", "abastecimento", "servico", "servicos", "shell", "ipiranga", "ale",
+        "petrobras", "vibra", "raizen", "mania", "atlantic", "distribuidora", "gas", "gasolina",
+    )
+
+    /** Palavras que identificam o posto pelo nome, já no formato de [streetKey]-like (sem vogais). */
+    internal fun nameKeys(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val ascii = Normalizer.normalize(raw, Normalizer.Form.NFD).lowercase()
+            .replace(Regex("[̀-ͯ]"), "")
+            .replace(Regex("[^a-z0-9 ]"), " ")
+        return ascii.split(' ')
+            .filter { it.length >= 3 && it !in genericWords }
+            .map { it.replace(Regex("[aeiou]"), "") }
+            .filter { it.isNotEmpty() }
+    }
+
+    /** Posto da ANP ligado a um posto do mapa, com a força da ligação (para desempatar dois postos do mapa no mesmo). */
+    data class Match(val station: AnpStationEntity, val score: Int)
+
+    fun match(place: Place, candidates: List<AnpStationEntity>): AnpStationEntity? = matchScored(place, candidates)?.station
+
+    /**
+     * O posto da ANP que corresponde a [place] entre [candidates] (todos da mesma cidade), ou null. Cada regra exige
+     * UM único candidato: na dúvida, não casa (melhor sem marcador do que com o preço de outro posto).
+     */
+    fun matchScored(place: Place, candidates: List<AnpStationEntity>): Match? {
         val key = streetKey(place.street ?: place.subtitle?.substringBefore(',')?.substringBefore(" · "))
-        if (key.length < 3) return null
         val num = number(place.houseNumber)
         val cep = digits(place.postcode).takeIf { it.length == 8 }
-        val sameStreet = candidates.filter { streetKey(streetOfAnp(it.endereco)) == key }
-        if (sameStreet.isEmpty()) return null
+        val sameStreet = if (key.length >= 3) candidates.filter { streetKey(streetOfAnp(it.endereco)) == key } else emptyList()
 
         // 1. rua + número da porta
-        if (num != null) sameStreet.singleOrNull { numberOfAnp(it.endereco) == num }?.let { return it }
-        // 2. rua + CEP
-        if (cep != null) sameStreet.filter { digits(it.cep) == cep }.let { if (it.size == 1) return it.first() }
-        // 3. rua + bandeira, só quando é única na rua (sem número no mapa)
-        sameStreet.filter { brandMatches(it.bandeira, place.name) }.let { if (it.size == 1 && num == null) return it.first() }
-        // 4. a rua só tem um posto cadastrado
-        if (num == null && sameStreet.size == 1) return sameStreet.first()
+        if (num != null) sameStreet.singleOrNull { numberOfAnp(it.endereco) == num }?.let { return Match(it, 4) }
+
+        // 2. nome do posto: todas as palavras que o identificam ("Coliseu", "Arara Azul") estão no nome da ANP
+        val wanted = nameKeys(place.name)
+        if (wanted.isNotEmpty()) {
+            candidates.filter { c -> nameKeys(c.nome).containsAll(wanted) }.singleOrNull()?.let { return Match(it, 3) }
+        }
+
+        // 3. rua + CEP
+        if (cep != null) sameStreet.filter { digits(it.cep) == cep }.singleOrNull()?.let { return Match(it, 2) }
+
+        val osmBrand = FuelPriceRepository.detectBrand(place.name)
+        // 4. rua + bandeira, só quando o nome do posto traz a bandeira e é única na rua (sem número no mapa)
+        if (num == null && osmBrand != "Branca") {
+            sameStreet.filter { brandMatches(it.bandeira, place.name) }.singleOrNull()?.let { return Match(it, 1) }
+        }
+        // 5. CEP único na cidade + bandeira compatível (a rua pode ter mudado de nome no mapa)
+        if (cep != null && osmBrand != "Branca") {
+            candidates.filter { digits(it.cep) == cep && brandMatches(it.bandeira, place.name) }.singleOrNull()
+                ?.let { return Match(it, 1) }
+        }
         return null
     }
 }

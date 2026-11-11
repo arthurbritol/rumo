@@ -2,6 +2,13 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.10]
+
+### Corrigido
+- **Postos do mapa recebiam o preço de outro posto**: a regra "só um posto da ANP na rua" dava o mesmo preço a vários postos do mapa na mesma avenida. Removida; agora cada ligação exige um único candidato e, se dois postos do mapa caem no mesmo da ANP, fica o de ligação mais forte.
+- **Mais postos com preço**: novo casamento pelo **nome do posto** (ex.: "Posto Coliseu", "Posto Solemar") e por CEP + bandeira, para quando a rua do mapa difere da cadastrada na ANP.
+- Ao atualizar, as ligações antigas do mapa são descartadas e refeitas com as regras novas.
+
 ## [0.7.9]
 
 ### Alterado

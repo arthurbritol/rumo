@@ -41,4 +41,33 @@ class AnpMatcherTest {
         assertNull(AnpMatcher.match(Place("Posto", null, 0.0, 0.0, street = "Rua Zeferino Vaz", houseNumber = "10"), list))
         assertNull(AnpMatcher.match(Place("Posto", null, 0.0, 0.0), list))
     }
+
+    private fun named(id: String, nome: String, end: String, brand: String = "VIBRA") =
+        anp(id, end, brand).copy(nome = nome)
+
+    @Test
+    fun `casa pelo nome do posto mesmo com a rua diferente no mapa`() {
+        val list = listOf(
+            named("coliseu", "POSTO COLISEU LTDA", "AVENIDA DESEMBARGADOR MARIO DA SILVA NUNES, 1637"),
+            named("solemar", "POSTO SOLEMAR", "AVENIDA ABIDO SAAD, 2100", "RAIZEN"),
+        )
+        val p = Place("Posto Coliseu", null, 0.0, 0.0, street = "Avenida Brigadeiro Eduardo Gomes", houseNumber = "1637")
+        assertEquals("coliseu", AnpMatcher.match(p, list)?.id)
+        assertEquals("solemar", AnpMatcher.match(Place("Posto solemar", null, 0.0, 0.0, street = "Avenida Abido Saade"), list)?.id)
+    }
+
+    @Test
+    fun `varios postos do mapa na mesma rua nao herdam o preco do unico posto da ANP dela`() {
+        val list = listOf(named("coliseu", "POSTO COLISEU LTDA", "AVENIDA DESEMBARGADOR MARIO DA SILVA NUNES, 1637"))
+        for (nome in listOf("Posto Rodeio", "Posto Castelo", "Posto Pioneiro do Gás", "Shell")) {
+            val p = Place(nome, null, 0.0, 0.0, street = "Avenida Desembargador Mário da Silva Nunes")
+            assertNull(nome, AnpMatcher.match(p, list))
+        }
+    }
+
+    @Test
+    fun `nome so com bandeira ou palavra generica nao casa`() {
+        val list = listOf(named("a", "POSTO SHELL LTDA", "RUA X, 1", "RAIZEN"), named("b", "AUTO POSTO Y", "RUA Z, 2"))
+        assertNull(AnpMatcher.match(Place("Posto Shell", null, 0.0, 0.0), list))
+    }
 }

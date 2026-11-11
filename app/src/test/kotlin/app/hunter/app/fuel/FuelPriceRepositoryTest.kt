@@ -564,7 +564,7 @@ class FuelPriceRepositoryTest {
     }
 
     @Test
-    fun `seed novo troca a base antiga e preserva os postos do mapa`() = runBlocking {
+    fun `seed novo troca a base antiga e refaz as ligacoes do mapa`() = runBlocking {
         val dao = FakeAnpFuelDao()
         dao.stations["anp_oldhash"] = anpStation("anp_oldhash", 6.00, "01/01/2026")
         dao.stations["anpm_anp_new"] = anpStation("anpm_anp_new", 6.00, "01/01/2026")
@@ -581,7 +581,7 @@ class FuelPriceRepositoryTest {
 
         assertNull(dao.stations["anp_oldhash"])
         assertEquals("anp_new", dao.stations["anp_new"]?.id)
-        assertEquals(6.50, dao.stations["anpm_anp_new"]?.precoGasolina) // renovado pela base nova
+        assertNull(dao.stations["anpm_anp_new"]) // ligação antiga descartada; volta na próxima busca
         assertEquals(FuelPriceRepository.SEED_VERSION, version)
     }
 }

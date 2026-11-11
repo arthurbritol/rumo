@@ -83,8 +83,8 @@ class FuelPriceRepository(
         val upToDate = seedVersionGet() >= SEED_VERSION
         if (upToDate && dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty()) return
         val stream = assetLoader("anp_fuel_seed.json.gz") ?: return
-        // Seed novo (série histórica de 12 meses): troca a base antiga, que tinha outros ids de posto.
-        if (!upToDate) dao.clearBaseStations()
+        // Seed novo: troca a base antiga (outros ids de posto) e descarta ligações do mapa feitas com regras antigas.
+        if (!upToDate) dao.clearStations()
         ingestGzipStream(stream)
         seedVersionSet(SEED_VERSION)
     }
@@ -355,10 +355,11 @@ class FuelPriceRepository(
                 .take(3)
                 .map { it.first.cityKey }
             val candidates = cityKeys.flatMap { anpStationsOf(it) }
-            val anp = AnpMatcher.match(place, candidates) ?: return@mapNotNull null
+            val scored = AnpMatcher.matchScored(place, candidates) ?: return@mapNotNull null
+            val anp = scored.station
             if (anp.precoGasolina == null && anp.precoEtanol == null && anp.precoDiesel == null) return@mapNotNull null
             val osmBrand = detectBrand(place.name)
-            AnpStationEntity(
+            scored.score to AnpStationEntity(
                 id = MATCHED_PREFIX + anp.id,
                 nome = place.name.ifBlank { anp.nome },
                 bandeira = if (osmBrand != "Branca") osmBrand else anp.bandeira,
@@ -375,7 +376,9 @@ class FuelPriceRepository(
                 precoDiesel = anp.precoDiesel,
                 dataColeta = anp.dataColeta,
             )
-        }.distinctBy { it.id }
+        }
+            // Dois postos do mapa na mesma ligação: fica o de ligação mais forte (o outro não é esse posto da ANP).
+            .groupBy { it.second.id }.values.map { group -> group.maxByOrNull { it.first }!!.second }
 
         dao.insertNewStations(entities)
 
@@ -404,7 +407,7 @@ class FuelPriceRepository(
         const val MATCHED_PREFIX = "anpm_"
 
         /** Sobe quando o seed embarcado muda de forma incompatível (v2: série histórica de 12 meses, ids por CNPJ). */
-        const val SEED_VERSION = 2
+        const val SEED_VERSION = 3
 
         /** "dd/MM/aaaa" -> "aaaaMMdd" (comparável); data inválida vira "". */
         fun dateKey(data: String): String {
