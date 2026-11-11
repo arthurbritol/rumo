@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.18]
+
+### Corrigido
+- **Base de preços da ANP nunca carregava no app instalado ("base ANP: 0 postos")**: o build de release do Android remove o `.gz` dos arquivos embarcados e os descompacta (`anp_fuel_seed.json`), mas o app procurava `anp_fuel_seed.json.gz`, não achava e desistia sem avisar. Agora tenta os dois nomes, aceita arquivo compactado ou não, e mostra "arquivo da base não encontrado no app" no aviso do mapa se faltar.
+
 ## [0.7.17]
 
 ### Corrigido

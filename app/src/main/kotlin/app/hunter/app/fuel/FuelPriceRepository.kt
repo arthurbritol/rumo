@@ -99,9 +99,14 @@ class FuelPriceRepository(
             ) {
                 return@withLock
             }
-            val stream = assetLoader("anp_fuel_seed.json.gz") ?: return@withLock
+            // O build de release do Android tira o ".gz" dos assets e os descompacta ("anp_fuel_seed.json"): tenta os dois nomes.
+            val stream = assetLoader("anp_fuel_seed.json.gz") ?: assetLoader("anp_fuel_seed.json")
+            if (stream == null) {
+                lastSeedError = "arquivo da base não encontrado no app"
+                return@withLock
+            }
             // Lê e valida tudo ANTES de apagar qualquer coisa; depois apaga e grava sem poder ser cancelado no meio.
-            val payload = GZIPInputStream(stream).bufferedReader(Charsets.UTF_8).use { AnpFuelPayload.fromJson(it.readText()) }
+            val payload = stream.use { AnpFuelPayload.fromJson(readSeedText(it)) }
             withContext(NonCancellable) {
                 // Seed novo: troca a base antiga (outros ids de posto) e descarta ligações do mapa feitas com regras antigas.
                 dao.clearStations()
@@ -118,6 +123,17 @@ class FuelPriceRepository(
     }
 
     private val seedMutex = Mutex()
+
+    /** Texto JSON do seed, compactado (gzip) ou não: decide pelos 2 primeiros bytes. */
+    private fun readSeedText(raw: InputStream): String {
+        val input = java.io.BufferedInputStream(raw)
+        input.mark(2)
+        val b0 = input.read()
+        val b1 = input.read()
+        input.reset()
+        val isGzip = b0 == 0x1f && b1 == 0x8b
+        return (if (isGzip) GZIPInputStream(input) else input).bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
 
     /** Último erro ao carregar a base embarcada (null = sem erro); aparece no aviso do mapa para diagnóstico. */
     @Volatile

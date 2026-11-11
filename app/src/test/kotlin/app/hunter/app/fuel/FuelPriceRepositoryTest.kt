@@ -646,4 +646,29 @@ class FuelPriceRepositoryTest {
 
         assertEquals(2, repo.baseStationCount())
     }
+
+    @Test
+    fun `base embarcada sem o gz (build de release) e carregada`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        val plain = AnpFuelPayload.toJson(payloadOf(Triple("anp_1", 6.40, "05/11/2026"))).toByteArray(Charsets.UTF_8)
+        // O build de release entrega "anp_fuel_seed.json" já descompactado; o nome ".json.gz" não existe.
+        val repo = FuelPriceRepository(dao = dao, assetLoader = { name ->
+            if (name == "anp_fuel_seed.json") ByteArrayInputStream(plain) else null
+        })
+
+        repo.ensureSeedLoaded()
+
+        assertEquals(1, repo.baseStationCount())
+        assertNull(repo.lastSeedError)
+    }
+
+    @Test
+    fun `base embarcada ausente deixa um erro visivel`() = runBlocking {
+        val repo = FuelPriceRepository(dao = FakeAnpFuelDao(), assetLoader = { null })
+
+        repo.ensureSeedLoaded()
+
+        assertNotNull(repo.lastSeedError)
+        Unit
+    }
 }
