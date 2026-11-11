@@ -257,4 +257,25 @@ class NavigationTest {
         assertEquals(1, result.size)
         assertEquals("Posto Proximo 1km", result[0].name)
     }
+
+    @Test
+    fun `FuelStationFinder acha postos de marca que nao tem a palavra posto no nome e junta sem repetir`() = kotlinx.coroutines.runBlocking {
+        val shell = """{"features":[{"geometry":{"coordinates":[-46.63, -23.55]},"properties":{"name":"Shell","osm_value":"fuel"}}]}"""
+        val ipiranga = """{"features":[{"geometry":{"coordinates":[-46.64, -23.56]},"properties":{"name":"Ipiranga","osm_value":"fuel"}},
+            {"geometry":{"coordinates":[-46.63, -23.55]},"properties":{"name":"Shell","osm_value":"fuel"}}]}"""
+        val overpassVia = """{"elements":[{"type":"way","center":{"lat":-23.57,"lon":-46.65},"tags":{"name":"Posto da Via"}}]}"""
+        val http = object : Http {
+            override suspend fun get(url: String): String = when {
+                url.contains("overpass") -> overpassVia
+                url.contains("q=shell") -> shell
+                url.contains("q=ipiranga") -> ipiranga
+                url.contains("q=posto") -> throw java.io.IOException("fora do ar")
+                else -> """{"features":[]}"""
+            }
+            override suspend fun postJson(url: String, body: String): String = ""
+        }
+        val finder = FuelStationFinder(http = http, baseUrl = "https://overpass.test/api", photonUrl = "https://photon.test")
+        val names = finder.near(LatLon(-23.5505, -46.6333), radiusM = 5_000, limit = 10).map { it.name }
+        assertEquals(listOf("Shell", "Ipiranga", "Posto da Via"), names)
+    }
 }

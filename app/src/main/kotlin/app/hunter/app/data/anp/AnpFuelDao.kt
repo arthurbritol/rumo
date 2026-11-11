@@ -28,6 +28,10 @@ interface AnpFuelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllStations(stations: List<AnpStationEntity>)
 
+    /** Só insere postos novos: não apaga o preço que o usuário informou num posto já salvo. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertNewStations(stations: List<AnpStationEntity>)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllCityStats(cities: List<AnpCityStatsEntity>)
 

@@ -346,7 +346,7 @@ class FuelPriceRepository(
             )
         }
 
-        dao.insertAllStations(entities)
+        dao.insertNewStations(entities)
 
         return entities.map { st ->
             val fonte = when {

@@ -49,6 +49,10 @@ class FuelPriceRepositoryTest {
             stations.forEach { this.stations[it.id] = it }
         }
 
+        override suspend fun insertNewStations(stations: List<AnpStationEntity>) {
+            stations.forEach { this.stations.putIfAbsent(it.id, it) }
+        }
+
         override suspend fun insertAllCityStats(cities: List<AnpCityStatsEntity>) {
             cities.forEach { this.cityStats[it.cityKey] = it }
         }

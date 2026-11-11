@@ -53,7 +53,7 @@ class FuelMapCoordinator(
         fetchStations = { box -> repository.getStationsInBox(box) },
         searchNearbyStations = if (stationFinder != null) { center ->
             val places = try {
-                stationFinder.near(center, radiusM = 5_000, limit = 25)
+                stationFinder.near(center, radiusM = 8_000, limit = 30)
             } catch (_: Exception) {
                 emptyList()
             }
