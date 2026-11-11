@@ -4,7 +4,7 @@ import app.hunter.app.BuildConfig
 
 /**
  * Camada de trânsito (imagens de fluxo da TomTom, pedidas ao servidor intermediário do Rumo: a chave da TomTom não vai
- * no app). O endereço e o token vêm do build (`TRAFFIC_TILE_URL` e `TRAFFIC_TOKEN`); sem eles a camada não existe.
+ * no app; o servidor fica em workers/traffic-proxy, veja docs/TRANSITO.md). O endereço e o token vêm do build (`TRAFFIC_TILE_URL` e `TRAFFIC_TOKEN`); sem eles a camada não existe.
  */
 object TrafficLayer {
     /** Modelo de endereço das imagens para o MapLibre, ou null se o build não tem servidor de trânsito configurado. */
