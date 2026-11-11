@@ -202,7 +202,7 @@ fun HunterMap(
             }
             m.addOnMapClickListener { latLng ->
                 val screenPoint = m.projection.toScreenLocation(latLng)
-                val features = m.queryRenderedFeatures(screenPoint, "fuel-circle", "fuel-symbol", "fuel-label")
+                val features = m.queryRenderedFeatures(screenPoint, "fuel-symbol")
                 if (features.isNotEmpty()) {
                     val stationId = features.first().getStringProperty("id")
                     val foundStation = latestFuelStations.find { it.id == stationId }
@@ -285,8 +285,25 @@ fun HunterMap(
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_STATE) ?: return@LaunchedEffect
         src.setGeoJson(stateAverageFeatures(stateAverages))
     }
+    val markerImages = remember(style) { mutableSetOf<String>() }
     LaunchedEffect(style, fuelStations) {
-        val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL) ?: return@LaunchedEffect
+        val st = style ?: return@LaunchedEffect
+        val src = st.getSourceAs<GeoJsonSource>(SRC_FUEL) ?: return@LaunchedEffect
+        // Uma imagem por bandeira + texto de preço (pino da marca e etiqueta branca), criada na primeira vez que aparece.
+        fuelStations.forEach { station ->
+            val key = stationMarkerKey(station)
+            if (markerImages.add(key)) {
+                st.addImage(
+                    key,
+                    stationMarkerBitmap(
+                        density = density,
+                        brand = stationBrandOf(station.bandeira, station.nome),
+                        priceText = stationMarkerPriceText(station),
+                        hasPrice = station.fonte != PriceSource.SEM_PRECO,
+                    ),
+                )
+            }
+        }
         src.setGeoJson(fuelStationsFeatures(fuelStations))
     }
     LaunchedEffect(style, me?.timeMs, me?.latitude, me?.longitude) {
@@ -427,31 +444,13 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             circleRadius(11f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(4f),
         ),
     )
-    // Bolinha simples por baixo do ícone: aparece mesmo se a imagem ou a fonte do estilo falharem.
-    st.addLayer(
-        CircleLayer("fuel-circle", SRC_FUEL).withProperties(
-            circleRadius(9f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2.5f),
-        ).also { it.minZoom = STATION_MIN_ZOOM },
-    )
+    // Marcador do posto: pino da bandeira + etiqueta de preço, uma imagem por posto (ver FuelMarkers.kt).
     st.addLayer(
         SymbolLayer("fuel-symbol", SRC_FUEL).withProperties(
-            iconImage("fuel-station"),
+            iconImage(Expression.get("icon")),
+            org.maplibre.android.style.layers.PropertyFactory.iconAnchor(org.maplibre.android.style.layers.Property.ICON_ANCHOR_BOTTOM),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
-        ).also { it.minZoom = STATION_MIN_ZOOM },
-    )
-    st.addLayer(
-        SymbolLayer("fuel-label", SRC_FUEL).withProperties(
-            textField(Expression.get("price")),
-            textFont(arrayOf("Noto Sans Bold")),
-            textSize(12f),
-            textColor(if (dark) "#FFFFFF" else "#0F172A"),
-            textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
-            textHaloWidth(2f),
-            textAnchor("top"),
-            textOffset(arrayOf(0f, 1.4f)),
-            textAllowOverlap(true),
-            textIgnorePlacement(false),
         ).also { it.minZoom = STATION_MIN_ZOOM },
     )
     st.addLayer(
@@ -525,6 +524,7 @@ fun fuelStationsFeatures(stations: List<ResolvedFuelStation>): FeatureCollection
     val features = stations.map { station ->
         val feature = Feature.fromGeometry(Point.fromLngLat(station.lon, station.lat))
         feature.addStringProperty("id", station.id)
+        feature.addStringProperty("icon", stationMarkerKey(station))
         feature.addStringProperty("price", formatStationMapPrice(station))
         feature.addStringProperty("name", station.nome)
         feature.addStringProperty("source", station.fonte.name)

@@ -2,6 +2,12 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.14]
+
+### Alterado
+- **Novo visual dos postos no mapa**: cada posto aparece com um pino na cor e letra da bandeira (Shell, Ipiranga, BR, Ale ou bomba para as demais) e, ao lado, a etiqueta branca com o preço ("sem preço" quando a ANP não pesquisou o posto).
+- **Novo cartão do posto**: gasolina comum em destaque (verde), etanol/aditivada/diesel em linhas e o botão principal "Ver rotas".
+
 ## [0.7.13]
 
 ### Corrigido

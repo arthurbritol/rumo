@@ -224,6 +224,57 @@ fun FuelPricesGrid(
     }
 }
 
+/** Faixa com a gasolina comum em destaque e, abaixo, as demais linhas de preço do posto. */
+@Composable
+fun FuelPriceHighlight(station: ResolvedFuelStation, modifier: Modifier = Modifier) {
+    val green = NovareSuccess
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = green.copy(alpha = 0.15f),
+            border = BorderStroke(1.dp, green.copy(alpha = 0.35f)),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Gasolina Comum",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = formatFuelPrice(station.precoGasolina),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = if (station.precoGasolina != null) green else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        listOf(
+            "Gasolina Aditivada" to station.precoGasolinaAdit,
+            "Etanol" to station.precoEtanol,
+            "Diesel" to station.precoDiesel,
+        ).filter { it.second != null || it.first == "Etanol" }.forEach { (label, price) ->
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = formatFuelPrice(price),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+    }
+}
+
 /**
  * Componente modal/bottom sheet de posto de combustível segundo o Design Novare e Font Awesome 6.
  *
@@ -308,8 +359,8 @@ fun FuelStationCard(
 
         Spacer(Modifier.height(4.dp))
 
-        // Preços dos combustíveis pesquisados
-        FuelPricesGrid(station = station)
+        // Gasolina em destaque; etanol, aditivada e diesel em linhas (como no mapa de referência)
+        FuelPriceHighlight(station = station)
 
         // Termômetro de Paridade (se Etanol e Gasolina disponíveis)
         val parityInfo = resolveFuelParity(station.precoEtanol, station.precoGasolina)
@@ -332,7 +383,7 @@ fun FuelStationCard(
 
         // Botões de Ação Novare
         RumoPrimaryButton(
-            text = "Navegar até o posto",
+            text = "Ver rotas",
             onClick = onNavigate,
             leadingIconRes = R.drawable.fa_route,
         )
