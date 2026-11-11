@@ -2,6 +2,14 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.3]
+
+### Corrigido e Aprimorado
+- **Busca ultra-rápida de postos de combustível (`FuelStationFinder`)**: integração com o Komoot Photon como provedor primário (`osm_tag=amenity:fuel`), retornando postos em menos de 1 segundo (em substituição ao Overpass que sofria com timeouts de mais de 15 segundos).
+- **Persistência garantida e carregamento imediato (0ms)**: postos encontrados são salvos imediatamente no banco Room (`anp_stations`) e, em acessos futuros na mesma região, são carregados instantaneamente da base local sem requisições de rede.
+- **Não-cancelamento da busca durante movimento de câmera**: a busca online em background agora executa desacoplada de cancelamento por arrasto de mapa ou updates de GPS (`collectLatest`), garantindo que a requisição finalize e popule o banco mesmo durante a pilotagem.
+- **Carga do seed embarcado para bases pré-existentes**: o método `ensureSeedLoaded()` agora confere se a base de cidades está completa (ao menos 40 cidades polo), garantindo que atualizações de versões anteriores recebam todas as médias municipais e postos de referência imediatamente.
+
 ## [0.7.2]
 
 ### Corrigido e Aprimorado

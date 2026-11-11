@@ -9,16 +9,46 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URLEncoder
 
-/** Postos de combustível (OpenStreetMap, `amenity=fuel`) perto de um ponto, via Overpass API. */
+/** Postos de combustível (OpenStreetMap, `amenity=fuel`) perto de um ponto, via Komoot Photon (rápido) com fallback Overpass. */
 class FuelStationFinder(
-    private val http: Http = UrlConnectionHttp(),
-    private val baseUrl: String = "https://overpass-api.de/api/interpreter",
+    private val http: Http = UrlConnectionHttp(connectTimeoutMs = 4_000, readTimeoutMs = 6_000, attempts = 2),
+    private val baseUrl: String = "https://overpass.kumi.systems/api/interpreter",
+    private val photonUrl: String = "https://photon.komoot.io",
 ) {
     /** Os [limit] postos mais próximos de [p] dentro de [radiusM] metros. */
-    suspend fun near(p: LatLon, radiusM: Int = 4_000, limit: Int = 6): List<Place> {
-        val query = "[out:json][timeout:15];node(around:$radiusM,${p.lat},${p.lon})[amenity=fuel];out 30;"
-        val text = http.get("$baseUrl?data=${URLEncoder.encode(query, "UTF-8")}")
-        return parse(text, p).take(limit)
+    suspend fun near(p: LatLon, radiusM: Int = 5_000, limit: Int = 25): List<Place> {
+        // 1. Tenta Komoot Photon primeiro: resposta ultra-rápida (típica < 1s)
+        if (photonUrl.isNotBlank()) {
+            try {
+                val queryUrl = "$photonUrl/api/?q=posto&lat=${p.lat}&lon=${p.lon}&limit=$limit&osm_tag=amenity:fuel"
+                val text = http.get(queryUrl)
+                val places = PhotonGeocoder.parse(text).map { place ->
+                    val cleanName = if (place.name.equals("posto", ignoreCase = true)) {
+                        "Posto de Combustível"
+                    } else {
+                        place.name
+                    }
+                    place.copy(name = cleanName)
+                }
+                if (places.isNotEmpty()) return places.take(limit)
+            } catch (_: Exception) {
+                // Continua para fallback Overpass
+            }
+        }
+
+        // 2. Fallback para Overpass API caso Photon esteja indisponível
+        if (baseUrl.isNotBlank()) {
+            try {
+                val query = "[out:json][timeout:6];node(around:$radiusM,${p.lat},${p.lon})[amenity=fuel];out 30;"
+                val text = http.get("$baseUrl?data=${URLEncoder.encode(query, "UTF-8")}")
+                val places = parse(text, p)
+                if (places.isNotEmpty()) return places.take(limit)
+            } catch (_: Exception) {
+                // ignora
+            }
+        }
+
+        return emptyList()
     }
 
     companion object {

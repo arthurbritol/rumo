@@ -74,7 +74,7 @@ class FuelPriceRepository(
      * caso o banco local de estados esteja vazio.
      */
     suspend fun ensureSeedLoaded() {
-        if (dao.getAllStateStats().isNotEmpty()) return
+        if (dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty()) return
         val stream = assetLoader("anp_fuel_seed.json.gz") ?: return
         ingestGzipStream(stream)
     }
@@ -281,6 +281,10 @@ class FuelPriceRepository(
      */
     suspend fun enrichAndSavePlaces(places: List<Place>): List<ResolvedFuelStation> {
         if (places.isEmpty()) return emptyList()
+
+        if (dao.getAllStateStats().isEmpty() || dao.getAllCityStats().size < 40) {
+            ensureSeedLoaded()
+        }
 
         val allCities = dao.getAllCityStats()
         val allStates = dao.getAllStateStats()

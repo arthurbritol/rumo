@@ -245,4 +245,67 @@ class FuelStationMapLayerTest {
         assertEquals("st-fetched", coordinator.visibleFuelStations.value[0].id)
         assertFalse(coordinator.isSearchingOnline.value)
     }
+
+    @Test
+    fun `quando postos ja estao salvos no banco local, aparecem imediatamente sem chamar busca online`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var onlineCalls = 0
+
+        val coordinator = FuelMapCoordinator(
+            scope = backgroundScope,
+            fetchStations = { listOf(sampleStation("st-local", "Posto Local Ipiranga")) },
+            searchNearbyStations = {
+                onlineCalls++
+                emptyList()
+            },
+            ioDispatcher = dispatcher,
+            debounceMs = 100L,
+        )
+
+        coordinator.toggleFuelLayer()
+        coordinator.updateMapBoundingBox(GeoBox(-8.10, -34.95, -8.00, -34.85))
+
+        advanceTimeBy(150)
+        runCurrent()
+
+        assertEquals(0, onlineCalls)
+        assertEquals(1, coordinator.visibleFuelStations.value.size)
+        assertEquals("st-local", coordinator.visibleFuelStations.value[0].id)
+        assertFalse(coordinator.isSearchingOnline.value)
+    }
+
+    @Test
+    fun `quando camera se move durante busca online, a busca nao eh cancelada e completa`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var onlineCalls = 0
+        var localReturned = false
+
+        val coordinator = FuelMapCoordinator(
+            scope = backgroundScope,
+            fetchStations = {
+                if (localReturned) listOf(sampleStation("st-fetched-2", "Posto Petrobras"))
+                else emptyList()
+            },
+            searchNearbyStations = { center ->
+                onlineCalls++
+                localReturned = true
+                listOf(sampleStation("st-fetched-2", "Posto Petrobras", lat = center.lat, lon = center.lon))
+            },
+            ioDispatcher = dispatcher,
+            debounceMs = 100L,
+        )
+
+        coordinator.toggleFuelLayer()
+        coordinator.updateMapBoundingBox(GeoBox(-8.10, -34.95, -8.00, -34.85))
+        advanceTimeBy(150)
+
+        // Movimento de câmera durante a execução
+        coordinator.updateMapBoundingBox(GeoBox(-8.11, -34.96, -8.01, -34.86))
+        advanceTimeBy(150)
+        runCurrent()
+
+        assertEquals(1, onlineCalls)
+        assertEquals(1, coordinator.visibleFuelStations.value.size)
+        assertEquals("st-fetched-2", coordinator.visibleFuelStations.value[0].id)
+    }
 }
