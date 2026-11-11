@@ -179,6 +179,9 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     /** Indicador se está buscando postos na web via Overpass. */
     val isSearchingFuelOnline: StateFlow<Boolean> get() = fuelCoordinator.isSearchingOnline
 
+    /** Motivo de a última busca de postos não ter achado nada (ou null). */
+    val fuelSearchStatus: StateFlow<String?> get() = fuelCoordinator.searchStatus
+
     /** Posto de combustível selecionado para exibição do card de detalhes. */
     val selectedFuelStation: StateFlow<ResolvedFuelStation?> get() = fuelCoordinator.selectedFuelStation
 

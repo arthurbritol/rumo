@@ -7,7 +7,10 @@ import app.hunter.model.Geo
 import app.hunter.model.GeoBox
 import app.hunter.nav.FuelStationFinder
 import app.hunter.nav.LatLon
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -78,6 +81,10 @@ class FuelMapCoordinator(
     private val _isSearchingOnline = MutableStateFlow(false)
     val isSearchingOnline: StateFlow<Boolean> = _isSearchingOnline.asStateFlow()
 
+    /** Resultado da última busca online (null = nada a avisar), para a tela mostrar o motivo em vez de ficar muda. */
+    private val _searchStatus = MutableStateFlow<String?>(null)
+    val searchStatus: StateFlow<String?> = _searchStatus.asStateFlow()
+
     private var searchJob: Job? = null
     private val searchedCenters = mutableListOf<LatLon>()
 
@@ -109,19 +116,7 @@ class FuelMapCoordinator(
                                 searchedCenters.add(center)
                                 if (searchedCenters.size > 50) searchedCenters.removeAt(0)
                             }
-                            searchJob = scope.launch(ioDispatcher) {
-                                _isSearchingOnline.value = true
-                                try {
-                                    val fetched = searchNearbyStations.invoke(center)
-                                    val currentBox = _boundingBox.value ?: box
-                                    val refreshed = fetchStations(currentBox)
-                                    _visibleFuelStations.value = refreshed.ifEmpty { fetched }
-                                } catch (_: Exception) {
-                                    // Falha silenciosa de rede
-                                } finally {
-                                    _isSearchingOnline.value = false
-                                }
-                            }
+                            searchJob = launchSearch(center, box)
                         }
                     }
                 }
@@ -136,6 +131,7 @@ class FuelMapCoordinator(
             _selectedFuelStation.value = null
             _visibleFuelStations.value = emptyList()
             _isSearchingOnline.value = false
+            _searchStatus.value = null
             searchJob?.cancel()
         } else {
             // Ao ligar, exibe imediatamente os postos locais caso a caixa já esteja disponível
@@ -198,17 +194,35 @@ class FuelMapCoordinator(
         if (searchNearbyStations == null || !_fuelLayerEnabled.value) return
         searchJob?.cancel()
         val center = LatLon((box.minLat + box.maxLat) / 2.0, (box.minLon + box.maxLon) / 2.0)
-        searchJob = scope.launch(ioDispatcher) {
-            _isSearchingOnline.value = true
-            try {
-                val fetched = searchNearbyStations.invoke(center)
-                val currentBox = _boundingBox.value ?: box
-                val refreshed = fetchStations(currentBox)
-                _visibleFuelStations.value = refreshed.ifEmpty { fetched }
-            } catch (_: Exception) {
-            } finally {
-                _isSearchingOnline.value = false
+        searchJob = launchSearch(center, box)
+    }
+
+    /** Busca online com tempo máximo; sempre termina e deixa em [searchStatus] o que aconteceu. */
+    private fun launchSearch(center: LatLon, box: GeoBox): Job = scope.launch(ioDispatcher) {
+        val search = searchNearbyStations ?: return@launch
+        _isSearchingOnline.value = true
+        _searchStatus.value = null
+        try {
+            val fetched = withTimeout(SEARCH_TIMEOUT_MS) { search(center) }
+            val currentBox = _boundingBox.value ?: box
+            val refreshed = fetchStations(currentBox)
+            val shown = refreshed.ifEmpty { fetched }
+            _visibleFuelStations.value = shown
+            if (fetched.isEmpty()) {
+                _searchStatus.value = "Nenhum posto achado aqui. Aproxime o mapa ou tente de novo."
             }
+        } catch (e: TimeoutCancellationException) {
+            _searchStatus.value = "Os servidores de mapa não responderam. Toque para tentar de novo."
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _searchStatus.value = "Falha na busca de postos (${e.javaClass.simpleName}). Toque para tentar de novo."
+        } finally {
+            _isSearchingOnline.value = false
         }
+    }
+
+    private companion object {
+        const val SEARCH_TIMEOUT_MS = 25_000L
     }
 }

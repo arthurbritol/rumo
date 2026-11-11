@@ -364,4 +364,29 @@ class FuelStationMapLayerTest {
         runCurrent()
         assertEquals(2, callCount)
     }
+
+    @Test
+    fun `busca que falha ou volta vazia deixa um aviso e nunca fica buscando para sempre`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var mode = "falha"
+        val coordinator = FuelMapCoordinator(
+            scope = backgroundScope,
+            fetchStations = { emptyList() },
+            searchNearbyStations = { if (mode == "falha") throw java.io.IOException("sem rede") else emptyList() },
+            ioDispatcher = dispatcher,
+            debounceMs = 0L,
+        )
+        coordinator.toggleFuelLayer()
+        coordinator.updateMapBoundingBox(GeoBox(-8.10, -34.95, -8.00, -34.85))
+        advanceTimeBy(10)
+        runCurrent()
+        assertFalse(coordinator.isSearchingOnline.value)
+        assertTrue(coordinator.searchStatus.value!!.contains("IOException"))
+
+        mode = "vazio"
+        coordinator.searchCurrentArea()
+        runCurrent()
+        assertFalse(coordinator.isSearchingOnline.value)
+        assertTrue(coordinator.searchStatus.value!!.startsWith("Nenhum posto"))
+    }
 }

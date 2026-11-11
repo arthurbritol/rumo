@@ -103,6 +103,7 @@ fun MapScreen(
     val focusNonce by vm.focusNonce.collectAsStateWithLifecycle()
     val fuelLayerEnabled by vm.fuelLayerEnabled.collectAsStateWithLifecycle()
     val isSearchingFuelOnline by vm.isSearchingFuelOnline.collectAsStateWithLifecycle()
+    val fuelSearchStatus by vm.fuelSearchStatus.collectAsStateWithLifecycle()
     val visibleFuelStations by vm.visibleFuelStations.collectAsStateWithLifecycle()
     val selectedFuelStation by vm.selectedFuelStation.collectAsStateWithLifecycle()
 
@@ -350,7 +351,7 @@ fun MapScreen(
                                     modifier = Modifier.size(14.dp),
                                 )
                                 Text(
-                                    "Buscar postos nesta área",
+                                    fuelSearchStatus ?: "Buscar postos nesta área",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
