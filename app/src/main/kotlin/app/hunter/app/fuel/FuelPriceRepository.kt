@@ -82,6 +82,7 @@ class FuelPriceRepository(
      * caso o banco local de estados esteja vazio.
      */
     suspend fun ensureSeedLoaded() {
+        dao.deleteLegacyOsmStations() // preços inventados de versões antigas nunca podem aparecer no mapa
         val upToDate = seedVersionGet() >= SEED_VERSION
         if (upToDate && dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty()) return
         val stream = assetLoader("anp_fuel_seed.json.gz") ?: return
@@ -425,11 +426,11 @@ class FuelPriceRepository(
         /** Prefixo do id de um posto do mapa já ligado a um posto da ANP (o resto do id é o id da ANP). */
         const val MATCHED_PREFIX = "anpm_"
 
-        /** Prefixo do id de um posto achado no mapa que a ANP não pesquisou (resto do id = posição). */
-        const val OSM_PREFIX = "osm_"
+        /** Posto achado no mapa que a ANP não pesquisou (resto do id = posição). Não reusar "osm_": é o prefixo legado. */
+        const val OSM_PREFIX = "semp_"
 
         /** Sobe quando o seed embarcado muda de forma incompatível (v2: série histórica de 12 meses, ids por CNPJ). */
-        const val SEED_VERSION = 3
+        const val SEED_VERSION = 4
 
         /** "dd/MM/aaaa" -> "aaaaMMdd" (comparável); data inválida vira "". */
         fun dateKey(data: String): String {

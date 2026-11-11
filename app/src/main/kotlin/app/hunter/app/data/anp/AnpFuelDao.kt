@@ -49,6 +49,10 @@ interface AnpFuelDao {
     @Query("DELETE FROM anp_stations WHERE id LIKE 'anp\\_%' ESCAPE '\\'")
     suspend fun clearBaseStations()
 
+    /** Postos gravados por versões antigas ("osm_..."), com a média da cidade como se fosse o preço do posto. */
+    @Query("DELETE FROM anp_stations WHERE id LIKE 'osm\\_%' ESCAPE '\\'")
+    suspend fun deleteLegacyOsmStations()
+
     @Query("DELETE FROM anp_stations WHERE id = :stationId")
     suspend fun deleteStation(stationId: String)
 

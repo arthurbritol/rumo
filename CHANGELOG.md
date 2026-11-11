@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.12]
+
+### Corrigido
+- **Postos com o mesmo preço (R$ 5,95) por todo o mapa**: versões antigas gravaram postos com id `osm_...` usando a média da cidade como se fosse o preço do posto, e o mapa os misturava com os postos novos. Os postos sem preço da ANP agora usam o id `semp_...`; os `osm_...` antigos são apagados a cada abertura e nunca aparecem. A base local é refeita uma vez (versão 4).
+
 ## [0.7.11]
 
 ### Corrigido

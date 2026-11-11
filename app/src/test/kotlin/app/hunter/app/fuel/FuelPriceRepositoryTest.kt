@@ -65,6 +65,7 @@ class FuelPriceRepositoryTest {
             stations.values.filter { it.id.startsWith("anpm_") }
         override suspend fun clearBaseStations() { stations.keys.removeAll { it.startsWith("anp_") } }
         override suspend fun deleteStation(stationId: String) { stations.remove(stationId) }
+        override suspend fun deleteLegacyOsmStations() { stations.keys.removeAll { it.startsWith("osm_") } }
         override suspend fun clearStations() { stations.clear() }
         override suspend fun clearCityStats() { cityStats.clear() }
         override suspend fun clearStateStats() { stateStats.clear() }
@@ -481,7 +482,7 @@ class FuelPriceRepositoryTest {
         assertEquals(6.11, matched.precoGasolina)              // preço DESTE posto, não a média 5,82
         assertEquals(PriceSource.POSTO_ANP, matched.fonte)
         assertEquals(-22.89, matched.lat, 1e-9)                // posição do mapa, não a da cidade
-        val semPreco = enriched.single { it.id.startsWith("osm_") }
+        val semPreco = enriched.single { it.id.startsWith("semp_") }
         assertEquals(PriceSource.SEM_PRECO, semPreco.fonte)    // a ANP não pesquisou: aparece, mas sem preço nem média
         assertNull(semPreco.precoGasolina)
         // No mapa aparecem os dois; os da base da ANP (posição da cidade) não.
@@ -592,5 +593,17 @@ class FuelPriceRepositoryTest {
         assertEquals("anp_new", dao.stations["anp_new"]?.id)
         assertNull(dao.stations["anpm_anp_new"]) // ligação antiga descartada; volta na próxima busca
         assertEquals(FuelPriceRepository.SEED_VERSION, version)
+    }
+
+    @Test
+    fun `postos antigos osm_ com preco inventado somem e nunca aparecem no mapa`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        dao.stations["osm_-20_2_-40_3"] = anpStation("osm_-20_2_-40_3", 5.95, "01/11/2026") // legado: média como preço
+        val repo = FuelPriceRepository(dao = dao)
+        val box = app.hunter.model.GeoBox(-21.0, -41.0, -19.0, -39.0)
+
+        assertEquals(emptyList<String>(), repo.getMapStations(box).map { it.id })
+        repo.ensureSeedLoaded()
+        assertNull(dao.stations["osm_-20_2_-40_3"])
     }
 }
