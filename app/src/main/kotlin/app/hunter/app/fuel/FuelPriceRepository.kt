@@ -324,6 +324,9 @@ class FuelPriceRepository(
         )
     }
 
+    /** Quantos postos da base da ANP estão carregados no aparelho (aparece no aviso do mapa, para diagnóstico). */
+    suspend fun baseStationCount(): Int = dao.countBaseStations()
+
     suspend fun stateAverages(): List<StateAverage> =
         dao.getAllStateStats().map { StateAverage(it.uf, it.lat, it.lon, it.gasolinaAvg, it.etanolAvg) }
 

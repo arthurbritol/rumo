@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.15]
+
+### Alterado
+- O aviso do mapa agora diz quantos postos da base da ANP estão carregados no aparelho (ex.: "20 postos no mapa (9 com preço da ANP) · base ANP: 8587 postos"), para diagnosticar quando nenhum posto aparece com preço.
+
 ## [0.7.14]
 
 ### Alterado

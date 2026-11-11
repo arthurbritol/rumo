@@ -1,4 +1,4 @@
-package app.hunter.app.fuel
+﻿package app.hunter.app.fuel
 
 import app.hunter.app.data.anp.AnpCityStatsEntity
 import app.hunter.app.data.anp.AnpFuelDao
@@ -29,6 +29,8 @@ class FuelPriceRepositoryTest {
 
         override suspend fun getStationsInBox(minLat: Double, minLon: Double, maxLat: Double, maxLon: Double): List<AnpStationEntity> =
             stations.values.filter { it.lat in minLat..maxLat && it.lon in minLon..maxLon }
+
+        override suspend fun countBaseStations(): Int = stations.keys.count { it.startsWith("anp_") }
 
         override suspend fun getBaseStationsByUf(uf: String): List<AnpStationEntity> =
             stations.values.filter { it.uf == uf && it.id.startsWith("anp_") }

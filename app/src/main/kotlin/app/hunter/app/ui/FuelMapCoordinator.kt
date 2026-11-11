@@ -44,6 +44,8 @@ class FuelMapCoordinator(
     private val searchNearbyStations: (suspend (LatLon) -> List<ResolvedFuelStation>)? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val debounceMs: Long = 200L,
+    /** Texto extra do aviso do mapa (ex.: quantos postos da ANP há no aparelho). */
+    private val statusDetail: (suspend () -> String)? = null,
 ) {
     constructor(
         scope: CoroutineScope,
@@ -64,6 +66,7 @@ class FuelMapCoordinator(
         } else null,
         ioDispatcher = ioDispatcher,
         debounceMs = debounceMs,
+        statusDetail = { "base ANP: ${repository.baseStationCount()} postos" },
     )
 
     private val _fuelLayerEnabled = MutableStateFlow(false)
@@ -213,10 +216,11 @@ class FuelMapCoordinator(
             val shown = refreshed.ifEmpty { fetched }
             _visibleFuelStations.value = shown
             val withPrice = shown.count { it.fonte != PriceSource.SEM_PRECO }
+            val detail = runCatching { statusDetail?.invoke() }.getOrNull()?.let { " · $it" }.orEmpty()
             _searchStatus.value = if (shown.isEmpty()) {
-                "Nenhum posto encontrado aqui. Aproxime o mapa ou tente de novo."
+                "Nenhum posto encontrado aqui$detail. Aproxime o mapa ou tente de novo."
             } else {
-                "${shown.size} postos no mapa ($withPrice com preço da ANP) · toque para buscar de novo"
+                "${shown.size} postos no mapa ($withPrice com preço da ANP)$detail · toque para buscar de novo"
             }
         } catch (e: TimeoutCancellationException) {
             _searchStatus.value = "Os servidores de mapa não responderam. Toque para tentar de novo."

@@ -17,6 +17,9 @@ interface AnpFuelDao {
     @Query("SELECT * FROM anp_stations WHERE uf = :uf AND id LIKE 'anp\\_%' ESCAPE '\\'")
     suspend fun getBaseStationsByUf(uf: String): List<AnpStationEntity>
 
+    @Query("SELECT COUNT(*) FROM anp_stations WHERE id LIKE 'anp\\_%' ESCAPE '\\'")
+    suspend fun countBaseStations(): Int
+
     @Query("SELECT * FROM anp_city_stats WHERE cityKey = :cityKey LIMIT 1")
     suspend fun getCityStats(cityKey: String): AnpCityStatsEntity?
 
