@@ -1,0 +1,17 @@
+name = "rumo-nearby"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+# Durable Objects: uma Celula por quadrado de 1° x 1° e uma Conta por pessoa.
+[[durable_objects.bindings]]
+name = "CELULA"
+class_name = "Celula"
+
+[[durable_objects.bindings]]
+name = "CONTA"
+class_name = "Conta"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Celula", "Conta"]
