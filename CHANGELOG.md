@@ -2,6 +2,18 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.0]
+
+### Adicionado
+- **Integração com a Série Histórica de Preços de Combustíveis da ANP**: levantamento de preços da Agência Nacional do Petróleo integrado para consulta e apoio ao motociclista em todo o território nacional.
+- **Marcadores de postos com badge de preço e ícone Font Awesome `fa_gas_pump` na aba Mapa (`HunterMap`)**: visualização de postos no mapa com carregamento 100% offline via Room v4, sem travamentos e sem requisições de rede contínuas durante a pilotagem.
+- **Card detalhado de posto (`FuelStationCard`) em Design System Novare (`HCard`)**: painel de detalhes com tabela comparativa de combustíveis (Gasolina Comum, Aditivada, Etanol e Diesel S10) e termômetro de paridade Etanol x Gasolina (regra dos 70%).
+- **Hierarquia de cobertura em 3 níveis**: resolução inteligente de preços: Posto individual pesquisado pela ANP -> Média municipal -> Média estadual (UF), assegurando referências confiáveis mesmo em rodovias ou municípios sem coleta direta.
+- **Apoio no registro de abastecimento na Garagem (`AddFuelDialog`)**: chip inteligente sugerindo o preço médio da cidade/estado atual a partir do GPS com preenchimento em 1 toque.
+- **Pipeline ETL semanal em Python (`scripts/sync_anp_fuel.py`) e workflow agendado no GitHub Actions**: ingestão e enriquecimento de dados da ANP com cruzamento de coordenadas OSM e IBGE gerando payload compactado (`anp-fuel-latest.json.gz`).
+- **Seed inicial embarcado com as 27 UFs e capitais brasileiras**: arquivo comprimido nos assets para operação offline imediata desde o primeiro boot.
+- **Migração de banco de dados Room `MIGRATION_3_4`**: adição das tabelas `anp_stations`, `anp_city_stats` e `anp_state_stats`.
+
 ## [0.6.0]
 
 ### Adicionado

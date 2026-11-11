@@ -27,14 +27,14 @@ flowchart TD
 
 | Módulo | Responsabilidade |
 |---|---|
-| `core-model` | `TrackPoint`, `TripStatsAccumulator` (filtros de GPS, distância, tempo em movimento, paradas, altimetria com histerese), `FuelMath`, `MaintenanceMath`, `FuelPlanner`, `MaintenanceReminders`, `GeoBox` |
+| `core-model` | `TrackPoint`, `TripStatsAccumulator` (filtros de GPS, distância, tempo em movimento, paradas, altimetria com histerese), `FuelMath`, `MaintenanceMath`, `FuelPlanner`, `FuelParityMath`, `MaintenanceReminders`, `GeoBox` |
 | `pod-protocol` | Pacotes de 20 bytes do Tripper Pod (18 de payload + CRC-16/CCITT-FALSE), handshake/PIN/hora, bússola, navegação, ícones, `PodSession` (keepalive e escritas serializadas) |
 | `pod-ble` | `BlePodLink` (cliente GATT **e** servidor GATT local), `PodService` em primeiro plano com reconexão automática |
-| `navigation` | `ValhallaClient` (custo `motorcycle`), `PhotonGeocoder`, `FuelStationFinder` (Overpass), `NavEngine` (projeção na polilinha, fora de rota, recálculo), `NavAnnouncer` (voz), `PodManeuvers` (Valhalla → ícones do Pod) |
+| `navigation` | `ValhallaClient` (custo `motorcycle`), `PhotonGeocoder`, `FuelStationFinder` (Overpass), `AnpFuelPayload` (DTOs e parser JSON), `NavEngine` (projeção na polilinha, fora de rota, recálculo), `NavAnnouncer` (voz), `PodManeuvers` (Valhalla → ícones do Pod) |
 | `trips` | Entidades Room, `TripRecorder`, `TrackingService` (serviço de localização em primeiro plano), `AndroidLocationSource` |
 | `maintenance` | Entidades e DAO de abastecimento, itens de manutenção e hodômetro |
 | `sync-core` | JVM puro: pacote `app.hunter.social` (amigos, rolê e localização compartilhada com `LiveLocation`, `LocationPermission`) e `SyncEngine` (baixa, mescla e sobe), `merge`/`mergeOdometer` (último a escrever vence, sem duplicar), `LocalStore`/`RemoteStore` (interfaces), `OnboardingFlow` (ordem da primeira abertura), `BikeCatalog` |
-| `app` | `AppDatabase` (Room v3), `HunterViewModel`, telas Compose (Design System Novare e ícones Font Awesome), `HunterMap` (MapLibre e marcadores de amigos), `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`), social e localização compartilhada (`SocialGraph`, `LiveLocationPublisher`, `FirestoreSocialStore`) e telas de entrada e perfil |
+| `app` | `AppDatabase` (Room v4), `HunterViewModel`, telas Compose (Design System Novare e ícones Font Awesome), `HunterMap` (MapLibre, marcadores de amigos e postos ANP), `FuelPriceRepository`, `FuelPriceSyncWorker`, `FuelStationCard`, `OfflineMaps`, `ReminderWorker`; conta e sincronização (`AccountGraph`, `AuthRepository`, `FirebaseAuthGateway`, `RoomLocalStore`, `FirestoreRemoteStore`, `SyncScheduler`), social e localização compartilhada (`SocialGraph`, `LiveLocationPublisher`, `FirestoreSocialStore`) e telas de entrada e perfil |
 
 ## Decisões
 
@@ -164,6 +164,64 @@ O `LiveLocationPublisher` (no módulo `app`, gerenciado pelo `SocialGraph`) oper
 ### Exclusão de conta
 - No fluxo de exclusão de conta (`deleteAllUserData`), `FirestoreSocialStore.deleteAllSocial` apaga o documento `localizacoes/{uid}` e remove todas as concessões em `permissoesLocalizacao` onde o usuário é remetente (`de`) ou destinatário (`para`), não deixando dados órfãos.
 
+## Preços de combustíveis e dados da ANP (Projeto 6)
+
+Integração com a Série Histórica de Preços de Combustíveis da ANP (Agência Nacional do Petróleo, Gás Natural e Biocombustíveis) para fornecer referências de preços e identificação de postos com operação 100% offline, projetada especificamente para o uso em viagens e estradas sem conectividade.
+
+### Arquitetura Offline-First (Room v4)
+- **Fonte Primária Local:** Diferente de abordagens baseadas em consultas dinâmicas à Overpass API (que sofrem com rate limits/HTTP 429 e dependência de sinal móvel), todos os postos georreferenciados e as estatísticas de preços residem localmente no `AppDatabase` (versão 4 via `MIGRATION_3_4`).
+- **Tabelas do Banco Local:**
+  - `anp_stations`: armazena postos com coordenadas (`lat`, `lon`), bandeira, endereço e os preços coletados na bomba (gasolina comum, aditivada, etanol e diesel S10).
+  - `anp_city_stats`: médias municipais consolidadas por chave da cidade (`cityKey`), com centróides geográficos e valores médios/mínimos/máximos de cada combustível.
+  - `anp_state_stats`: médias estaduais consolidadas por UF, com centróides para referência regional em rodovias ou municípios sem amostragem direta.
+- **Consultas Espaciais Eficientes:** O mapa executa consultas por *Bounding Box* (`latMin <= lat <= latMax AND lonMin <= lon <= lonMax`) indexadas em `(lat, lon)` e `cityKey`, retornando entidades em poucos milissegundos sem bloquear a thread principal de renderização.
+
+### Hierarquia de Resolução de Preços em 3 Níveis
+Para garantir transparência e precisão em qualquer ponto do território nacional, o sistema adota uma resolução em cascata:
+1. **Nível 1 (Posto Individual ANP):** Caso o posto selecionado conste na amostragem semanal da ANP, exibe os valores exatos apurados na bomba e a data da última coleta.
+2. **Nível 2 (Média Municipal):** Caso o posto pertença a um município coberto pela pesquisa mas não tenha sido visitado na semana, calcula e exibe a média apurada para a cidade (ex: `"~R$ 5,82 · Média de Recife/PE"`).
+3. **Nível 3 (Média Estadual / UF):** Em áreas rurais, rodovias interestaduais ou municípios não contemplados na amostragem semanal, utiliza o centróide mais próximo para determinar o Estado e exibe a média estadual consolidada (ex: `"~R$ 5,85 · Média estadual (PE)"`).
+
+### Pipeline ETL e GitHub Actions
+- **Script ETL (`scripts/sync_anp_fuel.py`):** Script em Python executado no backend de CI que realiza:
+  - Download automático das séries históricas de preços dos portais de dados abertos do governo federal (`gov.br/anp`).
+  - Cruzamento de dados com o extrato de postos do OpenStreetMap Brasil (`amenity=fuel`) e bases de centróides municipais do IBGE.
+  - Agregação estatística de médias, mínimos e máximos por município e por UF.
+  - Compactação dos dados tratados em formato GZIP (`anp-fuel-latest.json.gz`), resultando em um payload ultraleve (< 1.5 MB) para distribuição.
+- **Workflow Semanal (`.github/workflows/sync-anp.yml`):** Executado automaticamente aos domingos via GitHub Actions (com suporte a `workflow_dispatch` manual), publicando o asset atualizado via GitHub Releases sem custos de infraestrutura ou servidores dedicados.
+- **Seed Inicial Embarcado:** O aplicativo inclui nos assets (`assets/anp_fuel_seed.json.gz`) um pacote pré-carregado com as 27 capitais e estados, garantindo dados disponíveis imediatamente na primeira instalação, mesmo antes de qualquer sincronização de rede.
+
+### Termômetro de Paridade Etanol vs. Gasolina (`FuelParityMath`)
+- Localizado no módulo `core-model` (JVM puro), implementa a regra energética dos 70% de paridade (`PARITY_THRESHOLD = 0.70`):
+  - Razão calculada como `etanolPrice / gasolinaPrice`.
+  - Se a razão for $\le 0.70$, o etanol é vantajoso financeiramente em relação ao rendimento calórico médio dos motores flex.
+  - Provê funções semânticas (`formatParityDescription`) para exibição em badges visuais Novare (`StatusPill`), informando ao motociclista a porcentagem exata e qual combustível compensa (ex: *"Etanol a 68% da gasolina · Etanol compensa"* ou *"Etanol a 73% da gasolina · Gasolina compensa"*).
+
+### Repositório e Sincronização (`FuelPriceRepository` e `FuelPriceSyncWorker`)
+- **`FuelPriceRepository` (`app.hunter.app.fuel`):**
+  - Gerencia o acesso ao `AnpFuelDao` e coordena a hierarquia de resolução em 3 níveis.
+  - Executa resolução por raio esférico (`Geo.distanceM`) para identificar o município ou estado mais próximo a partir da coordenada GPS do dispositivo.
+  - Provê métodos reativos baseados em corrotinas para busca por *Bounding Box*, enriquecimento de postos do mapa e sugestões para a garagem.
+- **`FuelPriceSyncWorker`:**
+  - `CoroutineWorker` do Android Jetpack WorkManager com execução periódica (semanal) configurada para rodar preferencialmente em redes Wi-Fi e com bateria recarregando.
+  - Realiza o download seguro do arquivo `anp-fuel-latest.json.gz`, descompacta o fluxo de bytes em memória usando `GZIPInputStream` e persiste os novos lotes no Room via transações atômicas no `AnpFuelDao`.
+
+### Componentes de Interface (Design System Novare)
+- **Marcadores no `HunterMap`:**
+  - Renderizados com o ícone Font Awesome `fa_gas_pump` e balão de preço contrastante em cores Midnight Navy / Clean Slate.
+  - Integração com `FuelMapCoordinator` para gerenciar a visibilidade da camada de postos e atualizar o conjunto de marcadores conforme a câmera do mapa se desloca.
+  - Toque no marcador seleciona o posto e abre imediatamente o card de detalhes sem recarregar o mapa.
+- **Card Detalhado (`FuelStationCard`):**
+  - Componente de bottom sheet construído sobre o `HCard` do Novare Design System.
+  - Cabeçalho com nome do posto, bandeira com `SquircleIcon`, endereço e distância em tempo real em relação ao usuário.
+  - Tabela comparativa de combustíveis em grid com suporte a Gasolina Comum, Aditivada, Etanol e Diesel S10.
+  - Termômetro de paridade com `StatusPill` verde/âmbar contextualizando a relação Etanol x Gasolina.
+  - Ações diretas com botões Novare (`RumoPrimaryButton` para "Navegar até o posto" via `NavEngine` e `RumoSecondaryButton` para "Adicionar parada").
+- **Sugestão Inteligente na Garagem (`AddFuelDialog` em `GarageScreen`):**
+  - Ao abrir o diálogo de registro de abastecimento com GPS disponível, o app busca a cidade ou estado mais próximo via `FuelPriceRepository.getNearestCityStats`.
+  - Exibe um chip interativo com a média recente de preço do litro (ex: *"Preço médio recente em Recife: R$ 5,82/L"*).
+  - Um único toque no chip preenche o campo de preço por litro no formulário, agilizando o registro e prevenindo erros de digitação.
+
 ## Interface e Design System (Novare)
 
 A interface do Rumo é desenvolvida em Jetpack Compose e adota os padrões do **Design System Novare**:
@@ -200,13 +258,16 @@ watchdog de ~5 s (ping após 2 s ocioso, tela reenviada a cada 2 s). O protocolo
 | OpenFreeMap | Tiles vetoriais e estilos (claro e escuro) |
 | Valhalla (valhalla1.openstreetmap.de) | Rotas para moto, com alternativas e paradas |
 | Photon (photon.komoot.io) | Busca de endereços e lugares |
-| Overpass | Postos de combustível (`amenity=fuel`) |
+| Overpass | Postos de combustível (`amenity=fuel`) para busca online sob demanda |
+| Dados Abertos ANP / GitHub Releases | Série histórica de preços de combustíveis compactada (`anp-fuel-latest.json.gz`) |
 | Firebase (Authentication + Firestore, plano gratuito) | Conta, sincronização e amigos/rolê, só quando o `google-services.json` está no build; sem Storage nem Functions |
 
 Todos são gratuitos e de uso justo; para uso intenso, hospede o seu próprio Valhalla e Photon.
 
 ## Testes
 
-Mais de 400 testes unitários na JVM (mais os testes das regras do Firestore, no emulador): vetores reais do protocolo do Pod, motor de navegação percorrendo uma rota
-real, respostas reais gravadas das APIs, estatísticas de viagem, combustível, manutenção, lembretes, hodômetro, mesclagem e motor de sincronização, regras de conta.
+Mais de 450 testes unitários na JVM (mais os testes das regras do Firestore, no emulador): vetores reais do protocolo do Pod, motor de navegação percorrendo uma rota
+real, respostas reais gravadas das APIs, estatísticas de viagem, combustível, manutenção, lembretes, hodômetro, mesclagem e motor de sincronização, regras de conta,
+paridade energética de combustíveis (`FuelParityMath`), parser de payload da ANP, migração Room v3 -> v4 (`Migration3To4`), resolução em 3 níveis do repositório
+de postos e componentes visuais do mapa, card de detalhes e tela de garagem.
 Rodam no CI a cada push.
