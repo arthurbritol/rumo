@@ -55,6 +55,7 @@ import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.textAnchor
 import org.maplibre.android.style.layers.PropertyFactory.textColor
 import org.maplibre.android.style.layers.PropertyFactory.textField
+import org.maplibre.android.style.layers.PropertyFactory.textFont
 import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
 import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
 import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
@@ -196,7 +197,7 @@ fun HunterMap(
             }
             m.addOnMapClickListener { latLng ->
                 val screenPoint = m.projection.toScreenLocation(latLng)
-                val features = m.queryRenderedFeatures(screenPoint, "fuel-symbol", "fuel-label")
+                val features = m.queryRenderedFeatures(screenPoint, "fuel-circle", "fuel-symbol", "fuel-label")
                 if (features.isNotEmpty()) {
                     val stationId = features.first().getStringProperty("id")
                     val foundStation = latestFuelStations.find { it.id == stationId }
@@ -417,6 +418,12 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             circleRadius(11f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(4f),
         ),
     )
+    // Bolinha simples por baixo do ícone: aparece mesmo se a imagem ou a fonte do estilo falharem.
+    st.addLayer(
+        CircleLayer("fuel-circle", SRC_FUEL).withProperties(
+            circleRadius(9f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2.5f),
+        ),
+    )
     st.addLayer(
         SymbolLayer("fuel-symbol", SRC_FUEL).withProperties(
             iconImage("fuel-station"),
@@ -427,7 +434,8 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addLayer(
         SymbolLayer("fuel-label", SRC_FUEL).withProperties(
             textField(Expression.get("price")),
-            textSize(11f),
+            textFont(arrayOf("Noto Sans Bold")),
+            textSize(12f),
             textColor(if (dark) "#FFFFFF" else "#0F172A"),
             textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
             textHaloWidth(2f),
