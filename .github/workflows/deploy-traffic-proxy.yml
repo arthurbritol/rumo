@@ -19,8 +19,6 @@ jobs:
   deploy:
     name: Testar e publicar
     runs-on: ubuntu-latest
-    env:
-      HAS_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' && secrets.TOMTOM_KEY != '' && secrets.TRAFFIC_APP_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -32,8 +30,23 @@ jobs:
         working-directory: workers/traffic-proxy
         run: npm test
 
+      - name: Verificar segredos
+        id: sec
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TT_KEY: ${{ secrets.TOMTOM_KEY }}
+          APP_TOK: ${{ secrets.TRAFFIC_APP_TOKEN }}
+        run: |
+          if [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ] && [ -n "$TT_KEY" ] && [ -n "$APP_TOK" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Segredos da Cloudflare/TomTom ausentes: servidor de trânsito NÃO foi publicado. Veja docs/TRANSITO.md."
+          fi
+
       - name: Publicar na Cloudflare
-        if: env.HAS_SECRETS == 'true'
+        if: steps.sec.outputs.ok == 'true'
         uses: cloudflare/wrangler-action@v3
         env:
           TOMTOM_KEY: ${{ secrets.TOMTOM_KEY }}
@@ -46,7 +59,3 @@ jobs:
           secrets: |
             TOMTOM_KEY
             APP_TOKEN
-
-      - name: Aviso (segredos ausentes)
-        if: env.HAS_SECRETS != 'true'
-        run: echo "::warning::Segredos da Cloudflare/TomTom ausentes: servidor de trânsito NÃO foi publicado. Veja docs/TRANSITO.md."
