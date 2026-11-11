@@ -60,6 +60,24 @@ class FuelPriceRepositoryTest {
         override suspend fun clearStations() { stations.clear() }
         override suspend fun clearCityStats() { cityStats.clear() }
         override suspend fun clearStateStats() { stateStats.clear() }
+
+        override suspend fun updateStationPrices(
+            stationId: String,
+            precoGasolina: Double?,
+            precoGasolinaAdit: Double?,
+            precoEtanol: Double?,
+            precoDiesel: Double?,
+            dataColeta: String,
+        ) {
+            val st = stations[stationId] ?: return
+            stations[stationId] = st.copy(
+                precoGasolina = precoGasolina,
+                precoGasolinaAdit = precoGasolinaAdit,
+                precoEtanol = precoEtanol,
+                precoDiesel = precoDiesel,
+                dataColeta = dataColeta,
+            )
+        }
     }
 
     private fun compressGzip(content: String): ByteArray {
@@ -480,5 +498,47 @@ class FuelPriceRepositoryTest {
 
         // Confere que foram salvos no banco
         assertEquals(2, dao.stations.size)
+    }
+
+    @Test
+    fun `updateStationPrices atualiza precos no banco e define valores atualizados`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        val repo = FuelPriceRepository(dao = dao)
+        dao.insertAllStations(listOf(
+            AnpStationEntity(
+                id = "osm_test",
+                nome = "Posto Teste",
+                bandeira = "Shell",
+                cityKey = "sp_sp",
+                uf = "SP",
+                endereco = "Rua Teste, 100",
+                bairro = "Centro",
+                cep = "01000-000",
+                lat = -23.55,
+                lon = -46.63,
+                precoGasolina = 5.80,
+                precoGasolinaAdit = 6.00,
+                precoEtanol = 4.00,
+                precoDiesel = 5.90,
+                dataColeta = "01/11/2026",
+            )
+        ))
+
+        repo.updateStationPrices(
+            stationId = "osm_test",
+            precoGasolina = 5.59,
+            precoGasolinaAdit = 5.89,
+            precoEtanol = 3.69,
+            precoDiesel = null,
+            dataColeta = "11/11/2026",
+        )
+
+        val updated = repo.getStationsInBox(GeoBox(-24.0, -47.0, -23.0, -46.0))
+        assertEquals(1, updated.size)
+        assertEquals(5.59, updated[0].precoGasolina)
+        assertEquals(5.89, updated[0].precoGasolinaAdit)
+        assertEquals(3.69, updated[0].precoEtanol)
+        assertNull(updated[0].precoDiesel)
+        assertEquals("11/11/2026", updated[0].dataRef)
     }
 }

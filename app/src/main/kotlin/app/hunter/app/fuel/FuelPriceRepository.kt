@@ -275,6 +275,24 @@ class FuelPriceRepository(
         return null
     }
 
+    suspend fun updateStationPrices(
+        stationId: String,
+        precoGasolina: Double?,
+        precoGasolinaAdit: Double?,
+        precoEtanol: Double?,
+        precoDiesel: Double? = null,
+        dataColeta: String = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.forLanguageTag("pt-BR")).format(java.util.Date()),
+    ) {
+        dao.updateStationPrices(
+            stationId = stationId,
+            precoGasolina = precoGasolina,
+            precoGasolinaAdit = precoGasolinaAdit,
+            precoEtanol = precoEtanol,
+            precoDiesel = precoDiesel,
+            dataColeta = dataColeta,
+        )
+    }
+
     /**
      * Enriquece uma lista de postos (por exemplo, retornados pelo OpenStreetMap via Overpass)
      * com os preços de combustíveis da ANP em 3 níveis (posto -> cidade -> estado) e persiste no Room.

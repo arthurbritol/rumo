@@ -42,4 +42,14 @@ interface AnpFuelDao {
 
     @Query("DELETE FROM anp_state_stats")
     suspend fun clearStateStats()
+
+    @Query("UPDATE anp_stations SET precoGasolina = :precoGasolina, precoGasolinaAdit = :precoGasolinaAdit, precoEtanol = :precoEtanol, precoDiesel = :precoDiesel, dataColeta = :dataColeta WHERE id = :stationId")
+    suspend fun updateStationPrices(
+        stationId: String,
+        precoGasolina: Double?,
+        precoGasolinaAdit: Double?,
+        precoEtanol: Double?,
+        precoDiesel: Double?,
+        dataColeta: String,
+    )
 }
