@@ -213,6 +213,17 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleFuelLayer() = fuelCoordinator.toggleFuelLayer()
 
+    private val _trafficEnabled = MutableStateFlow(prefs.getBoolean("traffic_layer", false))
+
+    /** Camada de trânsito ligada (lembrada entre aberturas do app; começa desligada). */
+    val trafficEnabled: StateFlow<Boolean> = _trafficEnabled.asStateFlow()
+
+    fun toggleTraffic() {
+        val next = !_trafficEnabled.value
+        _trafficEnabled.value = next
+        prefs.edit().putBoolean("traffic_layer", next).apply()
+    }
+
     fun selectFuelStation(station: ResolvedFuelStation?) {
         fuelCoordinator.selectFuelStation(station)
         _stationReference.value = null

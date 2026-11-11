@@ -1,0 +1,7 @@
+name = "rumo-traffic"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+# Segredos (não ficam aqui): TOMTOM_KEY (chave da TomTom) e APP_TOKEN (token que o app envia).
+# Eles são gravados pelo workflow "Servidor de trânsito" a partir dos segredos do GitHub.

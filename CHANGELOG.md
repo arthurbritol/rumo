@@ -2,6 +2,12 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.19]
+
+### Adicionado
+- **Camada de trânsito** (botão do semáforo no mapa): imagens de fluxo da TomTom pedidas a um servidor intermediário (Cloudflare Worker em `workers/traffic-proxy`) que esconde a chave, exige o token do app, só atende o Brasil (zoom 8 a 16) e guarda cada imagem por 2 minutos para dividir as requisições entre todos da mesma região. O botão só aparece quando o servidor está configurado (veja `docs/TRANSITO.md`). Começa desligada.
+- Workflow `Servidor de trânsito` testa e publica o servidor; sem os segredos ele só testa.
+
 ## [0.7.18]
 
 ### Corrigido

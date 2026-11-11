@@ -79,6 +79,10 @@ jobs:
           fi
 
       - name: APK de release
+        env:
+          # Camada de trânsito (opcional): variável TRAFFIC_TILE_URL e segredo TRAFFIC_APP_TOKEN do repositório.
+          ORG_GRADLE_PROJECT_trafficTileUrl: ${{ vars.TRAFFIC_TILE_URL }}
+          ORG_GRADLE_PROJECT_trafficToken: ${{ secrets.TRAFFIC_APP_TOKEN }}
         run: ./gradlew :app:assembleRelease -Prumo.versionCode=${{ steps.ver.outputs.code }} -Prumo.versionName=${{ steps.ver.outputs.name }} --console=plain
 
       - name: Notas da release

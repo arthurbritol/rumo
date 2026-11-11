@@ -140,6 +140,9 @@ fun HunterMap(
     fuelStations: List<ResolvedFuelStation> = emptyList(),
     stateAverages: List<app.hunter.app.fuel.StateAverage> = emptyList(),
     cityAverages: List<app.hunter.app.fuel.CityAverage> = emptyList(),
+    /** Modelo de endereço das imagens de trânsito (null = sem camada) e se ela está ligada. */
+    trafficTileUrl: String? = null,
+    showTraffic: Boolean = false,
     route: List<LatLon>? = null,
     altRoutes: List<List<LatLon>> = emptyList(),
     trail: List<TrackPoint>? = null,
@@ -257,7 +260,7 @@ fun HunterMap(
         val m = map ?: return@LaunchedEffect
         style = null
         m.setStyle(if (dark) STYLE_DARK else STYLE_LIGHT) { st ->
-            setupStyle(st, density, dark)
+            setupStyle(st, density, dark, trafficTileUrl)
             style = st
         }
     }
@@ -293,6 +296,14 @@ fun HunterMap(
     LaunchedEffect(style, stateAverages) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_STATE) ?: return@LaunchedEffect
         src.setGeoJson(stateAverageFeatures(stateAverages))
+    }
+    LaunchedEffect(style, showTraffic) {
+        val layer = style?.getLayer("traffic-layer") ?: return@LaunchedEffect
+        layer.setProperties(
+            org.maplibre.android.style.layers.PropertyFactory.visibility(
+                if (showTraffic) org.maplibre.android.style.layers.Property.VISIBLE else org.maplibre.android.style.layers.Property.NONE,
+            ),
+        )
     }
     val markerImages = remember(style) { mutableSetOf<String>() }
     LaunchedEffect(style, fuelStations) {
@@ -419,7 +430,22 @@ private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
     return FeatureCollection.fromFeatures(features)
 }
 
-private fun setupStyle(st: Style, density: Float, dark: Boolean) {
+private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl: String?) {
+    // Trânsito: imagens em cima do mapa-base, mas abaixo dos nomes de ruas e das nossas camadas. Começa escondida.
+    if (trafficTileUrl != null) {
+        val tiles = org.maplibre.android.style.sources.TileSet("2.2.0", trafficTileUrl).apply {
+            minZoom = 8f
+            maxZoom = 16f
+            attribution = "© TomTom"
+        }
+        st.addSource(org.maplibre.android.style.sources.RasterSource("traffic-src", tiles, 512))
+        val layer = org.maplibre.android.style.layers.RasterLayer("traffic-layer", "traffic-src").withProperties(
+            org.maplibre.android.style.layers.PropertyFactory.rasterOpacity(0.9f),
+            org.maplibre.android.style.layers.PropertyFactory.visibility(org.maplibre.android.style.layers.Property.NONE),
+        )
+        val firstSymbol = st.layers.firstOrNull { it is SymbolLayer }?.id
+        if (firstSymbol != null) st.addLayerBelow(layer, firstSymbol) else st.addLayer(layer)
+    }
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
     st.addImage("fuel-station", fuelStationBitmap(density))

@@ -102,6 +102,8 @@ fun MapScreen(
     val focusTarget by vm.focusTarget.collectAsStateWithLifecycle()
     val focusNonce by vm.focusNonce.collectAsStateWithLifecycle()
     val fuelLayerEnabled by vm.fuelLayerEnabled.collectAsStateWithLifecycle()
+    val trafficEnabled by vm.trafficEnabled.collectAsStateWithLifecycle()
+    val trafficTileUrl = remember { TrafficLayer.template() }
     val isSearchingFuelOnline by vm.isSearchingFuelOnline.collectAsStateWithLifecycle()
     val fuelSearchStatus by vm.fuelSearchStatus.collectAsStateWithLifecycle()
     val stateAverages by vm.stateAverages.collectAsStateWithLifecycle()
@@ -194,6 +196,8 @@ fun MapScreen(
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
             stateAverages = if (fuelLayerEnabled) stateAverages else emptyList(),
             cityAverages = if (fuelLayerEnabled) cityAverages else emptyList(),
+            trafficTileUrl = trafficTileUrl,
+            showTraffic = trafficEnabled,
             route = if (navigating) nav.route?.shape else preview?.route?.shape,
             altRoutes = altRoutes,
             destination = if (navigating) nav.destination?.latLon else preview?.place?.latLon,
@@ -235,6 +239,14 @@ fun MapScreen(
                     selected = fuelLayerEnabled,
                     onClick = { vm.toggleFuelLayer() },
                 )
+                if (trafficTileUrl != null) {
+                    SquircleIconButton(
+                        iconRes = R.drawable.fa_traffic_light,
+                        description = "Camada de trânsito",
+                        selected = trafficEnabled,
+                        onClick = { vm.toggleTraffic() },
+                    )
+                }
                 if (!follow) {
                     CircleButton(
                         icon = Icons.Default.LocationOn,

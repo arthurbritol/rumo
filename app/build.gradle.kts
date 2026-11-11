@@ -26,6 +26,10 @@ android {
             ?: (rootProject.file("version.txt").readText().trim() + ".0")
         // O MapLibre traz bibliotecas nativas por arquitetura; celulares atuais são arm64.
         ndk { abiFilters += listOf("arm64-v8a") }
+        // Camada de trânsito: endereço do servidor intermediário e token do app (vêm do CI; vazios = sem camada).
+        fun quoted(name: String) = "\"" + ((project.findProperty(name) as String?) ?: "").trim().replace("\"", "") + "\""
+        buildConfigField("String", "TRAFFIC_TILE_URL", quoted("trafficTileUrl"))
+        buildConfigField("String", "TRAFFIC_TOKEN", quoted("trafficToken"))
     }
 
     // Chave fixa de release (vem do CI ou de variáveis de ambiente). Sem ela cai na chave de debug.
@@ -57,6 +61,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 }
