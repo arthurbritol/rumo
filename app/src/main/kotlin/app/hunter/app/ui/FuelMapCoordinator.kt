@@ -212,10 +212,11 @@ class FuelMapCoordinator(
             val refreshed = fetchStations(currentBox)
             val shown = refreshed.ifEmpty { fetched }
             _visibleFuelStations.value = shown
-            _searchStatus.value = if (fetched.isEmpty()) {
-                "Nenhum posto com preço da ANP aqui. Aproxime o mapa ou tente de novo."
+            val withPrice = shown.count { it.fonte != PriceSource.SEM_PRECO }
+            _searchStatus.value = if (shown.isEmpty()) {
+                "Nenhum posto encontrado aqui. Aproxime o mapa ou tente de novo."
             } else {
-                "${shown.size} postos no mapa · toque para buscar de novo"
+                "${shown.size} postos no mapa ($withPrice com preço da ANP) · toque para buscar de novo"
             }
         } catch (e: TimeoutCancellationException) {
             _searchStatus.value = "Os servidores de mapa não responderam. Toque para tentar de novo."

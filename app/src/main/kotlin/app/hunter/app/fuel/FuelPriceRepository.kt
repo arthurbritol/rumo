@@ -16,6 +16,8 @@ enum class PriceSource {
     POSTO_ANP,
     MEDIA_MUNICIPAL,
     MEDIA_ESTADUAL,
+    /** Posto achado no mapa que a ANP não pesquisou: aparece sem preço (o usuário pode informar). */
+    SEM_PRECO,
 }
 
 data class ResolvedFuelStation(
@@ -325,11 +327,27 @@ class FuelPriceRepository(
         dao.getAllStateStats().map { StateAverage(it.uf, it.lat, it.lon, it.gasolinaAvg, it.etanolAvg) }
 
     /**
-     * Postos para o mapa: só os que têm preço próprio da ANP (nunca a média da cidade ou do estado). A posição vem do
-     * mapa; o preço, do posto da ANP de mesmo endereço (ver [AnpMatcher]).
+     * Postos para o mapa: todos os que já foram achados na região. Os ligados a um posto da ANP ("anpm_") trazem o preço
+     * DELE; os que a ANP não pesquisou ("osm_") vêm sem preço (nunca uma média), até alguém informar.
      */
-    suspend fun getMapStations(box: GeoBox): List<ResolvedFuelStation> =
-        getStationsInBox(box).filter { it.id.startsWith(MATCHED_PREFIX) && it.fonte == PriceSource.POSTO_ANP }
+    suspend fun getMapStations(box: GeoBox): List<ResolvedFuelStation> {
+        val rows = dao.getStationsInBox(box.minLat, box.minLon, box.maxLat, box.maxLon)
+            .filter { it.id.startsWith(MATCHED_PREFIX) || it.id.startsWith(OSM_PREFIX) }
+        val matched = rows.filter { it.id.startsWith(MATCHED_PREFIX) }
+        return rows
+            // posto "sem preço" que depois foi ligado à ANP: fica só o ligado
+            .filter { r -> !r.id.startsWith(OSM_PREFIX) || matched.none { Geo.distanceM(it.lat, it.lon, r.lat, r.lon) < 40.0 } }
+            .map { st ->
+                val hasPrice = st.precoGasolina != null || st.precoEtanol != null || st.precoDiesel != null ||
+                    st.precoGasolinaAdit != null
+                ResolvedFuelStation(
+                    id = st.id, nome = st.nome, bandeira = st.bandeira, endereco = st.endereco, bairro = st.bairro,
+                    cep = st.cep, lat = st.lat, lon = st.lon, precoGasolina = st.precoGasolina,
+                    precoGasolinaAdit = st.precoGasolinaAdit, precoEtanol = st.precoEtanol, precoDiesel = st.precoDiesel,
+                    fonte = if (hasPrice) PriceSource.POSTO_ANP else PriceSource.SEM_PRECO, dataRef = st.dataColeta,
+                )
+            }
+    }
 
     /**
      * Liga cada posto do mapa ao posto da ANP de mesmo endereço, grava (para aparecer na hora nas próximas vezes) e
@@ -347,7 +365,7 @@ class FuelPriceRepository(
         suspend fun anpStationsOf(cityKey: String) =
             byCity.getOrPut(cityKey) { dao.getStationsByCity(cityKey).filter { it.id.startsWith("anp_") } }
 
-        val entities = places.mapNotNull { place ->
+        val entities = places.map { place ->
             val cityKeys = allCities
                 .map { it to Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
                 .filter { it.second <= 30_000.0 }
@@ -355,56 +373,60 @@ class FuelPriceRepository(
                 .take(3)
                 .map { it.first.cityKey }
             val candidates = cityKeys.flatMap { anpStationsOf(it) }
-            val scored = AnpMatcher.matchScored(place, candidates) ?: return@mapNotNull null
-            val anp = scored.station
-            if (anp.precoGasolina == null && anp.precoEtanol == null && anp.precoDiesel == null) return@mapNotNull null
+            val scored = AnpMatcher.matchScored(place, candidates)
+                ?.takeIf { it.station.precoGasolina != null || it.station.precoEtanol != null || it.station.precoDiesel != null }
             val osmBrand = detectBrand(place.name)
-            scored.score to AnpStationEntity(
-                id = MATCHED_PREFIX + anp.id,
-                nome = place.name.ifBlank { anp.nome },
-                bandeira = if (osmBrand != "Branca") osmBrand else anp.bandeira,
-                cityKey = anp.cityKey,
-                uf = anp.uf,
-                endereco = anp.endereco,
-                bairro = anp.bairro,
-                cep = anp.cep,
-                lat = place.lat,
-                lon = place.lon,
-                precoGasolina = anp.precoGasolina,
-                precoGasolinaAdit = anp.precoGasolinaAdit,
-                precoEtanol = anp.precoEtanol,
-                precoDiesel = anp.precoDiesel,
-                dataColeta = anp.dataColeta,
-            )
+            if (scored != null) {
+                val anp = scored.station
+                scored.score to AnpStationEntity(
+                    id = MATCHED_PREFIX + anp.id,
+                    nome = place.name.ifBlank { anp.nome },
+                    bandeira = if (osmBrand != "Branca") osmBrand else anp.bandeira,
+                    cityKey = anp.cityKey, uf = anp.uf, endereco = anp.endereco, bairro = anp.bairro, cep = anp.cep,
+                    lat = place.lat, lon = place.lon,
+                    precoGasolina = anp.precoGasolina, precoGasolinaAdit = anp.precoGasolinaAdit,
+                    precoEtanol = anp.precoEtanol, precoDiesel = anp.precoDiesel, dataColeta = anp.dataColeta,
+                )
+            } else {
+                val nearest = allCities.minByOrNull { Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
+                0 to AnpStationEntity(
+                    id = osmId(place), nome = place.name, bandeira = osmBrand,
+                    cityKey = nearest?.cityKey.orEmpty(), uf = nearest?.uf.orEmpty(),
+                    endereco = listOfNotNull(place.street, place.houseNumber).joinToString(", "),
+                    bairro = "", cep = place.postcode.orEmpty(), lat = place.lat, lon = place.lon,
+                    precoGasolina = null, precoGasolinaAdit = null, precoEtanol = null, precoDiesel = null, dataColeta = "",
+                )
+            }
         }
-            // Dois postos do mapa na mesma ligação: fica o de ligação mais forte (o outro não é esse posto da ANP).
+            // Dois postos do mapa na mesma ligação com a ANP: fica o de ligação mais forte.
             .groupBy { it.second.id }.values.map { group -> group.maxByOrNull { it.first }!!.second }
 
         dao.insertNewStations(entities)
+        // O que antes era "sem preço" e agora casou com a ANP deixa de existir como duplicado.
+        for (m in entities.filter { it.id.startsWith(MATCHED_PREFIX) }) {
+            places.filter { Geo.distanceM(it.lat, it.lon, m.lat, m.lon) < 1.0 }.forEach { dao.deleteStation(osmId(it)) }
+        }
 
         return entities.map { st ->
             ResolvedFuelStation(
-                id = st.id,
-                nome = st.nome,
-                bandeira = st.bandeira,
-                endereco = st.endereco,
-                bairro = st.bairro,
-                cep = st.cep,
-                lat = st.lat,
-                lon = st.lon,
-                precoGasolina = st.precoGasolina,
-                precoGasolinaAdit = st.precoGasolinaAdit,
-                precoEtanol = st.precoEtanol,
-                precoDiesel = st.precoDiesel,
-                fonte = PriceSource.POSTO_ANP,
+                id = st.id, nome = st.nome, bandeira = st.bandeira, endereco = st.endereco, bairro = st.bairro,
+                cep = st.cep, lat = st.lat, lon = st.lon, precoGasolina = st.precoGasolina,
+                precoGasolinaAdit = st.precoGasolinaAdit, precoEtanol = st.precoEtanol, precoDiesel = st.precoDiesel,
+                fonte = if (st.id.startsWith(MATCHED_PREFIX)) PriceSource.POSTO_ANP else PriceSource.SEM_PRECO,
                 dataRef = st.dataColeta,
             )
         }
     }
 
+    private fun osmId(place: Place): String =
+        OSM_PREFIX + String.format(java.util.Locale.ROOT, "%.5f_%.5f", place.lat, place.lon)
+
     companion object {
         /** Prefixo do id de um posto do mapa já ligado a um posto da ANP (o resto do id é o id da ANP). */
         const val MATCHED_PREFIX = "anpm_"
+
+        /** Prefixo do id de um posto achado no mapa que a ANP não pesquisou (resto do id = posição). */
+        const val OSM_PREFIX = "osm_"
 
         /** Sobe quando o seed embarcado muda de forma incompatível (v2: série histórica de 12 meses, ids por CNPJ). */
         const val SEED_VERSION = 3

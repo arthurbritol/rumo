@@ -503,6 +503,7 @@ fun formatStationMapPrice(station: ResolvedFuelStation): String {
     return when (station.fonte) {
         PriceSource.POSTO_ANP -> formatted
         PriceSource.MEDIA_MUNICIPAL, PriceSource.MEDIA_ESTADUAL -> "~$formatted"
+        PriceSource.SEM_PRECO -> "-"
     }
 }
 

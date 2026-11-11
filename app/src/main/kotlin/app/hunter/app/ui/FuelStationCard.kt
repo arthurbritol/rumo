@@ -63,6 +63,7 @@ fun formatPriceSourceNotice(source: PriceSource, dataRef: String): String {
         PriceSource.POSTO_ANP -> "Pesquisa oficial ANP · Coletado em $cleanDate"
         PriceSource.MEDIA_MUNICIPAL -> "Média estimada da cidade ($cleanDate)"
         PriceSource.MEDIA_ESTADUAL -> "Média estadual estimada ($cleanDate)"
+        PriceSource.SEM_PRECO -> "A ANP não pesquisou este posto · toque em Informar preços"
     }
 }
 

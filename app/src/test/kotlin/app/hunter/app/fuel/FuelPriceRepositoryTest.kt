@@ -453,7 +453,7 @@ class FuelPriceRepositoryTest {
     }
 
     @Test
-    fun `enrichAndSavePlaces so guarda postos que casam com um posto da ANP e usa o preco desse posto`() = runBlocking {
+    fun `enrichAndSavePlaces mostra todos os postos achados, com preco so para os que casam com a ANP`() = runBlocking {
         val dao = FakeAnpFuelDao()
         dao.insertAllStateStats(listOf(AnpStateStatsEntity("SP", -23.55, -46.63, gasolinaAvg = 5.79, etanolAvg = 3.85, dieselAvg = 5.69, dataReferencia = "2026-11-10")))
         dao.insertAllCityStats(listOf(
@@ -476,14 +476,23 @@ class FuelPriceRepositoryTest {
         )
         val enriched = repo.enrichAndSavePlaces(places)
 
-        assertEquals(1, enriched.size)
-        assertEquals(6.11, enriched[0].precoGasolina)          // preço DESTE posto, não a média 5,82
-        assertEquals(PriceSource.POSTO_ANP, enriched[0].fonte)
-        assertEquals("anpm_anp_1", enriched[0].id)
-        assertEquals(-22.89, enriched[0].lat, 1e-9)            // posição do mapa, não a da cidade
-        // No mapa só aparece o posto ligado; os da base da ANP (posição da cidade) não.
+        assertEquals(2, enriched.size)
+        val matched = enriched.single { it.id == "anpm_anp_1" }
+        assertEquals(6.11, matched.precoGasolina)              // preço DESTE posto, não a média 5,82
+        assertEquals(PriceSource.POSTO_ANP, matched.fonte)
+        assertEquals(-22.89, matched.lat, 1e-9)                // posição do mapa, não a da cidade
+        val semPreco = enriched.single { it.id.startsWith("osm_") }
+        assertEquals(PriceSource.SEM_PRECO, semPreco.fonte)    // a ANP não pesquisou: aparece, mas sem preço nem média
+        assertNull(semPreco.precoGasolina)
+        // No mapa aparecem os dois; os da base da ANP (posição da cidade) não.
         val box = app.hunter.model.GeoBox(-23.5, -47.5, -22.5, -46.5)
-        assertEquals(listOf("anpm_anp_1"), repo.getMapStations(box).map { it.id })
+        assertEquals(setOf("anpm_anp_1", semPreco.id), repo.getMapStations(box).map { it.id }.toSet())
+
+        // Quem informa o preço de um posto sem preço passa a ver o valor dele no mapa.
+        repo.updateStationPrices(semPreco.id, 6.30, null, 4.10, null, "11/11/2026")
+        val informed = repo.getMapStations(box).single { it.id == semPreco.id }
+        assertEquals(6.30, informed.precoGasolina)
+        assertEquals(PriceSource.POSTO_ANP, informed.fonte)
     }
 
     @Test

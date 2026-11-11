@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.11]
+
+### Corrigido
+- **Postos não apareciam no mapa**: o mapa só mostrava postos ligados a um posto da ANP, e a ANP pesquisa só uma parte deles (em Serra/ES, 29 de ~90). Agora **todos os postos achados aparecem**; os que a ANP pesquisou mostram o preço próprio deles, e os demais aparecem sem preço (nunca uma média), com o cartão oferecendo "Informar preços". O aviso do mapa diz quantos postos há e quantos têm preço da ANP.
+
 ## [0.7.10]
 
 ### Corrigido
