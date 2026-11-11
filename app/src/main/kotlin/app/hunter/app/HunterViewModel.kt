@@ -1,11 +1,14 @@
 package app.hunter.app
 
 import android.app.Application
+import android.content.Context
+import android.location.LocationManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hunter.app.data.PlaceEntity
 import app.hunter.app.fuel.FuelPriceReference
 import app.hunter.app.fuel.FuelPriceRepository
+import app.hunter.app.fuel.FuelPriceSyncWorker
 import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.app.sync.ProfilePrefs
 import app.hunter.app.ui.FuelMapCoordinator
@@ -164,6 +167,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         FuelMapCoordinator(
             scope = viewModelScope,
             repository = fuelRepo,
+            stationFinder = NavServices.fuelStations,
             ioDispatcher = Dispatchers.IO,
             debounceMs = 300L,
         )
@@ -171,6 +175,9 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Estado da camada de postos no mapa (ligada/desligada). */
     val fuelLayerEnabled: StateFlow<Boolean> get() = fuelCoordinator.fuelLayerEnabled
+
+    /** Indicador se está buscando postos na web via Overpass. */
+    val isSearchingFuelOnline: StateFlow<Boolean> get() = fuelCoordinator.isSearchingOnline
 
     /** Posto de combustível selecionado para exibição do card de detalhes. */
     val selectedFuelStation: StateFlow<ResolvedFuelStation?> get() = fuelCoordinator.selectedFuelStation
@@ -183,6 +190,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     fun selectFuelStation(station: ResolvedFuelStation?) = fuelCoordinator.selectFuelStation(station)
 
     fun updateMapBoundingBox(box: GeoBox) = fuelCoordinator.updateMapBoundingBox(box)
+
+    fun searchFuelStationsInArea() = fuelCoordinator.searchCurrentArea()
 
     fun navigateToStation(station: ResolvedFuelStation) {
         selectFuelStation(null)
@@ -211,13 +220,54 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun getFuelPriceReference(): FuelPriceReference? {
-        val loc = _live.value ?: return null
-        return fuelRepo.getNearestReferencePrice(loc.latitude, loc.longitude)
+        val loc = _live.value ?: kotlinx.coroutines.withTimeoutOrNull(2_000L) {
+            kotlinx.coroutines.flow.filterNotNull(_live).first()
+        }
+        val (lat, lon) = if (loc != null) {
+            loc.latitude to loc.longitude
+        } else {
+            val lastSystemLoc = try {
+                val lm = getApplication<HunterApp>().getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    ?: lm?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            } catch (_: SecurityException) {
+                null
+            }
+            if (lastSystemLoc != null) {
+                lastSystemLoc.latitude to lastSystemLoc.longitude
+            } else {
+                val lastTrip = try { hunter.tripDao.all().firstOrNull() } catch (_: Exception) { null }
+                if (lastTrip != null && lastTrip.startLat != 0.0) {
+                    lastTrip.startLat to lastTrip.startLon
+                } else {
+                    -23.5505 to -46.6333 // Marco zero de referência SP
+                }
+            }
+        }
+        return fuelRepo.getNearestReferencePrice(lat, lon)
     }
 
     fun calculateSuggestedCost(liters: Double, pricePerLiter: Double): Double =
         if (liters <= 0.0 || pricePerLiter <= 0.0 || !liters.isFinite() || !pricePerLiter.isFinite()) 0.0
         else liters * pricePerLiter
+
+    private val _anpSyncStatus = MutableStateFlow<String?>(null)
+    val anpSyncStatus: StateFlow<String?> = _anpSyncStatus.asStateFlow()
+
+    fun syncAnpPricesNow() {
+        viewModelScope.launch {
+            _anpSyncStatus.value = "Sincronizando base da ANP..."
+            try {
+                FuelPriceSyncWorker.syncNow(getApplication())
+                fuelRepo.ensureSeedLoaded()
+                kotlinx.coroutines.delay(1200L)
+                _anpSyncStatus.value = "Preços da ANP atualizados"
+            } catch (e: Exception) {
+                _anpSyncStatus.value = "Erro ao sincronizar preços"
+            }
+        }
+    }
 
     // ---------- conexão ----------
 

@@ -8,6 +8,7 @@ import app.hunter.app.data.anp.AnpStationEntity
 import app.hunter.model.Geo
 import app.hunter.model.GeoBox
 import app.hunter.nav.AnpFuelPayload
+import app.hunter.nav.Place
 import java.io.InputStream
 import java.util.zip.GZIPInputStream
 
@@ -272,5 +273,94 @@ class FuelPriceRepository(
         }
 
         return null
+    }
+
+    /**
+     * Enriquece uma lista de postos (por exemplo, retornados pelo OpenStreetMap via Overpass)
+     * com os preços de combustíveis da ANP em 3 níveis (posto -> cidade -> estado) e persiste no Room.
+     */
+    suspend fun enrichAndSavePlaces(places: List<Place>): List<ResolvedFuelStation> {
+        if (places.isEmpty()) return emptyList()
+
+        val allCities = dao.getAllCityStats()
+        val allStates = dao.getAllStateStats()
+        val statesByUf = allStates.associateBy { it.uf.uppercase() }
+
+        val entities = places.map { place ->
+            val nearestCity = allCities
+                .map { it to Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
+                .minByOrNull { it.second }
+                ?.takeIf { it.second <= 50_000.0 }
+                ?.first
+
+            val nearestState = (nearestCity?.let { statesByUf[it.uf.uppercase()] })
+                ?: allStates.minByOrNull { Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
+
+            val brand = detectBrand(place.name)
+            val stationId = "osm_${place.lat.toString().replace('.', '_')}_${place.lon.toString().replace('.', '_')}"
+
+            val gc = nearestCity?.gasolinaAvg ?: nearestState?.gasolinaAvg
+            val ga = nearestCity?.gasolinaAditAvg
+            val et = nearestCity?.etanolAvg ?: nearestState?.etanolAvg
+            val ds = nearestCity?.dieselAvg ?: nearestState?.dieselAvg
+            val dateRef = nearestCity?.dataReferencia ?: nearestState?.dataReferencia.orEmpty()
+
+            AnpStationEntity(
+                id = stationId,
+                nome = place.name,
+                bandeira = brand,
+                cityKey = nearestCity?.cityKey.orEmpty(),
+                uf = nearestCity?.uf ?: nearestState?.uf.orEmpty(),
+                endereco = place.subtitle.orEmpty(),
+                bairro = "",
+                cep = "",
+                lat = place.lat,
+                lon = place.lon,
+                precoGasolina = gc,
+                precoGasolinaAdit = ga,
+                precoEtanol = et,
+                precoDiesel = ds,
+                dataColeta = dateRef,
+            )
+        }
+
+        dao.insertAllStations(entities)
+
+        return entities.map { st ->
+            val fonte = when {
+                st.cityKey.isNotBlank() -> PriceSource.MEDIA_MUNICIPAL
+                else -> PriceSource.MEDIA_ESTADUAL
+            }
+            ResolvedFuelStation(
+                id = st.id,
+                nome = st.nome,
+                bandeira = st.bandeira,
+                endereco = st.endereco,
+                bairro = st.bairro,
+                cep = st.cep,
+                lat = st.lat,
+                lon = st.lon,
+                precoGasolina = st.precoGasolina,
+                precoGasolinaAdit = st.precoGasolinaAdit,
+                precoEtanol = st.precoEtanol,
+                precoDiesel = st.precoDiesel,
+                fonte = fonte,
+                dataRef = st.dataColeta,
+            )
+        }
+    }
+
+    companion object {
+        fun detectBrand(name: String): String {
+            val n = name.lowercase()
+            return when {
+                "shell" in n -> "Shell"
+                "ipiranga" in n -> "Ipiranga"
+                "petrobras" in n || "vibra" in n || "br mania" in n || " br " in " $n " -> "Petrobras / Vibra"
+                "ale" in " $n ".split(" ", "-", "_", "/") -> "Ale"
+                "rodoil" in n -> "Rodoil"
+                else -> "Branca"
+            }
+        }
     }
 }

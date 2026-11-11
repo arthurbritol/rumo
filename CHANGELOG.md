@@ -2,6 +2,16 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.2]
+
+### Corrigido e Aprimorado
+- **Busca dinâmica de postos reais no mapa (`HunterMap` + `FuelStationFinder`)**: quando o cache local de uma área não possui postos, o app busca postos reais do OpenStreetMap via Overpass, cruza instantaneamente com as médias da ANP em 3 níveis e salva no Room para consultas offline subsequentes.
+- **Feedback de busca de postos**: pílula visual Novare indicando "Buscando postos próximos..." enquanto a consulta ao OpenStreetMap é executada.
+- **Sincronização da ANP no GitHub**: URL de download corrigida para `arthurbritol/rumo` e script ETL com suporte automático a arquivos `.zip` e `.csv` dos Dados Abertos Gov.br da ANP.
+- **Atualização manual de preços no Perfil (`ProfileScreen`)**: nova seção "Preços de Combustíveis (ANP)" com informações de cobertura e botão para disparar a sincronização imediata.
+- **Resiliência na sugestão da Garagem (`AddFuelupDialog`)**: fallback de localização (GPS quente, LocationManager, última viagem gravada ou marco zero estadual), garantindo que a sugestão de preço sempre apareça.
+- **Seed inicial embarcado ampliado**: base com todas as 27 UFs e cidades polo adicionais (Campinas, Santos, Ribeirão Preto, São José dos Campos, Sorocaba, Uberlândia, Juiz de Fora, Niterói, Londrina, Maringá, Joinville, Caxias do Sul, Feira de Santana, Caruaru, Petrolina, Campina Grande).
+
 ## [0.7.0]
 
 ### Adicionado

@@ -21,6 +21,7 @@ import re
 import sys
 import unicodedata
 import urllib.request
+import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -85,9 +86,33 @@ CITY_COORDINATES: Dict[str, Tuple[float, float]] = {
     "sp_campinas": (-22.90560, -47.06080),
     "sp_santos": (-23.96080, -46.33360),
     "sp_ribeirao_preto": (-21.17670, -47.81080),
+    "sp_sao_jose_dos_campos": (-23.1896, -45.8841),
+    "sp_sorocaba": (-23.5015, -47.4526),
+    "sp_piracicaba": (-22.7338, -47.6476),
+    "sp_bauru": (-22.3145, -49.0587),
+    "mg_uberlandia": (-18.9186, -48.2772),
+    "mg_juiz_de_fora": (-21.7642, -43.3503),
+    "rj_niteroi": (-22.8832, -43.1034),
+    "pr_londrina": (-23.3045, -51.1696),
+    "pr_maringa": (-23.4210, -51.9331),
+    "sc_joinville": (-26.3044, -48.8456),
+    "rs_caxias_do_sul": (-29.1678, -51.1794),
+    "ba_feira_de_santana": (-12.2576, -38.9667),
+    "pe_caruaru": (-8.2833, -35.9761),
+    "pe_petrolina": (-9.3891, -40.5028),
+    "pb_campina_grande": (-7.2307, -35.8817),
     "se_aracaju": (-10.91110, -37.07170),
     "to_palmas": (-10.18440, -48.33360),
 }
+
+# URLs oficiais candidatas da Série Histórica de Combustíveis Automotivos (ANP / Gov.br)
+OFFICIAL_ANP_CANDIDATE_URLS: List[str] = [
+    "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/dsas/ca/ca-2024-02.csv",
+    "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/dsas/ca/ca-2024-02.zip",
+    "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/dsas/ca/ca-2024-01.csv",
+    "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/dsas/ca/ca-2024-01.zip",
+]
+
 
 
 def unaccent(text: str) -> str:
@@ -511,6 +536,48 @@ def generate_seed_payload() -> Dict[str, Any]:
                 "data": ref_date,
             })
 
+    # Cidades polo adicionais para ampla cobertura de referências municipais
+    hub_cities: List[Tuple[str, str, float, float, float]] = [
+        ("SP", "Campinas", 5.82, 3.89, 5.72),
+        ("SP", "Santos", 5.89, 3.99, 5.79),
+        ("SP", "Ribeirão Preto", 5.75, 3.79, 5.69),
+        ("SP", "São José dos Campos", 5.79, 3.85, 5.75),
+        ("SP", "Sorocaba", 5.78, 3.82, 5.70),
+        ("MG", "Uberlândia", 5.85, 3.92, 5.75),
+        ("MG", "Juiz de Fora", 5.89, 3.99, 5.79),
+        ("RJ", "Niterói", 5.95, 4.22, 5.85),
+        ("PR", "Londrina", 5.92, 3.99, 5.82),
+        ("PR", "Maringá", 5.95, 4.02, 5.85),
+        ("SC", "Joinville", 6.05, 4.25, 5.95),
+        ("RS", "Caxias do Sul", 6.09, 4.39, 5.99),
+        ("BA", "Feira de Santana", 6.15, 4.35, 5.99),
+        ("PE", "Caruaru", 5.85, 4.09, 5.75),
+        ("PE", "Petrolina", 5.95, 4.19, 5.85),
+        ("PB", "Campina Grande", 5.85, 4.15, 5.75),
+    ]
+    for h_uf, h_mun, h_gc, h_et, h_ds in hub_cities:
+        h_key = normalize_city_key(h_uf, h_mun)
+        h_lat, h_lon = get_coordinates(h_key, h_uf)
+        cidades[h_key] = {
+            "uf": h_uf,
+            "mun": h_mun,
+            "lat": h_lat,
+            "lon": h_lon,
+            "gcAvg": h_gc,
+            "gcMin": round(h_gc - 0.20, 2),
+            "gcMax": round(h_gc + 0.30, 2),
+            "gaAvg": round(h_gc + 0.25, 2),
+            "gaMin": round(h_gc + 0.05, 2),
+            "gaMax": round(h_gc + 0.50, 2),
+            "etAvg": h_et,
+            "etMin": round(h_et - 0.15, 2),
+            "etMax": round(h_et + 0.20, 2),
+            "dsAvg": h_ds,
+            "dsMin": round(h_ds - 0.15, 2),
+            "dsMax": round(h_ds + 0.25, 2),
+            "ref": ref_date,
+        }
+
     # Adiciona postos extras detalhados para capitais de alta densidade (SP, RJ, PE, MG)
     extras = [
         ("sp_sao_paulo", "SP", "Posto Ipiranga Av Paulista", "Ipiranga", "Av. Paulista, 1500", "Bela Vista", -23.5614, -46.6565, 5.75, 5.99, 3.79, 5.65),
@@ -548,19 +615,30 @@ def generate_seed_payload() -> Dict[str, Any]:
 
 
 def read_source(input_source: str) -> str:
-    """Lê CSV da ANP a partir de arquivo local ou URL remota HTTP/HTTPS."""
+    """Lê CSV da ANP a partir de arquivo local ou URL remota HTTP/HTTPS, suportando .zip, .gz e .csv."""
     if input_source.startswith("http://") or input_source.startswith("https://"):
         req = urllib.request.Request(
             input_source,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Rumo-ETL/1.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Rumo-ETL/1.0"
+            },
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=90) as resp:
             raw_bytes = resp.read()
     else:
         with open(input_source, "rb") as f:
             raw_bytes = f.read()
 
-    # Descomprime se estiver gzippado
+    # Descomprime se for arquivo ZIP (padrão Gov.br)
+    if raw_bytes.startswith(b"PK\x03\x04") or raw_bytes.startswith(b"PK"):
+        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
+            csv_candidates = [n for n in z.namelist() if n.lower().endswith(".csv") or n.lower().endswith(".txt")]
+            if csv_candidates:
+                raw_bytes = z.read(csv_candidates[0])
+            elif z.namelist():
+                raw_bytes = z.read(z.namelist()[0])
+
+    # Descomprime se estiver gzippado (.gz)
     if raw_bytes.startswith(b"\x1f\x8b"):
         raw_bytes = gzip.decompress(raw_bytes)
 
@@ -571,21 +649,50 @@ def read_source(input_source: str) -> str:
         return raw_bytes.decode("latin-1")
 
 
+def auto_fetch_anp_content() -> Optional[str]:
+    """Tenta baixar a base mais recente da ANP a partir das URLs oficiais candidatas."""
+    for url in OFFICIAL_ANP_CANDIDATE_URLS:
+        try:
+            print(f"Tentando baixar série histórica ANP de: {url} ...")
+            content = read_source(url)
+            if len(content) > 10_000 and ("municipio" in content.lower() or "revenda" in content.lower()):
+                print(f"Sucesso ao baixar dados oficiais da ANP ({len(content)} caracteres) de {url}")
+                return content
+        except Exception as e:
+            print(f"Aviso: falha ao acessar {url}: {e}")
+    return None
+
+
 def process_anp_data(
     input_source: Optional[str],
     output_path: str,
     max_stations: Optional[int] = None,
     use_seed_fallback: bool = False,
+    auto_anp: bool = False,
 ) -> None:
     """Pipeline de processamento de ponta a ponta."""
-    if use_seed_fallback or not input_source:
-        payload = generate_seed_payload()
-        if max_stations and max_stations > 0:
-            payload["postos"] = payload["postos"][:max_stations]
-    else:
-        content = read_source(input_source)
+    content: Optional[str] = None
+    if auto_anp and not input_source:
+        content = auto_fetch_anp_content()
+
+    if not content and input_source:
+        try:
+            content = read_source(input_source)
+        except Exception as e:
+            print(f"Erro ao ler fonte informada ({input_source}): {e}. Recorrendo ao seed.")
+
+    if content:
         rows = parse_csv_content(content)
-        payload = build_payload(rows, max_stations=max_stations)
+        if rows:
+            payload = build_payload(rows, max_stations=max_stations)
+        else:
+            print("Aviso: nenhum registro válido encontrado no CSV. Usando seed de fallback.")
+            payload = generate_seed_payload()
+    else:
+        payload = generate_seed_payload()
+
+    if max_stations and max_stations > 0:
+        payload["postos"] = payload["postos"][:max_stations]
 
     # Garante diretório de destino
     parent_dir = os.path.dirname(os.path.abspath(output_path))
@@ -610,7 +717,7 @@ def main() -> None:
         "--input",
         type=str,
         default=None,
-        help="Caminho do arquivo CSV ou URL remota da ANP. Se omitido, usa geração de seed.",
+        help="Caminho do arquivo CSV/ZIP ou URL remota da ANP. Se omitido, usa busca automática ou seed.",
     )
     parser.add_argument(
         "--output",
@@ -625,6 +732,11 @@ def main() -> None:
         help="Limite máximo de postos para persistir no payload",
     )
     parser.add_argument(
+        "--auto-anp",
+        action="store_true",
+        help="Tenta baixar automaticamente a série histórica oficial mais recente da ANP no Gov.br",
+    )
+    parser.add_argument(
         "--generate-seed",
         action="store_true",
         help="Força a geração do seed inicial das 27 capitais/estados",
@@ -636,7 +748,8 @@ def main() -> None:
         input_source=args.input,
         output_path=args.output,
         max_stations=args.max_stations,
-        use_seed_fallback=args.generate_seed or (args.input is None),
+        use_seed_fallback=args.generate_seed,
+        auto_anp=args.auto_anp or (args.input is None and not args.generate_seed),
     )
 
 

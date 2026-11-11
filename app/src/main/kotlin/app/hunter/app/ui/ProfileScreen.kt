@@ -87,6 +87,8 @@ fun ProfileRoute(
     onBack: () -> Unit,
     updateCheck: UpdateCheck = UpdateCheck.IDLE,
     onCheckUpdate: () -> Unit = {},
+    anpSyncStatus: String? = null,
+    onSyncAnpPrices: () -> Unit = {},
     /** Logado: se a pessoa aparece na busca por nome; nulo esconde a opção. */
     searchable: Boolean? = null,
     onSearchableChange: (Boolean) -> Unit = {},
@@ -144,6 +146,8 @@ fun ProfileRoute(
         versionName = versionName,
         updateCheck = updateCheck,
         onCheckUpdate = onCheckUpdate,
+        anpSyncStatus = anpSyncStatus,
+        onSyncAnpPrices = onSyncAnpPrices,
         searchable = searchable.takeIf { state is AuthState.SignedIn },
         onSearchableChange = onSearchableChange,
     )
@@ -213,6 +217,8 @@ fun ProfileScreen(
     versionName: String = "",
     updateCheck: UpdateCheck = UpdateCheck.IDLE,
     onCheckUpdate: () -> Unit = {},
+    anpSyncStatus: String? = null,
+    onSyncAnpPrices: () -> Unit = {},
     searchable: Boolean? = null,
     onSearchableChange: (Boolean) -> Unit = {},
     profile: UserProfile? = null,
@@ -652,6 +658,45 @@ fun ProfileScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
+        }
+
+        // 5b. Seção: Preços de Combustíveis (ANP)
+        HCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SquircleIcon(
+                    iconRes = R.drawable.fa_gas_pump,
+                    backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    tintColor = MaterialTheme.colorScheme.primary,
+                    contentDescription = "Preços ANP",
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "Preços de Combustíveis (ANP)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = anpSyncStatus ?: "Base de referência com 27 UFs e cidades polo integradas.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (anpSyncStatus != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            RumoSecondaryButton(
+                text = "Sincronizar preços agora",
+                onClick = onSyncAnpPrices,
+                leadingIconRes = R.drawable.fa_gas_pump,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         // 6. Seção: Ações de Conta

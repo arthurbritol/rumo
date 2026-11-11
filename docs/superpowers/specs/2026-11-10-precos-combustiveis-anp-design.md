@@ -1,7 +1,7 @@
 # Mini Projeto 6: Preços de Combustíveis (Série Histórica ANP & Postos no Mapa)
 
 **Data:** 10 de novembro de 2026  
-**Status:** Pronto para Aprovação do Usuário  
+**Status:** Revisado pós-teste em celular real
 **Design System:** Novare (Midnight Navy / Clean Slate) com Font Awesome 6  
 **Domínio:** Android (Kotlin, Jetpack Compose, Room), JVM puro (`core-model`, `navigation`), Ingestão de Dados (Python/ETL no GitHub Actions)
 
@@ -257,3 +257,22 @@ Componente `HCard` exibido na base da tela ao selecionar um posto:
 4. **Verificação de Regressão e Build:**
    - `./gradlew :sync-core:test :app:testDebugUnitTest`
    - `./gradlew assembleRelease`
+
+---
+
+## 11. Revisão Pós-Teste em Celular Real
+
+Com base no teste de campo no celular, foram identificados e solucionados os seguintes pontos:
+
+1. **Correção de Endpoint do Sync Worker:**
+   - Repositório corrigido para `arthurbritol/rumo` em `FuelPriceSyncWorker.DEFAULT_DOWNLOAD_URL`.
+2. **Integração Real de Postos no Mapa com OpenStreetMap / Overpass (`FuelStationFinder`):**
+   - Ao ativar a camada de postos no `MapScreen`, se o cache local de postos (`anp_stations`) estiver vazio na bounding box visível, o app consulta os postos reais do OpenStreetMap via `FuelStationFinder.near()`.
+   - Cada posto retornado é enriquecido com a inteligência de preços da ANP (Nível 1 direto se houver correspondência, Nível 2 média municipal, ou Nível 3 média estadual) e persistido no Room (`anp_stations`), tornando-os disponíveis permanentemente offline.
+   - Feedback visual através de status/pílula no mapa indicando busca de postos.
+3. **Atualização Manual de Preços ANP no Perfil (`ProfileScreen`):**
+   - Seção dedicada para visualização do status da base ANP (versão/data de referência) e botão "Sincronizar preços da ANP agora" com feedback visual de progresso.
+4. **Resiliência na Sugestão de Preço da Garagem (`AddFuelupDialog`):**
+   - Fallback de localização para `LocationManager.getLastKnownLocation` ou última viagem gravada quando o GPS contínuo (`_live.value`) ainda não emitiu.
+5. **Automação do Script ETL da ANP:**
+   - Suporte a download de dados abertos da ANP (.csv, .zip, .gz) no `scripts/sync_anp_fuel.py`, com URLs candidatas do portal oficial do Gov.br e enriquecimento do seed embarcado com ampla cobertura.

@@ -63,7 +63,7 @@ class FuelPriceSyncWorker(
     }
 
     companion object {
-        const val DEFAULT_DOWNLOAD_URL = "https://github.com/ArthurLucio/rumo-app/releases/download/anp-data-latest/anp-fuel-latest.json.gz"
+        const val DEFAULT_DOWNLOAD_URL = "https://github.com/arthurbritol/rumo/releases/download/anp-data-latest/anp-fuel-latest.json.gz"
         const val KEY_DOWNLOAD_URL = "download_url"
         const val UNIQUE_WORK_NAME = "fuel_price_sync_weekly"
 

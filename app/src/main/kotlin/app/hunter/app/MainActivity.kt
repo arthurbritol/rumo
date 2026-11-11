@@ -225,6 +225,8 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             onBack = { overlay = Overlay.NONE.name },
                             updateCheck = vmProvider().updateCheck.collectAsStateWithLifecycle().value,
                             onCheckUpdate = { vmProvider().checkUpdate(force = true) },
+                            anpSyncStatus = vmProvider().anpSyncStatus.collectAsStateWithLifecycle().value,
+                            onSyncAnpPrices = { vmProvider().syncAnpPricesNow() },
                             searchable = socialState.searchVisible,
                             onSearchableChange = socialVm::answerSearchPrompt,
                         )

@@ -415,4 +415,70 @@ class FuelPriceRepositoryTest {
             FuelPriceSyncWorker.parseCompressedStream(ByteArrayInputStream(corruptedGzip))
         }
     }
+
+    @Test
+    fun `detectBrand reconhece marcas principais e fallback para Branca`() {
+        assertEquals("Shell", FuelPriceRepository.detectBrand("Auto Posto Shell Portal"))
+        assertEquals("Ipiranga", FuelPriceRepository.detectBrand("Posto Ipiranga Centro"))
+        assertEquals("Petrobras / Vibra", FuelPriceRepository.detectBrand("Posto BR Mania"))
+        assertEquals("Petrobras / Vibra", FuelPriceRepository.detectBrand("Petrobras Distribuidora"))
+        assertEquals("Ale", FuelPriceRepository.detectBrand("Posto Ale Rodovia"))
+        assertEquals("Branca", FuelPriceRepository.detectBrand("Auto Posto Modelo Independente"))
+    }
+
+    @Test
+    fun `enrichAndSavePlaces enriquece postos do OSM com precos da ANP e persiste no DAO`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        dao.insertAllStateStats(listOf(
+            AnpStateStatsEntity("SP", -23.55, -46.63, gasolinaAvg = 5.79, etanolAvg = 3.85, dieselAvg = 5.69, dataReferencia = "2026-11-10")
+        ))
+        dao.insertAllCityStats(listOf(
+            AnpCityStatsEntity(
+                cityKey = "sp_campinas",
+                uf = "SP",
+                municipio = "Campinas",
+                lat = -22.90,
+                lon = -47.06,
+                gasolinaAvg = 5.82,
+                gasolinaMin = 5.60,
+                gasolinaMax = 6.00,
+                gasolinaAditAvg = 6.05,
+                gasolinaAditMin = null,
+                gasolinaAditMax = null,
+                etanolAvg = 3.89,
+                etanolMin = 3.70,
+                etanolMax = 4.10,
+                dieselAvg = 5.72,
+                dieselMin = 5.50,
+                dieselMax = 5.90,
+                dataReferencia = "2026-11-10",
+            )
+        ))
+
+        val repo = FuelPriceRepository(dao = dao)
+        val osmPlaces = listOf(
+            app.hunter.nav.Place(name = "Auto Posto Shell Guanabara", subtitle = "Av Brasil 100", lat = -22.89, lon = -47.07),
+            app.hunter.nav.Place(name = "Posto Rodovia Interior", subtitle = "BR 369", lat = -21.00, lon = -50.00),
+        )
+
+        val enriched = repo.enrichAndSavePlaces(osmPlaces)
+
+        assertEquals(2, enriched.size)
+        // 1. Posto perto de Campinas (<= 50km) recebe média municipal
+        val st1 = enriched[0]
+        assertEquals("Auto Posto Shell Guanabara", st1.nome)
+        assertEquals("Shell", st1.bandeira)
+        assertEquals(5.82, st1.precoGasolina)
+        assertEquals(6.05, st1.precoGasolinaAdit)
+        assertEquals(PriceSource.MEDIA_MUNICIPAL, st1.fonte)
+
+        // 2. Posto longe (> 50km) recebe média estadual
+        val st2 = enriched[1]
+        assertEquals("Branca", st2.bandeira)
+        assertEquals(5.79, st2.precoGasolina)
+        assertEquals(PriceSource.MEDIA_ESTADUAL, st2.fonte)
+
+        // Confere que foram salvos no banco
+        assertEquals(2, dao.stations.size)
+    }
 }

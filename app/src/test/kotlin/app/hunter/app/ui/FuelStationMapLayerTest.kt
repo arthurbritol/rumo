@@ -212,4 +212,37 @@ class FuelStationMapLayerTest {
         val emptyFc = fuelStationsFeatures(emptyList<ResolvedFuelStation>())
         assertTrue(emptyFc.features().isNullOrEmpty())
     }
+
+    @Test
+    fun `quando cache local esta vazio, busca postos reais online sob demanda e atualiza lista`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var onlineCalls = 0
+        var localReturned = false
+
+        val coordinator = FuelMapCoordinator(
+            scope = backgroundScope,
+            fetchStations = {
+                if (localReturned) listOf(sampleStation("st-fetched", "Posto Shell Real"))
+                else emptyList()
+            },
+            searchNearbyStations = { center ->
+                onlineCalls++
+                localReturned = true
+                listOf(sampleStation("st-fetched", "Posto Shell Real", lat = center.lat, lon = center.lon))
+            },
+            ioDispatcher = dispatcher,
+            debounceMs = 100L,
+        )
+
+        coordinator.toggleFuelLayer()
+        coordinator.updateMapBoundingBox(GeoBox(-8.10, -34.95, -8.00, -34.85))
+
+        advanceTimeBy(150)
+        runCurrent()
+
+        assertEquals(1, onlineCalls)
+        assertEquals(1, coordinator.visibleFuelStations.value.size)
+        assertEquals("st-fetched", coordinator.visibleFuelStations.value[0].id)
+        assertFalse(coordinator.isSearchingOnline.value)
+    }
 }

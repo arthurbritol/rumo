@@ -495,6 +495,10 @@ private fun AddFuelDialog(
 
     LaunchedEffect(Unit) {
         fuelRef = vm.getFuelPriceReference()
+        if (fuelRef == null) {
+            kotlinx.coroutines.delay(2000L)
+            fuelRef = vm.getFuelPriceReference()
+        }
     }
 
     val o = parseNumber(odo)

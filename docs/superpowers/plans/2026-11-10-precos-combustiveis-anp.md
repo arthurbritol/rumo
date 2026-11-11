@@ -345,3 +345,82 @@ Expected: BUILD SUCCESSFUL.
 git add CHANGELOG.md docs/ARQUITETURA.md version.txt
 git commit -m "docs(release): documentar Mini Projeto 6 e preparar versao 0.7.0"
 ```
+
+---
+
+### Task 9: Correção do Sync Worker, URL de Download e Pipeline ETL ANP
+
+**Files:**
+- Modify: `app/src/main/kotlin/app/hunter/app/fuel/FuelPriceSyncWorker.kt`
+- Modify: `scripts/sync_anp_fuel.py`
+- Modify: `.github/workflows/sync-anp.yml`
+- Modify: `app/src/main/assets/anp_fuel_seed.json.gz`
+- Create/Modify: `app/src/test/kotlin/app/hunter/app/fuel/FuelPriceSyncWorkerTest.kt`
+
+**Steps:**
+- [x] **Step 1:** Corrigir `DEFAULT_DOWNLOAD_URL` em `FuelPriceSyncWorker.kt` para `https://github.com/arthurbritol/rumo/releases/download/anp-data-latest/anp-fuel-latest.json.gz`.
+- [x] **Step 2:** Atualizar `scripts/sync_anp_fuel.py` com suporte a URLs oficiais candidatas da ANP, extração de `.zip`/`.csv`, centróides de mais municípios e geração de seed aprimorado.
+- [x] **Step 3:** Atualizar workflow `.github/workflows/sync-anp.yml` para baixar automaticamente a série de preços da ANP antes de fallback para seed.
+- [x] **Step 4:** Regenerar `app/src/main/assets/anp_fuel_seed.json.gz` com base representativa completa.
+- [x] **Step 5:** Criar/atualizar testes unitários e validar.
+
+---
+
+### Task 10: Integração Real de Postos no Mapa (`FuelMapCoordinator` + `FuelStationFinder`) e Cache Room
+
+**Files:**
+- Modify: `app/src/main/kotlin/app/hunter/app/fuel/FuelPriceRepository.kt`
+- Modify: `app/src/main/kotlin/app/hunter/app/ui/FuelMapCoordinator.kt`
+- Modify: `app/src/main/kotlin/app/hunter/app/ui/HunterMap.kt`
+- Modify: `app/src/main/kotlin/app/hunter/app/ui/MapScreen.kt`
+- Modify: `app/src/main/kotlin/app/hunter/app/HunterViewModel.kt`
+- Modify: `app/src/test/kotlin/app/hunter/app/ui/FuelStationMapLayerTest.kt`
+
+**Steps:**
+- [x] **Step 1:** No `FuelPriceRepository`, implementar `enrichAndSavePlaces(places: List<Place>)` que mapeia postos do OSM com a hierarquia em 3 níveis (posto -> cidade -> estado) e insere no Room.
+- [x] **Step 2:** No `FuelMapCoordinator`, injetar `FuelStationFinder`. Se o Room não retornar postos na região da bounding box, buscar postos via Overpass, enriquecer com ANP e salvar no Room.
+- [x] **Step 3:** Expor `isSearchingOnline: StateFlow<Boolean>` no `FuelMapCoordinator` e `HunterViewModel`.
+- [x] **Step 4:** Em `MapScreen.kt`, exibir pílula Novare indicando "Buscando postos próximos..." quando `isSearchingOnline` for verdadeiro.
+- [x] **Step 5:** Validar com testes unitários em `FuelStationMapLayerTest.kt`.
+
+---
+
+### Task 11: Atualização Manual de Preços ANP no Perfil (`ProfileScreen.kt`)
+
+**Files:**
+- Modify: `app/src/main/kotlin/app/hunter/app/ui/ProfileScreen.kt`
+- Modify: `app/src/main/kotlin/app/hunter/app/HunterViewModel.kt`
+- Modify: `app/src/test/kotlin/app/hunter/app/ui/ProfileScreenTest.kt`
+
+**Steps:**
+- [x] **Step 1:** Adicionar método `syncAnpPricesNow()` no `HunterViewModel` e estado de status do sync.
+- [x] **Step 2:** Adicionar seção "Preços de Combustíveis (ANP)" no `ProfileScreen.kt` com botão de atualizar e informações da base.
+- [x] **Step 3:** Validar com testes unitários.
+
+---
+
+### Task 12: Robustez na Sugestão da Garagem (`AddFuelupDialog`)
+
+**Files:**
+- Modify: `app/src/main/kotlin/app/hunter/app/HunterViewModel.kt`
+- Modify: `app/src/main/kotlin/app/hunter/app/ui/GarageScreen.kt`
+- Modify: `app/src/test/kotlin/app/hunter/app/ui/GarageFuelPriceSuggestionTest.kt`
+
+**Steps:**
+- [x] **Step 1:** No `HunterViewModel.getFuelPriceReference()`, obter coordenadas com fallback para última localização conhecida do sistema (`LocationManager`) ou da última viagem gravada.
+- [x] **Step 2:** Em `GarageScreen.kt`, atualizar o diálogo para consultar preço com tratamento resiliente a atraso no GPS.
+- [x] **Step 3:** Validar com testes unitários.
+
+---
+
+### Task 13: Verificação Completa e Preparação da Release 0.7.2
+
+**Files:**
+- Modify: `CHANGELOG.md`
+- Modify: `version.txt`
+
+**Steps:**
+- [x] **Step 1:** Atualizar `CHANGELOG.md` e `version.txt` para 0.7.2.
+- [x] **Step 2:** Executar suíte de testes unitários.
+- [x] **Step 3:** Fornecer resumo das correções e passos para publicação da release e testes no celular.
+```

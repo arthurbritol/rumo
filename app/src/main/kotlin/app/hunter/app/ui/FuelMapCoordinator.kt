@@ -3,6 +3,8 @@ package app.hunter.app.ui
 import app.hunter.app.fuel.FuelPriceRepository
 import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.model.GeoBox
+import app.hunter.nav.FuelStationFinder
+import app.hunter.nav.LatLon
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,22 +25,36 @@ import kotlinx.coroutines.withContext
  * Atualizações de Bounding Box durante o arrasto da câmera no mapa (60 FPS) são agrupadas
  * e atrasadas por [debounceMs] (padrão 300ms) e executadas no [ioDispatcher] (padrão Dispatchers.IO),
  * garantindo que consultas espaciais ao Room nunca bloqueiem a thread principal da interface.
+ *
+ * Se não houver postos cadastrados no Room para a região enquadrada, dispara busca sob demanda
+ * de postos reais via [searchNearbyStations] (Overpass / OSM), enriquecendo-os com as médias ANP
+ * e salvando-os no Room para operação offline contínua.
  */
 @OptIn(FlowPreview::class)
 class FuelMapCoordinator(
     private val scope: CoroutineScope,
     private val fetchStations: suspend (GeoBox) -> List<ResolvedFuelStation>,
+    private val searchNearbyStations: (suspend (LatLon) -> List<ResolvedFuelStation>)? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val debounceMs: Long = 300L,
 ) {
     constructor(
         scope: CoroutineScope,
         repository: FuelPriceRepository,
+        stationFinder: FuelStationFinder? = null,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         debounceMs: Long = 300L,
     ) : this(
         scope = scope,
         fetchStations = { box -> repository.getStationsInBox(box) },
+        searchNearbyStations = if (stationFinder != null) { center ->
+            val places = try {
+                stationFinder.near(center, radiusM = 5_000, limit = 25)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            repository.enrichAndSavePlaces(places)
+        } else null,
         ioDispatcher = ioDispatcher,
         debounceMs = debounceMs,
     )
@@ -54,6 +70,9 @@ class FuelMapCoordinator(
     private val _visibleFuelStations = MutableStateFlow<List<ResolvedFuelStation>>(emptyList())
     val visibleFuelStations: StateFlow<List<ResolvedFuelStation>> = _visibleFuelStations.asStateFlow()
 
+    private val _isSearchingOnline = MutableStateFlow(false)
+    val isSearchingOnline: StateFlow<Boolean> = _isSearchingOnline.asStateFlow()
+
     init {
         scope.launch {
             combine(_fuelLayerEnabled, _boundingBox.debounce(debounceMs)) { enabled, box ->
@@ -61,11 +80,38 @@ class FuelMapCoordinator(
             }.collectLatest { (enabled, box) ->
                 if (!enabled || box == null) {
                     _visibleFuelStations.value = emptyList()
+                    _isSearchingOnline.value = false
                 } else {
-                    val stations = withContext(ioDispatcher) {
+                    val localStations = withContext(ioDispatcher) {
                         fetchStations(box)
                     }
-                    _visibleFuelStations.value = stations
+                    if (localStations.isNotEmpty()) {
+                        _visibleFuelStations.value = localStations
+                        _isSearchingOnline.value = false
+                    } else if (searchNearbyStations != null) {
+                        // Se não há postos na área visível, busca no OSM/Overpass e enriquece com a ANP
+                        _isSearchingOnline.value = true
+                        val center = LatLon((box.minLat + box.maxLat) / 2.0, (box.minLon + box.maxLon) / 2.0)
+                        val fetched = withContext(ioDispatcher) {
+                            try {
+                                searchNearbyStations.invoke(center)
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                        }
+                        _isSearchingOnline.value = false
+                        if (fetched.isNotEmpty()) {
+                            val refreshed = withContext(ioDispatcher) {
+                                fetchStations(box)
+                            }
+                            _visibleFuelStations.value = refreshed.ifEmpty { fetched }
+                        } else {
+                            _visibleFuelStations.value = emptyList()
+                        }
+                    } else {
+                        _visibleFuelStations.value = emptyList()
+                        _isSearchingOnline.value = false
+                    }
                 }
             }
         }
@@ -77,6 +123,7 @@ class FuelMapCoordinator(
         if (!next) {
             _selectedFuelStation.value = null
             _visibleFuelStations.value = emptyList()
+            _isSearchingOnline.value = false
         }
     }
 
@@ -86,5 +133,22 @@ class FuelMapCoordinator(
 
     fun updateMapBoundingBox(box: GeoBox) {
         _boundingBox.value = box
+    }
+
+    fun searchCurrentArea() {
+        val box = _boundingBox.value ?: return
+        if (searchNearbyStations == null || !_fuelLayerEnabled.value) return
+        scope.launch {
+            _isSearchingOnline.value = true
+            val center = LatLon((box.minLat + box.maxLat) / 2.0, (box.minLon + box.maxLon) / 2.0)
+            withContext(ioDispatcher) {
+                try {
+                    searchNearbyStations.invoke(center)
+                } catch (_: Exception) {}
+            }
+            _isSearchingOnline.value = false
+            val refreshed = withContext(ioDispatcher) { fetchStations(box) }
+            _visibleFuelStations.value = refreshed
+        }
     }
 }

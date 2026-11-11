@@ -101,6 +101,7 @@ fun MapScreen(
     val focusTarget by vm.focusTarget.collectAsStateWithLifecycle()
     val focusNonce by vm.focusNonce.collectAsStateWithLifecycle()
     val fuelLayerEnabled by vm.fuelLayerEnabled.collectAsStateWithLifecycle()
+    val isSearchingFuelOnline by vm.isSearchingFuelOnline.collectAsStateWithLifecycle()
     val visibleFuelStations by vm.visibleFuelStations.collectAsStateWithLifecycle()
     val selectedFuelStation by vm.selectedFuelStation.collectAsStateWithLifecycle()
 
@@ -296,6 +297,20 @@ fun MapScreen(
                             "Sem internet: rotas e busca indisponíveis",
                             Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelMedium, color = Color.Black,
+                        )
+                    }
+                }
+                if (fuelLayerEnabled && isSearchingFuelOnline) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
+                        modifier = Modifier.padding(top = 8.dp),
+                    ) {
+                        Text(
+                            "Buscando postos próximos...",
+                            Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary,
                         )
                     }
                 }

@@ -35,7 +35,7 @@ jobs:
           if [ -n "${{ github.event.inputs.anp_url }}" ]; then
             python scripts/sync_anp_fuel.py --input "${{ github.event.inputs.anp_url }}" --output anp-fuel-latest.json.gz
           else
-            python scripts/sync_anp_fuel.py --generate-seed --output anp-fuel-latest.json.gz
+            python scripts/sync_anp_fuel.py --auto-anp --output anp-fuel-latest.json.gz
           fi
 
       - name: Validar integridade do payload gerado
