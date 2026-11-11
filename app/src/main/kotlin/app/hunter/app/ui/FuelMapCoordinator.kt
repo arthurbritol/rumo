@@ -163,7 +163,13 @@ class FuelMapCoordinator(
         _visibleFuelStations.value = stations
     }
 
-    fun updateStationPriceInVisible(stationId: String, gc: Double?, ga: Double?, et: Double?) {
+    fun updateStationPriceInVisible(
+        stationId: String,
+        gc: Double?,
+        ga: Double?,
+        et: Double?,
+        date: String = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.forLanguageTag("pt-BR")).format(java.util.Date()),
+    ) {
         _visibleFuelStations.value = _visibleFuelStations.value.map { st ->
             if (st.id == stationId) {
                 st.copy(
@@ -171,6 +177,7 @@ class FuelMapCoordinator(
                     precoGasolinaAdit = ga,
                     precoEtanol = et,
                     fonte = PriceSource.POSTO_ANP,
+                    dataRef = date,
                 )
             } else st
         }
@@ -181,6 +188,7 @@ class FuelMapCoordinator(
                 precoGasolinaAdit = ga,
                 precoEtanol = et,
                 fonte = PriceSource.POSTO_ANP,
+                dataRef = date,
             )
         }
     }

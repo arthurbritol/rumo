@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import gzip
 import hashlib
 import io
@@ -322,6 +322,13 @@ def parse_xlsx_records(xlsx_bytes: bytes) -> List[Dict[str, Any]]:
             bandeira = (str(vals[band_col]).strip() if band_col and band_col < len(vals) else "Branca").strip()
             cnpj = (str(vals[cnpj_col]).strip() if cnpj_col and cnpj_col < len(vals) else "").strip()
             data_coleta = (str(vals[data_col]).strip() if data_col and data_col < len(vals) else "").strip()
+            if data_coleta:
+                try:
+                    val_float = float(data_coleta)
+                    if 30000 <= val_float <= 60000:
+                        data_coleta = (datetime(1899, 12, 30) + timedelta(days=int(val_float))).strftime("%d/%m/%Y")
+                except (ValueError, OverflowError):
+                    pass
 
             records.append({
                 "cnpj": cnpj,

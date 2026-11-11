@@ -120,7 +120,9 @@ fun EditFuelPricesDialog(
             }
         },
         confirmButton = {
+            val hasValidPrice = parsePriceInput(gcText) != null || parsePriceInput(gaText) != null || parsePriceInput(etText) != null
             TextButton(
+                enabled = hasValidPrice,
                 onClick = {
                     val gc = parsePriceInput(gcText)
                     val ga = parsePriceInput(gaText)
@@ -131,7 +133,7 @@ fun EditFuelPricesDialog(
                 Text(
                     text = "Salvar Preços",
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = if (hasValidPrice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 )
             }
         },

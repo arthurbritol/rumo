@@ -331,9 +331,12 @@ class FuelStationMapLayerTest {
             et = 3.69,
         )
 
+        val today = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.forLanguageTag("pt-BR")).format(java.util.Date())
         assertEquals(5.59, coordinator.selectedFuelStation.value?.precoGasolina)
         assertEquals(3.69, coordinator.selectedFuelStation.value?.precoEtanol)
+        assertEquals(today, coordinator.selectedFuelStation.value?.dataRef)
         assertEquals(5.59, coordinator.visibleFuelStations.value[0].precoGasolina)
+        assertEquals(today, coordinator.visibleFuelStations.value[0].dataRef)
         assertEquals(PriceSource.POSTO_ANP, coordinator.visibleFuelStations.value[0].fonte)
     }
 
