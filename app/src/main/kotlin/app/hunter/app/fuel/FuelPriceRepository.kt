@@ -9,6 +9,11 @@ import app.hunter.model.Geo
 import app.hunter.model.GeoBox
 import app.hunter.nav.AnpFuelPayload
 import app.hunter.nav.Place
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.util.zip.GZIPInputStream
 
@@ -84,16 +89,40 @@ class FuelPriceRepository(
      * Garante que a base inicial de postos e médias seja carregada a partir do asset embarcado
      * caso o banco local de estados esteja vazio.
      */
-    suspend fun ensureSeedLoaded() {
-        dao.deleteLegacyOsmStations() // preços inventados de versões antigas nunca podem aparecer no mapa
-        val upToDate = seedVersionGet() >= SEED_VERSION
-        if (upToDate && dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty()) return
-        val stream = assetLoader("anp_fuel_seed.json.gz") ?: return
-        // Seed novo: troca a base antiga (outros ids de posto) e descarta ligações do mapa feitas com regras antigas.
-        if (!upToDate) dao.clearStations()
-        ingestGzipStream(stream)
-        seedVersionSet(SEED_VERSION)
+    suspend fun ensureSeedLoaded() = seedMutex.withLock {
+        try {
+            dao.deleteLegacyOsmStations() // preços inventados de versões antigas nunca podem aparecer no mapa
+            val upToDate = seedVersionGet() >= SEED_VERSION
+            // Base vazia com versão em dia = carga que foi cortada no meio: recarrega.
+            if (upToDate && dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty() &&
+                dao.countBaseStations() > 0
+            ) {
+                return@withLock
+            }
+            val stream = assetLoader("anp_fuel_seed.json.gz") ?: return@withLock
+            // Lê e valida tudo ANTES de apagar qualquer coisa; depois apaga e grava sem poder ser cancelado no meio.
+            val payload = GZIPInputStream(stream).bufferedReader(Charsets.UTF_8).use { AnpFuelPayload.fromJson(it.readText()) }
+            withContext(NonCancellable) {
+                // Seed novo: troca a base antiga (outros ids de posto) e descarta ligações do mapa feitas com regras antigas.
+                dao.clearStations()
+                ingestPayload(payload)
+                seedVersionSet(SEED_VERSION)
+            }
+            lastSeedError = null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lastSeedError = "${e.javaClass.simpleName}: ${e.message.orEmpty().take(80)}"
+            throw e
+        }
     }
+
+    private val seedMutex = Mutex()
+
+    /** Último erro ao carregar a base embarcada (null = sem erro); aparece no aviso do mapa para diagnóstico. */
+    @Volatile
+    var lastSeedError: String? = null
+        private set
 
     /**
      * Descomprime e faz o parse de um fluxo GZIP contendo o payload JSON da ANP.
@@ -366,9 +395,7 @@ class FuelPriceRepository(
     suspend fun enrichAndSavePlaces(places: List<Place>): List<ResolvedFuelStation> {
         if (places.isEmpty()) return emptyList()
 
-        if (dao.getAllStateStats().isEmpty() || dao.getAllCityStats().size < 40) {
-            ensureSeedLoaded()
-        }
+        ensureSeedLoaded() // espera a carga em andamento, se houver; barato quando a base já está carregada
 
         val allCities = dao.getAllCityStats()
         val allStates = dao.getAllStateStats()

@@ -35,7 +35,7 @@ fun stationBrandOf(bandeira: String, nome: String): StationBrand {
 
 /** Texto da etiqueta de preço do marcador. */
 fun stationMarkerPriceText(station: ResolvedFuelStation): String =
-    if (station.fonte == PriceSource.SEM_PRECO) "sem preço" else formatStationMapPrice(station)
+    if (station.fonte == PriceSource.SEM_PRECO) "" else formatStationMapPrice(station) // sem preço: só o pino
 
 /** Nome da imagem no estilo do mapa: um por combinação bandeira + texto. */
 fun stationMarkerKey(station: ResolvedFuelStation): String =
@@ -58,7 +58,7 @@ fun stationMarkerBitmap(density: Float, brand: StationBrand, priceText: String, 
         textSize = 13f * d
         color = if (hasPrice) 0xFF0F172A.toInt() else 0xFF6B7280.toInt()
     }
-    val pillW = textPaint.measureText(priceText) + 2 * PILL_PAD * d
+    val pillW = if (priceText.isEmpty()) 0f else textPaint.measureText(priceText) + 2 * PILL_PAD * d
     val half = PIN_D / 2f * d
     val side = half + pillW + 4f * d
     val w = (2f * side).toInt()
@@ -70,16 +70,18 @@ fun stationMarkerBitmap(density: Float, brand: StationBrand, priceText: String, 
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
 
     // Etiqueta branca com o preço (começa por baixo do pino)
-    val pill = RectF(cx + half * 0.55f, cy - PILL_H / 2f * d, cx + half * 0.55f + pillW, cy + PILL_H / 2f * d)
-    p.style = Paint.Style.FILL
-    p.color = 0xFFFFFFFF.toInt()
-    c.drawRoundRect(pill, PILL_H / 2f * d, PILL_H / 2f * d, p)
-    p.style = Paint.Style.STROKE
-    p.strokeWidth = 1f * d
-    p.color = 0x33000000
-    c.drawRoundRect(pill, PILL_H / 2f * d, PILL_H / 2f * d, p)
-    val fm = textPaint.fontMetrics
-    c.drawText(priceText, pill.left + half * 0.45f + PILL_PAD * d, cy - (fm.ascent + fm.descent) / 2f, textPaint)
+    if (priceText.isNotEmpty()) {
+        val pill = RectF(cx + half * 0.55f, cy - PILL_H / 2f * d, cx + half * 0.55f + pillW, cy + PILL_H / 2f * d)
+        p.style = Paint.Style.FILL
+        p.color = 0xFFFFFFFF.toInt()
+        c.drawRoundRect(pill, PILL_H / 2f * d, PILL_H / 2f * d, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 1f * d
+        p.color = 0x33000000
+        c.drawRoundRect(pill, PILL_H / 2f * d, PILL_H / 2f * d, p)
+        val fm = textPaint.fontMetrics
+        c.drawText(priceText, pill.left + half * 0.45f + PILL_PAD * d, cy - (fm.ascent + fm.descent) / 2f, textPaint)
+    }
 
     // Pino: gota com anel branco e a cor da bandeira
     val tip = (RING * 2 + PIN_D + TAIL) * d

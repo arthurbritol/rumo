@@ -458,6 +458,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
         SymbolLayer("fuel-symbol", SRC_FUEL).withProperties(
             iconImage(Expression.get("icon")),
             org.maplibre.android.style.layers.PropertyFactory.iconAnchor(org.maplibre.android.style.layers.Property.ICON_ANCHOR_BOTTOM),
+            org.maplibre.android.style.layers.PropertyFactory.symbolSortKey(Expression.get("z")),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
         ).also { it.minZoom = STATION_MIN_ZOOM },
@@ -559,6 +560,7 @@ fun fuelStationsFeatures(stations: List<ResolvedFuelStation>): FeatureCollection
         val feature = Feature.fromGeometry(Point.fromLngLat(station.lon, station.lat))
         feature.addStringProperty("id", station.id)
         feature.addStringProperty("icon", stationMarkerKey(station))
+        feature.addNumberProperty("z", if (station.fonte == PriceSource.SEM_PRECO) 0 else 1) // com preço fica por cima
         feature.addStringProperty("price", formatStationMapPrice(station))
         feature.addStringProperty("name", station.nome)
         feature.addStringProperty("source", station.fonte.name)

@@ -66,7 +66,9 @@ class FuelMapCoordinator(
         } else null,
         ioDispatcher = ioDispatcher,
         debounceMs = debounceMs,
-        statusDetail = { "base ANP: ${repository.baseStationCount()} postos" },
+        statusDetail = {
+            "base ANP: ${repository.baseStationCount()} postos" + (repository.lastSeedError?.let { " (erro: $it)" } ?: "")
+        },
     )
 
     private val _fuelLayerEnabled = MutableStateFlow(false)

@@ -2,6 +2,13 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.17]
+
+### Corrigido
+- **Base de preços da ANP vazia no aparelho ("base ANP: 0 postos")**: a carga da base rodava em três lugares ao mesmo tempo; uma delas podia apagar a tabela de postos e ser cancelada antes de regravar, e o app considerava a base carregada. Agora a carga é uma de cada vez, valida o arquivo antes de apagar, apaga e grava sem poder ser cancelada no meio, e recarrega sozinha se encontrar a base vazia. A busca de postos espera a carga terminar.
+- O aviso do mapa mostra o erro de carga da base, se houver.
+- **Mapa limpo**: postos sem preço aparecem só com o pino (sem etiqueta), e os com preço ficam por cima.
+
 ## [0.7.16]
 
 ### Adicionado

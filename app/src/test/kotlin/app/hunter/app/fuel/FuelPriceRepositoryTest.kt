@@ -9,6 +9,7 @@ import app.hunter.nav.AnpCityDto
 import app.hunter.nav.AnpFuelPayload
 import app.hunter.nav.AnpStateDto
 import app.hunter.nav.AnpStationDto
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -610,5 +611,39 @@ class FuelPriceRepositoryTest {
         assertEquals(emptyList<String>(), repo.getMapStations(box).map { it.id })
         repo.ensureSeedLoaded()
         assertNull(dao.stations["osm_-20_2_-40_3"])
+    }
+
+    @Test
+    fun `base de postos vazia com versao em dia e recarregada`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        // Estado de uma carga cortada no meio: versão atual, municípios e estados presentes, mas nenhum posto.
+        (1..40).forEach { n ->
+            dao.cityStats["c$n"] = AnpCityStatsEntity(cityKey = "c$n", uf = "ES", municipio = "C$n", lat = 0.0, lon = 0.0,
+                gasolinaAvg = 6.0, gasolinaMin = null, gasolinaMax = null, gasolinaAditAvg = null, gasolinaAditMin = null,
+                gasolinaAditMax = null, etanolAvg = null, etanolMin = null, etanolMax = null, dieselAvg = null,
+                dieselMin = null, dieselMax = null, dataReferencia = "")
+        }
+        dao.stateStats["ES"] = AnpStateStatsEntity("ES", -20.0, -40.0, gasolinaAvg = 6.0, etanolAvg = 4.0, dieselAvg = null, dataReferencia = "")
+        val gz = compressGzip(AnpFuelPayload.toJson(payloadOf(Triple("anp_1", 6.40, "05/11/2026"))))
+        val repo = FuelPriceRepository(dao = dao, assetLoader = { ByteArrayInputStream(gz) })
+
+        repo.ensureSeedLoaded()
+
+        assertEquals(1, repo.baseStationCount())
+    }
+
+    @Test
+    fun `cargas simultaneas da base terminam com a base completa`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        val gz = compressGzip(AnpFuelPayload.toJson(payloadOf(Triple("anp_1", 6.40, "05/11/2026"), Triple("anp_2", 6.10, "05/11/2026"))))
+        var version = 0
+        val repo = FuelPriceRepository(dao = dao, assetLoader = { ByteArrayInputStream(gz) },
+            seedVersionGet = { version }, seedVersionSet = { version = it })
+
+        kotlinx.coroutines.coroutineScope {
+            repeat(4) { launch { repo.ensureSeedLoaded() } }
+        }
+
+        assertEquals(2, repo.baseStationCount())
     }
 }
