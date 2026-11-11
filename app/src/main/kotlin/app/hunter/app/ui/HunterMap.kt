@@ -218,7 +218,8 @@ fun HunterMap(
                 latestBoxChanged(box)
             }
             m.addOnCameraMoveStartedListener { reason -> if (reason == REASON_API_GESTURE) latestGesture() }
-            m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(LatLng(-8.05, -34.9)).zoom(11.0).build()))
+            val startTarget = me?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(-23.5505, -46.6333)
+            m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(startTarget).zoom(14.0).build()))
             val initialBounds = m.projection.visibleRegion.latLngBounds
             latestBoxChanged(
                 GeoBox(

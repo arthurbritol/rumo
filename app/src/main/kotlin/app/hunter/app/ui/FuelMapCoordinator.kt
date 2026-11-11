@@ -1,6 +1,7 @@
 package app.hunter.app.ui
 
 import app.hunter.app.fuel.FuelPriceRepository
+import app.hunter.app.fuel.PriceSource
 import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.model.Geo
 import app.hunter.model.GeoBox
@@ -69,6 +70,7 @@ class FuelMapCoordinator(
     val selectedFuelStation: StateFlow<ResolvedFuelStation?> = _selectedFuelStation.asStateFlow()
 
     private val _boundingBox = MutableStateFlow<GeoBox?>(null)
+    val boundingBox: StateFlow<GeoBox?> = _boundingBox.asStateFlow()
 
     private val _visibleFuelStations = MutableStateFlow<List<ResolvedFuelStation>>(emptyList())
     val visibleFuelStations: StateFlow<List<ResolvedFuelStation>> = _visibleFuelStations.asStateFlow()
@@ -155,6 +157,32 @@ class FuelMapCoordinator(
 
     fun updateMapBoundingBox(box: GeoBox) {
         _boundingBox.value = box
+    }
+
+    fun refreshVisibleStations(stations: List<ResolvedFuelStation>) {
+        _visibleFuelStations.value = stations
+    }
+
+    fun updateStationPriceInVisible(stationId: String, gc: Double?, ga: Double?, et: Double?) {
+        _visibleFuelStations.value = _visibleFuelStations.value.map { st ->
+            if (st.id == stationId) {
+                st.copy(
+                    precoGasolina = gc,
+                    precoGasolinaAdit = ga,
+                    precoEtanol = et,
+                    fonte = PriceSource.POSTO_ANP,
+                )
+            } else st
+        }
+        val sel = _selectedFuelStation.value
+        if (sel != null && sel.id == stationId) {
+            _selectedFuelStation.value = sel.copy(
+                precoGasolina = gc,
+                precoGasolinaAdit = ga,
+                precoEtanol = et,
+                fonte = PriceSource.POSTO_ANP,
+            )
+        }
     }
 
     fun searchCurrentArea() {

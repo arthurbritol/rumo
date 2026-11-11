@@ -308,4 +308,57 @@ class FuelStationMapLayerTest {
         assertEquals(1, coordinator.visibleFuelStations.value.size)
         assertEquals("st-fetched-2", coordinator.visibleFuelStations.value[0].id)
     }
+
+    @Test
+    fun `updateStationPriceInVisible atualiza precos no estado visivel e no selecionado`() = runTest {
+        val coordinator = FuelMapCoordinator(
+            scope = backgroundScope,
+            fetchStations = { emptyList() },
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        val station = sampleStation(id = "st-update", precoGasolina = 6.00)
+        coordinator.selectFuelStation(station)
+        coordinator.refreshVisibleStations(listOf(station))
+
+        assertEquals(6.00, coordinator.selectedFuelStation.value?.precoGasolina)
+        assertEquals(6.00, coordinator.visibleFuelStations.value[0].precoGasolina)
+
+        coordinator.updateStationPriceInVisible(
+            stationId = "st-update",
+            gc = 5.59,
+            ga = 5.89,
+            et = 3.69,
+        )
+
+        assertEquals(5.59, coordinator.selectedFuelStation.value?.precoGasolina)
+        assertEquals(3.69, coordinator.selectedFuelStation.value?.precoEtanol)
+        assertEquals(5.59, coordinator.visibleFuelStations.value[0].precoGasolina)
+        assertEquals(PriceSource.POSTO_ANP, coordinator.visibleFuelStations.value[0].fonte)
+    }
+
+    @Test
+    fun `searchCurrentArea forca nova busca mesmo se centro ja foi consultado anteriormente`() = runTest {
+        var callCount = 0
+        val coordinator = FuelMapCoordinator(
+            scope = backgroundScope,
+            fetchStations = { emptyList() },
+            searchNearbyStations = {
+                callCount++
+                listOf(sampleStation(id = "st-$callCount"))
+            },
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+            debounceMs = 50L,
+        )
+        coordinator.toggleFuelLayer()
+        coordinator.updateMapBoundingBox(GeoBox(-8.10, -34.95, -8.00, -34.85))
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(1, callCount)
+
+        coordinator.searchCurrentArea()
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(2, callCount)
+    }
 }

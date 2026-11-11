@@ -72,6 +72,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.hunter.app.HunterViewModel
 import app.hunter.app.PreviewUi
 import app.hunter.app.R
+import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.nav.Place
 import app.hunter.nav.RouteProfile
 import app.hunter.trips.service.TrackingService
@@ -109,6 +110,7 @@ fun MapScreen(
     var follow by remember { mutableStateOf(true) }
     var nonce by remember { mutableIntStateOf(0) }
     var locationOk by remember { mutableStateOf(false) }
+    var editingFuelStation by remember { mutableStateOf<ResolvedFuelStation?>(null) }
 
     LaunchedEffect(focusNonce) {
         if (focusTarget != null) {
@@ -148,8 +150,9 @@ fun MapScreen(
         onDispose { lifecycle.removeObserver(obs); vm.stopLocation() }
     }
 
-    BackHandler(enabled = searching || preview != null || selectedFuelStation != null) {
+    BackHandler(enabled = searching || preview != null || selectedFuelStation != null || editingFuelStation != null) {
         when {
+            editingFuelStation != null -> editingFuelStation = null
             searching -> searching = false
             selectedFuelStation != null -> vm.selectFuelStation(null)
             preview != null -> vm.cancelPreview()
@@ -277,8 +280,20 @@ fun MapScreen(
                     onNavigate = { vm.navigateToStation(station) },
                     onAddStop = { vm.addStationAsStop(station) },
                     onClose = { vm.selectFuelStation(null) },
+                    onEditPrices = { editingFuelStation = station },
                 )
             }
+        }
+
+        editingFuelStation?.let { st ->
+            EditFuelPricesDialog(
+                station = st,
+                onDismiss = { editingFuelStation = null },
+                onSave = { gc, ga, et ->
+                    vm.updateStationPrices(st.id, gc, ga, et)
+                    editingFuelStation = null
+                },
+            )
         }
 
         // ----- Ocioso / gravando -----
@@ -300,18 +315,48 @@ fun MapScreen(
                         )
                     }
                 }
-                if (fuelLayerEnabled && isSearchingFuelOnline) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) {
-                        Text(
-                            "Buscando postos próximos...",
-                            Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
+                if (fuelLayerEnabled) {
+                    if (isSearchingFuelOnline) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
+                            modifier = Modifier.padding(top = 8.dp),
+                        ) {
+                            Text(
+                                "Buscando postos próximos...",
+                                Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                    } else {
+                        Surface(
+                            onClick = { vm.searchFuelStationsInArea() },
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                            modifier = Modifier.padding(top = 8.dp),
+                            shadowElevation = 3.dp,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    painter = androidx.compose.ui.res.painterResource(R.drawable.fa_gas_pump),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    "Buscar postos nesta área",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
                     }
                 }
             }
