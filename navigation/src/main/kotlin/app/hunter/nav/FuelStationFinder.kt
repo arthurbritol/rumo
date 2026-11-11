@@ -16,21 +16,29 @@ class FuelStationFinder(
     private val photonUrl: String = "https://photon.komoot.io",
 ) {
     /** Os [limit] postos mais próximos de [p] dentro de [radiusM] metros. */
-    suspend fun near(p: LatLon, radiusM: Int = 5_000, limit: Int = 25): List<Place> {
+    suspend fun near(p: LatLon, radiusM: Int = 8_000, limit: Int = 30): List<Place> {
         // 1. Tenta Komoot Photon primeiro: resposta ultra-rápida (típica < 1s)
         if (photonUrl.isNotBlank()) {
             try {
-                val queryUrl = "$photonUrl/api/?q=posto&lat=${p.lat}&lon=${p.lon}&limit=$limit&osm_tag=amenity:fuel"
+                val queryLimit = maxOf(limit * 2, 35)
+                val queryUrl = "$photonUrl/api/?q=posto&lat=${p.lat}&lon=${p.lon}&limit=$queryLimit&osm_tag=amenity:fuel"
                 val text = http.get(queryUrl)
-                val places = PhotonGeocoder.parse(text).map { place ->
-                    val cleanName = if (place.name.equals("posto", ignoreCase = true)) {
-                        "Posto de Combustível"
-                    } else {
-                        place.name
+                val rawPlaces = PhotonGeocoder.parse(text)
+                val filtered = rawPlaces
+                    .map { place ->
+                        val cleanName = if (place.name.equals("posto", ignoreCase = true) || place.name.isBlank()) {
+                            "Posto de Combustível"
+                        } else {
+                            place.name
+                        }
+                        place.copy(name = cleanName)
                     }
-                    place.copy(name = cleanName)
-                }
-                if (places.isNotEmpty()) return places.take(limit)
+                    .map { it to Geo.distanceM(p.lat, p.lon, it.lat, it.lon) }
+                    .filter { it.second <= radiusM.toDouble() }
+                    .sortedBy { it.second }
+                    .map { it.first }
+
+                if (filtered.isNotEmpty()) return filtered.take(limit)
             } catch (_: Exception) {
                 // Continua para fallback Overpass
             }

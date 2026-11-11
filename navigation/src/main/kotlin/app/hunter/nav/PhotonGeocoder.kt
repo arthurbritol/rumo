@@ -61,7 +61,7 @@ class PhotonGeocoder(
             val house = p.str("housenumber")
             val name = p.str("name")
                 ?: street?.let { if (house != null) "$it, $house" else it }
-                ?: return null
+                ?: if (p.str("osm_value") == "fuel" || p.str("osm_key") == "amenity") "Posto de Combustível" else return null
             val sub = listOfNotNull(
                 street?.takeIf { it != name && p.str("name") != null },
                 p.str("district"),

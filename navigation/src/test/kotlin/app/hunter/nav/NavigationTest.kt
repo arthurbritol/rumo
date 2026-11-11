@@ -240,4 +240,21 @@ class NavigationTest {
         assertEquals(2, d[13].toInt())
         assertNotNull(d)
     }
+
+    @Test
+    fun `FuelStationFinder near ordena postos por proximidade e descarta postos fora do raio`() = kotlinx.coroutines.runBlocking {
+        val fakeHttp = object : Http {
+            override suspend fun get(url: String): String = """
+            {"features":[
+                {"geometry":{"coordinates":[-46.90, -23.70]},"properties":{"name":"Posto Distante 30km","osm_value":"fuel"}},
+                {"geometry":{"coordinates":[-46.63, -23.55]},"properties":{"name":"Posto Proximo 1km","osm_value":"fuel"}}
+            ]}
+            """
+            override suspend fun postJson(url: String, body: String): String = ""
+        }
+        val finder = FuelStationFinder(http = fakeHttp)
+        val result = finder.near(LatLon(-23.5505, -46.6333), radiusM = 5_000, limit = 10)
+        assertEquals(1, result.size)
+        assertEquals("Posto Proximo 1km", result[0].name)
+    }
 }
