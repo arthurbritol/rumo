@@ -290,6 +290,7 @@ fun FuelStationCard(
     onAddStop: () -> Unit,
     onClose: () -> Unit,
     onEditPrices: () -> Unit = {},
+    cityReference: app.hunter.app.fuel.FuelPriceReference? = null,
     modifier: Modifier = Modifier,
 ) {
     HCard(modifier = modifier) {
@@ -361,6 +362,22 @@ fun FuelStationCard(
 
         // Gasolina em destaque; etanol, aditivada e diesel em linhas (como no mapa de referência)
         FuelPriceHighlight(station = station)
+
+        // Posto que a ANP não pesquisou: mostra a média do município, claramente como referência (não é preço do posto)
+        if (station.fonte == PriceSource.SEM_PRECO && cityReference != null) {
+            val parts = listOfNotNull(
+                cityReference.precoGasolina?.let { "gasolina " + formatFuelPrice(it) },
+                cityReference.precoEtanol?.let { "etanol " + formatFuelPrice(it) },
+                cityReference.precoDiesel?.let { "diesel " + formatFuelPrice(it) },
+            )
+            if (parts.isNotEmpty()) {
+                Text(
+                    text = "Média em ${cityReference.regiaoNome} (${cityReference.dataRef}): ${parts.joinToString(" · ")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
 
         // Termômetro de Paridade (se Etanol e Gasolina disponíveis)
         val parityInfo = resolveFuelParity(station.precoEtanol, station.precoGasolina)

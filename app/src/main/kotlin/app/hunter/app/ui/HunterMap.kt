@@ -118,6 +118,10 @@ private const val SRC_FRIENDS = "friends-src"
 private const val SRC_ME = "me-src"
 private const val SRC_FUEL = "fuel-src"
 private const val SRC_FUEL_STATE = "fuel-state-src"
+private const val SRC_FUEL_CITY = "fuel-city-src"
+
+/** Abaixo deste zoom o mapa mostra a média do estado; entre este e [STATION_MIN_ZOOM], a do município. */
+private const val CITY_MIN_ZOOM = 6.5f
 
 /** Abaixo deste zoom aparece a média do estado; a partir dele, os postos com preço próprio. */
 private const val STATION_MIN_ZOOM = 9f
@@ -135,6 +139,7 @@ fun HunterMap(
     friends: List<FriendMarker> = emptyList(),
     fuelStations: List<ResolvedFuelStation> = emptyList(),
     stateAverages: List<app.hunter.app.fuel.StateAverage> = emptyList(),
+    cityAverages: List<app.hunter.app.fuel.CityAverage> = emptyList(),
     route: List<LatLon>? = null,
     altRoutes: List<List<LatLon>> = emptyList(),
     trail: List<TrackPoint>? = null,
@@ -281,6 +286,10 @@ fun HunterMap(
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
         src.setGeoJson(friendsFeatures(friends))
     }
+    LaunchedEffect(style, cityAverages) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_CITY) ?: return@LaunchedEffect
+        src.setGeoJson(cityAverageFeatures(cityAverages))
+    }
     LaunchedEffect(style, stateAverages) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_STATE) ?: return@LaunchedEffect
         src.setGeoJson(stateAverageFeatures(stateAverages))
@@ -414,7 +423,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
     st.addImage("fuel-station", fuelStationBitmap(density))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE).forEach { st.addSource(GeoJsonSource(it)) }
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -462,7 +471,21 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
             textHaloWidth(2f),
             textAllowOverlap(true),
-        ).also { it.maxZoom = STATION_MIN_ZOOM },
+        ).also { it.maxZoom = CITY_MIN_ZOOM },
+    )
+    st.addLayer(
+        SymbolLayer("fuel-city", SRC_FUEL_CITY).withProperties(
+            textField(Expression.get("label")),
+            textFont(arrayOf("Noto Sans Bold")),
+            textSize(12f),
+            textColor(if (dark) "#FFFFFF" else "#0F172A"),
+            textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
+            textHaloWidth(2f),
+            textAllowOverlap(false),
+        ).also {
+            it.minZoom = CITY_MIN_ZOOM
+            it.maxZoom = STATION_MIN_ZOOM
+        },
     )
     st.addLayer(
         SymbolLayer("friends-symbol", SRC_FRIENDS).withProperties(
@@ -504,6 +527,17 @@ fun formatStationMapPrice(station: ResolvedFuelStation): String {
         PriceSource.MEDIA_MUNICIPAL, PriceSource.MEDIA_ESTADUAL -> "~$formatted"
         PriceSource.SEM_PRECO -> "-"
     }
+}
+
+/** Médias por município da ANP como rótulos ("Serra\n~R$ 6,21"), usadas no zoom intermediário. */
+fun cityAverageFeatures(cities: List<app.hunter.app.fuel.CityAverage>): FeatureCollection {
+    val features = cities.mapNotNull { c ->
+        val price = c.gasolina ?: return@mapNotNull null
+        val f = Feature.fromGeometry(Point.fromLngLat(c.lon, c.lat))
+        f.addStringProperty("label", c.name + "\n" + String.format(Locale.forLanguageTag("pt-BR"), "~R$ %.2f", price))
+        f
+    }
+    return FeatureCollection.fromFeatures(features)
 }
 
 /** Médias estaduais da ANP como rótulos ("ES

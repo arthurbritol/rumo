@@ -2,6 +2,14 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.16]
+
+### Adicionado
+- **Médias por município da ANP**: o ETL lê as planilhas oficiais `mensal-municipios-desde-jan2026.xlsx` (base) e `semanal-municipios-2026.xlsx` (atualização), e vale a coleta mais recente de cada município e combustível (gasolina, aditivada, etanol e diesel S10). Posição dos municípios vinda do IBGE (antes, 10 cidades do ES dividiam o mesmo ponto).
+- **Mapa em três níveis**: média do estado (zoom bem aberto), média do município (zoom intermediário) e postos com preço próprio (zoom de rua).
+- **Cartão do posto sem preço**: mostra a média do município como referência, deixando claro que não é o preço do posto.
+- O CSV `ultimas-4-semanas-gasolina-etanol.csv` passa a ser a fonte das semanas recentes dos postos (com as planilhas semanais como reserva).
+
 ## [0.7.15]
 
 ### Alterado

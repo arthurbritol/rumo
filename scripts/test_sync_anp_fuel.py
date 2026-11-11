@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Testes do ETL de preços da ANP (sync_anp_fuel.py): base histórica + semanas recentes."""
 
 import gzip
@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 
+import anp_municipal as am
 import sync_anp_fuel as s
 
 HEADER = (
@@ -100,6 +101,54 @@ class TestSyncAnpFuel(unittest.TestCase):
             self.assertEqual(len(data["estados"]), 27)
             self.assertEqual(data["postos"][0]["gc"], 6.29)
             self.assertEqual(data["postos"][0]["et"], 4.59)
+
+
+MONTHLY_HEADER = ["MÊS", "PRODUTO", "REGIÃO", "ESTADO", "MUNICÍPIO", "NÚMERO DE POSTOS PESQUISADOS", "UNIDADE DE MEDIDA",
+                  "PREÇO MÉDIO REVENDA", "DESVIO PADRÃO REVENDA", "PREÇO MÍNIMO REVENDA", "PREÇO MÁXIMO REVENDA"]
+WEEKLY_HEADER = ["DATA INICIAL", "DATA FINAL", "REGIÃO", "ESTADO", "MUNICÍPIO", "PRODUTO", "NÚMERO DE POSTOS PESQUISADOS",
+                 "UNIDADE DE MEDIDA", "PREÇO MÉDIO REVENDA", "DESVIO PADRÃO REVENDA", "PREÇO MÍNIMO REVENDA", "PREÇO MÁXIMO REVENDA"]
+UF = {"ESPIRITO SANTO": "ES"}
+
+
+class TestMunicipal(unittest.TestCase):
+    def monthly(self):
+        # 46296 = 01/10/2026
+        rows = [["lixo"], MONTHLY_HEADER,
+                ["46296", "GASOLINA COMUM", "SUDESTE", "ESPIRITO SANTO", "SERRA", "56", "R$/l", "6.18", "0.15", "6.03", "6.59"],
+                ["46296", "ETANOL HIDRATADO", "SUDESTE", "ESPIRITO SANTO", "SERRA", "47", "R$/l", "4.69", "0.2", "4.29", "5.09"],
+                ["46266", "GASOLINA COMUM", "SUDESTE", "ESPIRITO SANTO", "SERRA", "50", "R$/l", "6.00", "0.1", "5.90", "6.10"]]
+        return am.parse_municipal(rows, UF)
+
+    def weekly(self):
+        # 46328 = 02/11/2026 (semana 01/11 a 07/11 termina em 46332)
+        rows = [WEEKLY_HEADER,
+                ["46326", "46332", "SUDESTE", "ESPIRITO SANTO", "SERRA", "GASOLINA COMUM", "9", "R$/l", "6.25", "0", "6.19", "6.29"]]
+        return am.parse_municipal(rows, UF)
+
+    def test_monthly_keeps_latest_month_per_product(self):
+        serra = self.monthly()["es_serra"]
+        self.assertEqual(serra["gc"][:4], (6.18, 6.03, 6.59, 56))
+        self.assertEqual(serra["et"][0], 4.69)
+
+    def test_weekly_overrides_monthly_only_where_newer(self):
+        merged = am.merge_municipal(self.monthly(), self.weekly())
+        serra = merged["es_serra"]
+        self.assertEqual(serra["gc"][0], 6.25)   # a semana de novembro vence o mês de outubro
+        self.assertEqual(serra["et"][0], 4.69)   # sem dado semanal: fica o mensal
+
+    def test_older_weekly_does_not_override_monthly(self):
+        old_week = am.parse_municipal([WEEKLY_HEADER, ["46300", "46306", "S", "ESPIRITO SANTO", "SERRA", "GASOLINA COMUM", "9",
+                                                       "R$/l", "9.99", "0", "9.00", "9.99"]], UF)
+        self.assertEqual(am.merge_municipal(self.monthly(), old_week)["es_serra"]["gc"][0], 6.18)
+
+    def test_apply_sets_city_coordinates_ref_and_weighted_state_average(self):
+        payload = {"cidades": {}, "estados": {"ES": {"uf": "ES", "gcAvg": 1.0, "etAvg": 1.0, "dsAvg": None, "ref": ""}},
+                   "postos": [{"cityKey": "es_serra", "lat": 0.0, "lon": 0.0}]}
+        am.apply_municipal(payload, am.merge_municipal(self.monthly(), self.weekly()), {"es_serra": (-20.12, -40.30)})
+        c = payload["cidades"]["es_serra"]
+        self.assertEqual((c["lat"], c["lon"], c["gcAvg"], c["ref"]), (-20.12, -40.30, 6.25, "06/11/2026"))
+        self.assertEqual(payload["postos"][0]["lat"], -20.12)
+        self.assertEqual(payload["estados"]["ES"]["gcAvg"], 6.25)
 
 
 if __name__ == "__main__":

@@ -179,6 +179,16 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     /** Indicador se está buscando postos na web via Overpass. */
     val isSearchingFuelOnline: StateFlow<Boolean> get() = fuelCoordinator.isSearchingOnline
 
+    private val _cityAverages = MutableStateFlow<List<app.hunter.app.fuel.CityAverage>>(emptyList())
+
+    /** Média por município da ANP, para o zoom intermediário do mapa. */
+    val cityAverages: StateFlow<List<app.hunter.app.fuel.CityAverage>> = _cityAverages.asStateFlow()
+
+    private val _stationReference = MutableStateFlow<app.hunter.app.fuel.FuelPriceReference?>(null)
+
+    /** Média do município para o posto selecionado quando a ANP não pesquisou o posto (só como referência). */
+    val stationReference: StateFlow<app.hunter.app.fuel.FuelPriceReference?> = _stationReference.asStateFlow()
+
     private val _stateAverages = MutableStateFlow<List<app.hunter.app.fuel.StateAverage>>(emptyList())
 
     /** Média da ANP por estado, para a vista de zoom aberto. */
@@ -188,6 +198,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching { fuelRepo.ensureSeedLoaded() }
             _stateAverages.value = runCatching { fuelRepo.stateAverages() }.getOrDefault(emptyList())
+            _cityAverages.value = runCatching { fuelRepo.cityAverages() }.getOrDefault(emptyList())
         }
     }
 
@@ -202,7 +213,15 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleFuelLayer() = fuelCoordinator.toggleFuelLayer()
 
-    fun selectFuelStation(station: ResolvedFuelStation?) = fuelCoordinator.selectFuelStation(station)
+    fun selectFuelStation(station: ResolvedFuelStation?) {
+        fuelCoordinator.selectFuelStation(station)
+        _stationReference.value = null
+        if (station != null && station.fonte == app.hunter.app.fuel.PriceSource.SEM_PRECO) {
+            viewModelScope.launch {
+                _stationReference.value = runCatching { fuelRepo.getNearestReferencePrice(station.lat, station.lon) }.getOrNull()
+            }
+        }
+    }
 
     fun updateMapBoundingBox(box: GeoBox) = fuelCoordinator.updateMapBoundingBox(box)
 

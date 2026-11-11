@@ -225,6 +225,19 @@ def fetch_history_records(months: int = 12) -> List[Dict[str, Any]]:
     return records
 
 
+def fetch_weekly_csv_records() -> List[Dict[str, Any]]:
+    """Postos das últimas 4 semanas num único CSV ('ultimas-4-semanas-gasolina-etanol.csv'); vazio se indisponível."""
+    try:
+        links = _page_links(OFFICIAL_ANP_HISTORY_PAGE, r"ultimas-4-semanas-gasolina-etanol\.csv")
+        if not links:
+            return []
+        print(f"Baixando últimas 4 semanas: {links[0]}")
+        return parse_history_csv(_http_get(links[0], timeout=120))
+    except Exception as e:
+        print(f"Aviso: CSV das últimas 4 semanas indisponível ({e}); usando as planilhas semanais.")
+        return []
+
+
 def fetch_weekly_records(weeks: int = 4) -> List[Dict[str, Any]]:
     """Atualização: as planilhas semanais mais recentes (preço de revenda por posto)."""
     records: List[Dict[str, Any]] = []
@@ -648,6 +661,37 @@ def generate_seed_payload() -> Dict[str, Any]:
     }
 
 
+def _apply_municipal_data(payload: Dict[str, Any], local_paths: Optional[List[str]] = None) -> None:
+    """
+    Médias por município (planilhas mensal e semanal da ANP) + coordenadas do IBGE: viram `cidades` e as médias dos
+    estados. A coleta mais recente de cada município e combustível vale.
+    """
+    try:
+        import anp_municipal as am
+
+        sources: List[bytes] = []
+        if local_paths:
+            for path in local_paths:
+                with open(path, "rb") as f:
+                    sources.append(f.read())
+        else:
+            urls = am.find_municipal_urls()
+            if not urls:
+                print("Aviso: planilhas por município não encontradas; mantendo as médias dos postos.")
+                return
+            for url in urls:
+                print(f"Baixando médias por município: {url}")
+                sources.append(am._get(url, 240))
+        muni: Dict[str, Dict[str, Any]] = {}
+        for raw in sources:  # mensal primeiro (base), semanal depois (atualização)
+            muni = am.merge_municipal(muni, am.parse_municipal(am.xlsx_rows(raw), ESTADOS_NOME_TO_UF))
+        coords = am.load_ibge_coords()
+        am.apply_municipal(payload, muni, coords)
+        print(f"Médias por município aplicadas: {len(muni)} municípios ({len(coords)} com coordenadas do IBGE)")
+    except Exception as e:  # sem as planilhas o payload continua válido, só com as médias dos postos
+        print(f"Aviso: não foi possível aplicar as médias por município: {e}")
+
+
 def _parse_bytes(raw: bytes) -> List[Dict[str, Any]]:
     return parse_xlsx_records(raw) if raw[:2] == b"PK" else parse_history_csv(raw)
 
@@ -660,6 +704,7 @@ def process_anp_data(
     auto_anp: bool = True,
     history_months: int = 12,
     weeks: int = 4,
+    municipal_xlsx: Optional[List[str]] = None,
 ) -> None:
     """
     Base = série histórica (últimos `history_months` meses); atualização = `weeks` semanas mais recentes por cima.
@@ -676,13 +721,15 @@ def process_anp_data(
                     records = _parse_bytes(f.read())
         elif auto_anp:
             base = fetch_history_records(history_months)
-            weekly = fetch_weekly_records(weeks)
+            weekly = fetch_weekly_csv_records() or fetch_weekly_records(weeks)
             print(f"Base histórica: {len(base)} registros | semanas recentes: {len(weekly)} registros")
             records = base + weekly
 
     if records:
         print(f"Total de registros válidos de combustíveis (GC, GA, ET): {len(records)}")
         payload = build_payload_from_records(records, max_stations=max_stations)
+        if municipal_xlsx or (auto_anp and not input_source):
+            _apply_municipal_data(payload, municipal_xlsx)
     else:
         print("Usando payload de seed de contingência.")
         payload = generate_seed_payload()
@@ -712,6 +759,8 @@ def main() -> None:
     parser.add_argument("--max-stations", type=int, default=None, help="Limite de postos no payload")
     parser.add_argument("--history-months", type=int, default=12, help="Meses da série histórica usados como base (padrão 12)")
     parser.add_argument("--weeks", type=int, default=4, help="Semanas recentes aplicadas por cima da base (padrão 4)")
+    parser.add_argument("--municipal-xlsx", nargs="*", default=None,
+                        help="Planilhas por município da ANP (locais, mensal e/ou semanal). Se omitidas, baixa as mais recentes.")
     parser.add_argument("--auto-anp", action="store_true", default=True, help="Baixa os dados da ANP (padrão)")
     parser.add_argument("--generate-seed", action="store_true", help="Força o seed de contingência")
     args = parser.parse_args()
@@ -724,6 +773,7 @@ def main() -> None:
         auto_anp=args.auto_anp and not args.generate_seed,
         history_months=args.history_months,
         weeks=args.weeks,
+        municipal_xlsx=args.municipal_xlsx,
     )
 
 

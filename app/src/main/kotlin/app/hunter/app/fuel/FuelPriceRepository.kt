@@ -37,6 +37,9 @@ data class ResolvedFuelStation(
     val dataRef: String,
 )
 
+/** Média municipal da ANP (planilhas mensal/semanal por município), mostrada no mapa em zoom intermediário. */
+data class CityAverage(val name: String, val uf: String, val lat: Double, val lon: Double, val gasolina: Double?, val etanol: Double?)
+
 /** Média estadual da ANP, mostrada no mapa só quando o zoom enquadra o estado inteiro. */
 data class StateAverage(val uf: String, val lat: Double, val lon: Double, val gasolina: Double?, val etanol: Double?)
 
@@ -327,6 +330,9 @@ class FuelPriceRepository(
     /** Quantos postos da base da ANP estão carregados no aparelho (aparece no aviso do mapa, para diagnóstico). */
     suspend fun baseStationCount(): Int = dao.countBaseStations()
 
+    suspend fun cityAverages(): List<CityAverage> =
+        dao.getAllCityStats().map { CityAverage(it.municipio, it.uf, it.lat, it.lon, it.gasolinaAvg, it.etanolAvg) }
+
     suspend fun stateAverages(): List<StateAverage> =
         dao.getAllStateStats().map { StateAverage(it.uf, it.lat, it.lon, it.gasolinaAvg, it.etanolAvg) }
 
@@ -433,7 +439,7 @@ class FuelPriceRepository(
         const val OSM_PREFIX = "semp_"
 
         /** Sobe quando o seed embarcado muda de forma incompatível (v2: série histórica de 12 meses, ids por CNPJ). */
-        const val SEED_VERSION = 4
+        const val SEED_VERSION = 5
 
         /** "dd/MM/aaaa" -> "aaaaMMdd" (comparável); data inválida vira "". */
         fun dateKey(data: String): String {

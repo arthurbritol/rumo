@@ -105,6 +105,8 @@ fun MapScreen(
     val isSearchingFuelOnline by vm.isSearchingFuelOnline.collectAsStateWithLifecycle()
     val fuelSearchStatus by vm.fuelSearchStatus.collectAsStateWithLifecycle()
     val stateAverages by vm.stateAverages.collectAsStateWithLifecycle()
+    val cityAverages by vm.cityAverages.collectAsStateWithLifecycle()
+    val stationReference by vm.stationReference.collectAsStateWithLifecycle()
     val visibleFuelStations by vm.visibleFuelStations.collectAsStateWithLifecycle()
     val selectedFuelStation by vm.selectedFuelStation.collectAsStateWithLifecycle()
 
@@ -191,6 +193,7 @@ fun MapScreen(
             friends = friends,
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
             stateAverages = if (fuelLayerEnabled) stateAverages else emptyList(),
+            cityAverages = if (fuelLayerEnabled) cityAverages else emptyList(),
             route = if (navigating) nav.route?.shape else preview?.route?.shape,
             altRoutes = altRoutes,
             destination = if (navigating) nav.destination?.latLon else preview?.place?.latLon,
@@ -284,6 +287,7 @@ fun MapScreen(
                     onAddStop = { vm.addStationAsStop(station) },
                     onClose = { vm.selectFuelStation(null) },
                     onEditPrices = { editingFuelStation = station },
+                    cityReference = stationReference,
                 )
             }
         }
