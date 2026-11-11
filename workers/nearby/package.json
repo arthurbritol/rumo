@@ -4,6 +4,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "test:int": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "vitest": "^4.1.12"
   }
 }
