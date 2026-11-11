@@ -193,6 +193,18 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun searchFuelStationsInArea() = fuelCoordinator.searchCurrentArea()
 
+    fun updateStationPrices(stationId: String, gc: Double?, ga: Double?, et: Double?) {
+        viewModelScope.launch {
+            fuelRepo.updateStationPrices(
+                stationId = stationId,
+                precoGasolina = gc,
+                precoGasolinaAdit = ga,
+                precoEtanol = et,
+            )
+            fuelCoordinator.updateStationPriceInVisible(stationId, gc, ga, et)
+        }
+    }
+
     fun navigateToStation(station: ResolvedFuelStation) {
         selectFuelStation(null)
         val place = Place(

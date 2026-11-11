@@ -194,56 +194,41 @@ fun FuelPriceItem(
 }
 
 /**
- * Grade 2x2 com os preços dos quatro principais combustíveis pesquisados.
+ * Grade com os preços dos três combustíveis pesquisados (Gasolina Comum, Aditivada e Etanol).
  */
 @Composable
 fun FuelPricesGrid(
     station: ResolvedFuelStation,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    Row(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FuelPriceItem(
-                label = "Gasolina Comum",
-                price = station.precoGasolina,
-                modifier = Modifier.weight(1f),
-            )
-            FuelPriceItem(
-                label = "Gasolina Adit.",
-                price = station.precoGasolinaAdit,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FuelPriceItem(
-                label = "Etanol",
-                price = station.precoEtanol,
-                modifier = Modifier.weight(1f),
-            )
-            FuelPriceItem(
-                label = "Diesel S10",
-                price = station.precoDiesel,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        FuelPriceItem(
+            label = "Gasolina Comum",
+            price = station.precoGasolina,
+            modifier = Modifier.weight(1f),
+        )
+        FuelPriceItem(
+            label = "Gasolina Adit.",
+            price = station.precoGasolinaAdit,
+            modifier = Modifier.weight(1f),
+        )
+        FuelPriceItem(
+            label = "Etanol",
+            price = station.precoEtanol,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
 /**
  * Componente modal/bottom sheet de posto de combustível segundo o Design Novare e Font Awesome 6.
  *
- * Apresenta o cabeçalho com SquircleIcon e badge de bandeira, grid 2x2 de preços,
+ * Apresenta o cabeçalho com SquircleIcon e badge de bandeira, grade dos combustíveis (GC, GA, ET),
  * termômetro de paridade Etanol x Gasolina (StatusPill), carimbo de procedência ANP
- * e botões de navegação e adição de parada.
+ * e botões de navegação, informe de preços e adição de parada.
  */
 @Composable
 fun FuelStationCard(
@@ -252,6 +237,7 @@ fun FuelStationCard(
     onNavigate: () -> Unit,
     onAddStop: () -> Unit,
     onClose: () -> Unit,
+    onEditPrices: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     HCard(modifier = modifier) {
@@ -349,10 +335,22 @@ fun FuelStationCard(
             onClick = onNavigate,
             leadingIconRes = R.drawable.fa_route,
         )
-        RumoSecondaryButton(
-            text = "Adicionar parada",
-            onClick = onAddStop,
-            leadingIconRes = R.drawable.fa_plus,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RumoSecondaryButton(
+                text = "Informar preços",
+                onClick = onEditPrices,
+                leadingIconRes = R.drawable.fa_gas_pump,
+                modifier = Modifier.weight(1f),
+            )
+            RumoSecondaryButton(
+                text = "Adicionar parada",
+                onClick = onAddStop,
+                leadingIconRes = R.drawable.fa_plus,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
