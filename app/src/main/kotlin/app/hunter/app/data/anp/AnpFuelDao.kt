@@ -41,6 +41,17 @@ interface AnpFuelDao {
     @Query("DELETE FROM anp_stations")
     suspend fun clearStations()
 
+    /** Postos do mapa já ligados a um posto da ANP (id começa com "anpm_"). */
+    @Query("SELECT * FROM anp_stations WHERE id LIKE 'anpm\\_%' ESCAPE '\\'")
+    suspend fun getMatchedStations(): List<AnpStationEntity>
+
+    /** Apaga a base da ANP (id "anp_..."), preservando os postos já ligados ao mapa ("anpm_..."). */
+    @Query("DELETE FROM anp_stations WHERE id LIKE 'anp\\_%' ESCAPE '\\'")
+    suspend fun clearBaseStations()
+
+    @Query("DELETE FROM anp_stations WHERE id = :stationId")
+    suspend fun deleteStation(stationId: String)
+
     @Query("DELETE FROM anp_city_stats")
     suspend fun clearCityStats()
 

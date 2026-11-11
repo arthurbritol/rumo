@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 sync_anp_fuel.py - ETL para normalização de preços de combustíveis da ANP.
 
@@ -121,6 +121,8 @@ CITY_COORDINATES: Dict[str, Tuple[float, float]] = {
     "to_palmas": (-10.18440, -48.33360),
 }
 
+PLACEHOLDER_NAME = "Posto de Combustível"
+
 ESTADOS_NOME_TO_UF: Dict[str, str] = {
     "ACRE": "AC", "ALAGOAS": "AL", "AMAPA": "AP", "AMAZONAS": "AM",
     "BAHIA": "BA", "CEARA": "CE", "DISTRITO FEDERAL": "DF", "ESPIRITO SANTO": "ES",
@@ -153,50 +155,164 @@ def get_coordinates(city_key: str, uf: str) -> Tuple[float, float]:
     return STATE_CENTROIDS.get(uf.upper(), (-14.2350, -51.9253))
 
 
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Rumo-ETL/3.0"
+
+# Série histórica (dados abertos): um CSV por mês, com todos os postos pesquisados naquele mês.
+OFFICIAL_ANP_HISTORY_PAGE = (
+    "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/serie-historica-de-precos-de-combustiveis"
+)
+
+# Prices older than this (relative to the newest collection date) don't enter city/state averages.
+AVERAGE_WINDOW_DAYS = 45
+
+
+def _http_get(url: str, timeout: int = 60) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _page_links(page_url: str, pattern: str) -> List[str]:
+    """Links (absolutos) da página que casam com `pattern`, sem repetição."""
+    html = _http_get(page_url, timeout=30).decode("utf-8", errors="ignore")
+    found = re.findall(r'href=["\']([^"\']*' + pattern + r')["\']', html, re.IGNORECASE)
+    out: List[str] = []
+    for link in found:
+        if not link.startswith("http"):
+            link = f"https://www.gov.br{link}"
+        if link not in out:
+            out.append(link)
+    return out
+
+
+def history_url_sort_key(url: str) -> Tuple[int, int]:
+    """(ano, mês) do CSV mensal. A ANP mudou o padrão do nome: '2025/precos-gasolina-etanol-07.csv' e '2026/07-dados-abertos-...csv'."""
+    y = re.search(r"/dsan/(\d{4})/", url)
+    if not y:
+        return (0, 0)
+    name = url.rsplit("/", 1)[-1]
+    m = re.match(r"(\d{2})-", name) or re.search(r"-(\d{2})\.csv$", name)
+    return (int(y.group(1)), int(m.group(1))) if m else (0, 0)
+
+
+def weekly_url_sort_key(url: str) -> str:
+    """Data inicial da semana (aaaammdd) no nome do arquivo; os nomes da ANP misturam '-' e '_'."""
+    m = re.search(r"(\d{4})[-_](\d{2})[-_](\d{2})", url.rsplit("/", 1)[-1])
+    return "".join(m.groups()) if m else ""
+
+
+def list_history_urls(months: int = 12) -> List[str]:
+    links = _page_links(OFFICIAL_ANP_HISTORY_PAGE, r"dsan/\d{4}/[^\"']*etanol[^\"']*")
+    links = [u for u in links if history_url_sort_key(u) != (0, 0)]
+    return sorted(links, key=history_url_sort_key)[-months:]
+
+
+def list_weekly_urls(weeks: int = 4) -> List[str]:
+    links = _page_links(OFFICIAL_ANP_SURVEY_PAGE, r"revendas_lpc_[^\"']+\.xlsx")
+    links = [u for u in links if weekly_url_sort_key(u)]
+    return sorted(links, key=weekly_url_sort_key)[-weeks:]
+
+
+def fetch_history_records(months: int = 12) -> List[Dict[str, Any]]:
+    """Base: série histórica dos últimos `months` meses (todos os postos que a ANP pesquisou no período)."""
+    records: List[Dict[str, Any]] = []
+    for url in list_history_urls(months):
+        try:
+            print(f"Baixando série histórica: {url}")
+            records.extend(parse_history_csv(_http_get(url, timeout=120)))
+        except Exception as e:  # um mês fora do ar não derruba a base inteira
+            print(f"Aviso: não foi possível ler {url}: {e}")
+    return records
+
+
+def fetch_weekly_records(weeks: int = 4) -> List[Dict[str, Any]]:
+    """Atualização: as planilhas semanais mais recentes (preço de revenda por posto)."""
+    records: List[Dict[str, Any]] = []
+    for url in list_weekly_urls(weeks):
+        try:
+            print(f"Baixando semana: {url}")
+            content = _http_get(url, timeout=120)
+            if len(content) > 50_000:
+                records.extend(parse_xlsx_records(content))
+        except Exception as e:
+            print(f"Aviso: não foi possível ler {url}: {e}")
+    return records
+
+
 def fetch_latest_anp_weekly_survey() -> Optional[bytes]:
-    """
-    Localiza na página oficial da ANP e baixa o arquivo XLSX mais recente
-    do levantamento de preços semanais por revenda (revendas_lpc_*.xlsx).
-    """
+    """Compatibilidade: baixa só a planilha da semana mais recente."""
     try:
-        print(f"Consultando página oficial da ANP: {OFFICIAL_ANP_SURVEY_PAGE} ...")
-        req = urllib.request.Request(
-            OFFICIAL_ANP_SURVEY_PAGE,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Rumo-ETL/2.0"},
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-
-        # Encontra links para arquivos revendas_lpc_*.xlsx
-        links = re.findall(r'href=["\']([^"\']+/revendas_lpc_[^"\']+\.xlsx)["\']', html, re.IGNORECASE)
-        if not links:
-            # Fallback para qualquer revendas_lpc
-            links = re.findall(r'href=["\']([^"\']+revendas_lpc[^"\']+)["\']', html, re.IGNORECASE)
-
-        if not links:
-            print("Aviso: nenhum link de revendas encontrado na página oficial da ANP.")
-            return None
-
-        # Ordena em ordem decrescente para pegar a semana mais recente
-        sorted_links = sorted(set(links), reverse=True)
-        latest_url = sorted_links[0]
-        if not latest_url.startswith("http"):
-            latest_url = f"https://www.gov.br{latest_url}"
-
-        print(f"Baixando pesquisa semanal mais recente da ANP: {latest_url} ...")
-        down_req = urllib.request.Request(
-            latest_url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Rumo-ETL/2.0"},
-        )
-        with urllib.request.urlopen(down_req, timeout=60) as down_resp:
-            content = down_resp.read()
-
-        if len(content) > 50_000:
-            print(f"Download com sucesso: {len(content)} bytes baixados.")
-            return content
+        urls = list_weekly_urls(1)
+        return _http_get(urls[-1], timeout=120) if urls else None
     except Exception as e:
         print(f"Aviso ao consultar página semanal da ANP: {e}")
+        return None
+
+
+def map_product(raw: str) -> Optional[str]:
+    """GASOLINA / GASOLINA COMUM -> gc, GASOLINA ADITIVADA -> ga, ETANOL [HIDRATADO] -> et, outros -> None."""
+    p = unaccent(raw)
+    if "GASOLINA" in p and "ADITIVADA" in p:
+        return "ga"
+    if "GASOLINA" in p:
+        return "gc"
+    if "ETANOL" in p:
+        return "et"
     return None
+
+
+def parse_history_csv(raw: bytes) -> List[Dict[str, Any]]:
+    """CSV mensal da série histórica (';', UTF-8 com BOM) -> registros no mesmo formato do XLSX semanal."""
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=";")
+    records: List[Dict[str, Any]] = []
+    for row in reader:
+        prod = map_product(row.get("Produto", ""))
+        if prod is None:
+            continue
+        try:
+            price = float((row.get("Valor de Venda") or "").replace(",", ".").strip())
+        except ValueError:
+            continue
+        if price <= 0.0 or price > 30.0:
+            continue
+        uf = (row.get("Estado - Sigla") or "").strip().upper()
+        mun = (row.get("Municipio") or "").strip().title()
+        if not uf or not mun:
+            continue
+        rua = (row.get("Nome da Rua") or "").strip()
+        numero = (row.get("Numero Rua") or "").strip()
+        endereco = rua
+        if numero and numero.upper() not in ("SN", "S/N", "-"):
+            endereco = f"{rua}, {numero}".strip(", ")
+        records.append({
+            "cnpj": (row.get("CNPJ da Revenda") or "").strip(),
+            "nome": (row.get("Revenda") or "").strip() or PLACEHOLDER_NAME,
+            "bandeira": (row.get("Bandeira") or "").strip() or "Branca",
+            "endereco": endereco,
+            "bairro": (row.get("Bairro") or "").strip(),
+            "cep": (row.get("Cep") or "").strip(),
+            "mun": mun,
+            "uf": uf,
+            "prod": prod,
+            "preco": price,
+            "data": (row.get("Data da Coleta") or "").strip(),
+        })
+    return records
+
+
+def date_key(data: str) -> str:
+    """'dd/mm/aaaa' -> 'aaaammdd' (ordenável); data inválida -> ''."""
+    m = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", (data or "").strip())
+    return f"{m.group(3)}{m.group(2)}{m.group(1)}" if m else ""
+
+
+def station_key(cnpj: str, nome: str, city_key: str, endereco: str) -> str:
+    """CNPJ (14 dígitos) é o id estável do posto; sem CNPJ, um hash do nome/cidade/endereço."""
+    digits = re.sub(r"\D", "", cnpj or "")
+    if digits:
+        return digits.zfill(14)
+    return hashlib.md5(f"{nome}_{city_key}_{endereco}".encode()).hexdigest()[:12]
 
 
 def parse_xlsx_records(xlsx_bytes: bytes) -> List[Dict[str, Any]]:
@@ -308,20 +424,23 @@ def parse_xlsx_records(xlsx_bytes: bytes) -> List[Dict[str, Any]]:
             uf = ESTADOS_NOME_TO_UF.get(raw_est, raw_est if len(raw_est) == 2 else "BR")
             mun = str(vals[mun_col]).strip().title()
 
-            nome = (str(vals[fant_col]).strip() if fant_col and fant_col < len(vals) else "").strip()
-            if not nome or nome == "-":
-                nome = "Posto de Combustível"
+            def cell(col: Optional[int]) -> str:
+                return str(vals[col]).strip() if col is not None and col < len(vals) else ""
 
-            endereco = (str(vals[end_col]).strip() if end_col and end_col < len(vals) else "").strip()
-            numero = (str(vals[num_col]).strip() if num_col and num_col < len(vals) else "").strip()
-            if numero and numero != "SN" and numero != "-":
+            nome = cell(fant_col)
+            if not nome or nome == "-":
+                nome = PLACEHOLDER_NAME
+
+            endereco = cell(end_col)
+            numero = cell(num_col)
+            if numero and numero.upper() not in ("SN", "S/N", "-"):
                 endereco = f"{endereco}, {numero}".strip(", ")
 
-            bairro = (str(vals[bairro_col]).strip() if bairro_col and bairro_col < len(vals) else "").strip()
-            cep = (str(vals[cep_col]).strip() if cep_col and cep_col < len(vals) else "").strip()
-            bandeira = (str(vals[band_col]).strip() if band_col and band_col < len(vals) else "Branca").strip()
-            cnpj = (str(vals[cnpj_col]).strip() if cnpj_col and cnpj_col < len(vals) else "").strip()
-            data_coleta = (str(vals[data_col]).strip() if data_col and data_col < len(vals) else "").strip()
+            bairro = cell(bairro_col)
+            cep = cell(cep_col)
+            bandeira = cell(band_col) or "Branca"
+            cnpj = cell(cnpj_col)
+            data_coleta = cell(data_col)
             if data_coleta:
                 try:
                     val_float = float(data_coleta)
@@ -348,118 +467,108 @@ def parse_xlsx_records(xlsx_bytes: bytes) -> List[Dict[str, Any]]:
 
 
 def build_payload_from_records(records: List[Dict[str, Any]], max_stations: Optional[int] = None) -> Dict[str, Any]:
-    """Agrega os registros oficiais em estados, cidades e postos individuais."""
-    state_prices: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: {"gc": [], "ga": [], "et": []})
-    state_dates: Dict[str, List[str]] = defaultdict(list)
+    """
+    Agrega os registros (série histórica + semanas recentes) em estados, cidades e postos.
 
-    city_prices: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: {"gc": [], "ga": [], "et": []})
-    city_info: Dict[str, Tuple[str, str]] = {} # city_key -> (mun, uf)
-    city_dates: Dict[str, List[str]] = defaultdict(list)
+    - Cada posto guarda, por produto, o preço da coleta MAIS RECENTE (a semana sobrescreve a série histórica).
+    - Médias/mín/máx de cidade e estado usam só preços coletados nos últimos AVERAGE_WINDOW_DAYS dias da base,
+      para um preço de oito meses atrás não puxar a média de hoje.
+    """
+    # Mais antigos primeiro: campos de endereço/nome do registro mais novo vencem.
+    ordered = sorted(records, key=lambda r: date_key(r.get("data", "")))
 
     stations_map: Dict[str, Dict[str, Any]] = {}
+    best: Dict[str, Dict[str, Tuple[str, float]]] = defaultdict(dict)  # id -> prod -> (dk, preco)
+    city_info: Dict[str, Tuple[str, str]] = {}
 
-    for rec in records:
+    for rec in ordered:
         uf = rec["uf"]
-        mun = rec["mun"]
-        city_key = normalize_city_key(uf, mun)
-        prod = rec["prod"]
-        preco = rec["preco"]
-        data = rec["data"]
+        city_key = normalize_city_key(uf, rec["mun"])
+        city_info[city_key] = (rec["mun"], uf)
+        prod, preco, dk = rec["prod"], rec["preco"], date_key(rec.get("data", ""))
+        sid = station_key(rec.get("cnpj", ""), rec["nome"], city_key, rec["endereco"])
 
-        state_prices[uf][prod].append(preco)
-        if data:
-            state_dates[uf].append(data)
-
-        city_prices[city_key][prod].append(preco)
-        city_info[city_key] = (mun, uf)
-        if data:
-            city_dates[city_key].append(data)
-
-        # Mapeia posto
-        station_id = rec["cnpj"] or hashlib.md5(f"{rec['nome']}_{city_key}_{rec['endereco']}".encode()).hexdigest()[:12]
-        if station_id not in stations_map:
+        st = stations_map.get(sid)
+        if st is None:
             lat, lon = get_coordinates(city_key, uf)
-            stations_map[station_id] = {
-                "id": f"anp_{station_id}",
-                "nome": rec["nome"],
-                "bandeira": rec["bandeira"],
-                "cityKey": city_key,
-                "uf": uf,
-                "endereco": rec["endereco"],
-                "bairro": rec["bairro"],
-                "cep": rec["cep"],
-                "lat": lat,
-                "lon": lon,
-                "gc": None,
-                "ga": None,
-                "et": None,
-                "ds": None,
-                "data": data,
+            st = {
+                "id": f"anp_{sid}", "nome": rec["nome"], "bandeira": rec["bandeira"], "cityKey": city_key,
+                "uf": uf, "endereco": rec["endereco"], "bairro": rec["bairro"], "cep": rec["cep"],
+                "lat": lat, "lon": lon, "gc": None, "ga": None, "et": None, "ds": None, "data": "",
             }
-        stations_map[station_id][prod] = preco
-        if data and data > stations_map[station_id]["data"]:
-            stations_map[station_id]["data"] = data
+            stations_map[sid] = st
+        else:
+            for field in ("bandeira", "endereco", "bairro", "cep"):
+                if rec[field]:
+                    st[field] = rec[field]
+            if rec["nome"] != PLACEHOLDER_NAME:
+                st["nome"] = rec["nome"]
 
-    # Constrói cidades
+        prev = best[sid].get(prod)
+        if prev is None or dk >= prev[0]:
+            best[sid][prod] = (dk, preco)
+            st[prod] = preco
+            if dk and dk >= date_key(st["data"]):
+                st["data"] = rec["data"]
+
+    all_dks = [dk for per in best.values() for dk, _ in per.values() if dk]
+    cutoff = ""
+    if all_dks:
+        newest = datetime.strptime(max(all_dks), "%Y%m%d")
+        cutoff = (newest - timedelta(days=AVERAGE_WINDOW_DAYS)).strftime("%Y%m%d")
+
+    city_prices: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: {"gc": [], "ga": [], "et": []})
+    state_prices: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: {"gc": [], "ga": [], "et": []})
+    city_dates: Dict[str, List[str]] = defaultdict(list)
+    state_dates: Dict[str, List[str]] = defaultdict(list)
+    for sid, per in best.items():
+        st = stations_map[sid]
+        for prod, (dk, preco) in per.items():
+            if dk < cutoff:
+                continue
+            city_prices[st["cityKey"]][prod].append(preco)
+            state_prices[st["uf"]][prod].append(preco)
+            if dk:
+                city_dates[st["cityKey"]].append(dk)
+                state_dates[st["uf"]].append(dk)
+
+    def ref_of(dks: List[str]) -> str:
+        return datetime.strptime(max(dks), "%Y%m%d").strftime("%d/%m/%Y") if dks else ""
+
     final_cidades: Dict[str, Dict[str, Any]] = {}
     for c_key, c_prods in city_prices.items():
         mun, uf = city_info[c_key]
         lat, lon = get_coordinates(c_key, uf)
-        c_dict: Dict[str, Any] = {
-            "uf": uf,
-            "mun": mun,
-            "lat": lat,
-            "lon": lon,
-            "ref": max(city_dates[c_key]) if city_dates[c_key] else "",
-        }
+        c_dict: Dict[str, Any] = {"uf": uf, "mun": mun, "lat": lat, "lon": lon, "ref": ref_of(city_dates[c_key])}
         for p in ("gc", "ga", "et"):
             vals = c_prods[p]
-            if vals:
-                c_dict[f"{p}Avg"] = round(sum(vals) / len(vals), 2)
-                c_dict[f"{p}Min"] = round(min(vals), 2)
-                c_dict[f"{p}Max"] = round(max(vals), 2)
-            else:
-                c_dict[f"{p}Avg"] = None
-                c_dict[f"{p}Min"] = None
-                c_dict[f"{p}Max"] = None
-        c_dict["dsAvg"] = None
-        c_dict["dsMin"] = None
-        c_dict["dsMax"] = None
+            c_dict[f"{p}Avg"] = round(sum(vals) / len(vals), 2) if vals else None
+            c_dict[f"{p}Min"] = round(min(vals), 2) if vals else None
+            c_dict[f"{p}Max"] = round(max(vals), 2) if vals else None
+        c_dict["dsAvg"] = c_dict["dsMin"] = c_dict["dsMax"] = None
         final_cidades[c_key] = c_dict
 
-    # Constrói estados
     final_estados: Dict[str, Dict[str, Any]] = {}
     for uf, s_prods in state_prices.items():
         lat, lon = STATE_CENTROIDS.get(uf, (-14.2350, -51.9253))
-        s_dict: Dict[str, Any] = {
-            "uf": uf,
-            "lat": lat,
-            "lon": lon,
-            "ref": max(state_dates[uf]) if state_dates[uf] else "",
-        }
+        s_dict: Dict[str, Any] = {"uf": uf, "lat": lat, "lon": lon, "ref": ref_of(state_dates[uf])}
         for p in ("gc", "et"):
             vals = s_prods[p]
             s_dict[f"{p}Avg"] = round(sum(vals) / len(vals), 2) if vals else None
         s_dict["dsAvg"] = None
         final_estados[uf] = s_dict
 
-    # Garante que as 27 UFs existam no mapa de estados
+    # Garante as 27 UFs (sem dado: valores de contingência).
     for uf, (lat, lon) in STATE_CENTROIDS.items():
         if uf not in final_estados:
             final_estados[uf] = {
-                "uf": uf,
-                "lat": lat,
-                "lon": lon,
+                "uf": uf, "lat": lat, "lon": lon,
                 "ref": datetime.now(timezone.utc).strftime("%d/%m/%Y"),
-                "gcAvg": 6.30,
-                "etAvg": 4.20,
-                "dsAvg": None,
+                "gcAvg": 6.30, "etAvg": 4.20, "dsAvg": None,
             }
 
-    # Postos finais
     final_postos = list(stations_map.values())
     final_postos.sort(key=lambda p: (p["uf"], p["cityKey"], p["nome"]))
-
     if max_stations and max_stations > 0:
         final_postos = final_postos[:max_stations]
 
@@ -539,33 +648,37 @@ def generate_seed_payload() -> Dict[str, Any]:
     }
 
 
+def _parse_bytes(raw: bytes) -> List[Dict[str, Any]]:
+    return parse_xlsx_records(raw) if raw[:2] == b"PK" else parse_history_csv(raw)
+
+
 def process_anp_data(
     input_source: Optional[str],
     output_path: str,
     max_stations: Optional[int] = None,
     use_seed_fallback: bool = False,
     auto_anp: bool = True,
+    history_months: int = 12,
+    weeks: int = 4,
 ) -> None:
+    """
+    Base = série histórica (últimos `history_months` meses); atualização = `weeks` semanas mais recentes por cima.
+    `input_source` (arquivo local .csv/.xlsx ou URL) substitui o download automático.
+    """
     records: List[Dict[str, Any]] = []
 
     if not use_seed_fallback:
-        # 1. Se informou input local ou URL
         if input_source:
-            if input_source.startswith("http://") or input_source.startswith("https://"):
-                req = urllib.request.Request(input_source, headers={"User-Agent": "Mozilla/5.0"})
-                raw = urllib.request.urlopen(req, timeout=60).read()
+            if input_source.startswith(("http://", "https://")):
+                records = _parse_bytes(_http_get(input_source, timeout=120))
             else:
                 with open(input_source, "rb") as f:
-                    raw = f.read()
-
-            if raw.startswith(b"PK\x03\x04") or raw.startswith(b"PK"):
-                records = parse_xlsx_records(raw)
-
-        # 2. Se auto_anp ativo e ainda sem registros
-        if not records and auto_anp:
-            xlsx_bytes = fetch_latest_anp_weekly_survey()
-            if xlsx_bytes:
-                records = parse_xlsx_records(xlsx_bytes)
+                    records = _parse_bytes(f.read())
+        elif auto_anp:
+            base = fetch_history_records(history_months)
+            weekly = fetch_weekly_records(weeks)
+            print(f"Base histórica: {len(base)} registros | semanas recentes: {len(weekly)} registros")
+            records = base + weekly
 
     if records:
         print(f"Total de registros válidos de combustíveis (GC, GA, ET): {len(records)}")
@@ -576,7 +689,6 @@ def process_anp_data(
         if max_stations and max_stations > 0:
             payload["postos"] = payload["postos"][:max_stations]
 
-    # Salva arquivo gzip
     parent_dir = os.path.dirname(os.path.abspath(output_path))
     if parent_dir:
         os.makedirs(parent_dir, exist_ok=True)
@@ -593,37 +705,15 @@ def process_anp_data(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ETL e normalizador de preços de combustíveis da ANP")
-    parser.add_argument(
-        "--input",
-        type=str,
-        default=None,
-        help="Caminho do arquivo XLSX ou URL remota da ANP. Se omitido, busca automaticamente na página oficial.",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        required=True,
-        help="Caminho do arquivo final compactado (.json.gz)",
-    )
-    parser.add_argument(
-        "--max-stations",
-        type=int,
-        default=None,
-        help="Limite máximo de postos para persistir no payload",
-    )
-    parser.add_argument(
-        "--auto-anp",
-        action="store_true",
-        default=True,
-        help="Baixa automaticamente o relatório mais recente da página da ANP (padrão)",
-    )
-    parser.add_argument(
-        "--generate-seed",
-        action="store_true",
-        help="Força a geração do seed de contingência",
-    )
-
+    parser = argparse.ArgumentParser(description="ETL de preços de combustíveis da ANP (base histórica + semanas recentes)")
+    parser.add_argument("--input", type=str, default=None,
+                        help="Arquivo .csv/.xlsx local ou URL. Se omitido, baixa a série histórica e as semanas recentes da ANP.")
+    parser.add_argument("--output", type=str, required=True, help="Arquivo final compactado (.json.gz)")
+    parser.add_argument("--max-stations", type=int, default=None, help="Limite de postos no payload")
+    parser.add_argument("--history-months", type=int, default=12, help="Meses da série histórica usados como base (padrão 12)")
+    parser.add_argument("--weeks", type=int, default=4, help="Semanas recentes aplicadas por cima da base (padrão 4)")
+    parser.add_argument("--auto-anp", action="store_true", default=True, help="Baixa os dados da ANP (padrão)")
+    parser.add_argument("--generate-seed", action="store_true", help="Força o seed de contingência")
     args = parser.parse_args()
 
     process_anp_data(
@@ -632,6 +722,8 @@ def main() -> None:
         max_stations=args.max_stations,
         use_seed_fallback=args.generate_seed,
         auto_anp=args.auto_anp and not args.generate_seed,
+        history_months=args.history_months,
+        weeks=args.weeks,
     )
 
 

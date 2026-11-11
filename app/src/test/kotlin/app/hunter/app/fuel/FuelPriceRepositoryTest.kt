@@ -61,6 +61,10 @@ class FuelPriceRepositoryTest {
             states.forEach { this.stateStats[it.uf] = it }
         }
 
+        override suspend fun getMatchedStations(): List<AnpStationEntity> =
+            stations.values.filter { it.id.startsWith("anpm_") }
+        override suspend fun clearBaseStations() { stations.keys.removeAll { it.startsWith("anp_") } }
+        override suspend fun deleteStation(stationId: String) { stations.remove(stationId) }
         override suspend fun clearStations() { stations.clear() }
         override suspend fun clearCityStats() { cityStats.clear() }
         override suspend fun clearStateStats() { stateStats.clear() }
@@ -522,5 +526,62 @@ class FuelPriceRepositoryTest {
         assertEquals(3.69, updated[0].precoEtanol)
         assertNull(updated[0].precoDiesel)
         assertEquals("11/11/2026", updated[0].dataRef)
+    }
+
+    private fun anpStation(id: String, gc: Double?, data: String, lat: Double = -20.0) = AnpStationEntity(
+        id = id, nome = "Posto", bandeira = "VIBRA", cityKey = "es_serra", uf = "ES", endereco = "Rua A, 1", bairro = "",
+        cep = "", lat = lat, lon = -40.0, precoGasolina = gc, precoGasolinaAdit = null, precoEtanol = null,
+        precoDiesel = null, dataColeta = data,
+    )
+
+    private fun payloadOf(vararg gc: Triple<String, Double, String>) = AnpFuelPayload(
+        estados = mapOf("ES" to AnpStateDto(uf = "ES", lat = -20.0, lon = -40.0, gcAvg = 6.0, etAvg = 4.0, ref = "05/11/2026")),
+        cidades = mapOf("es_serra" to AnpCityDto(uf = "ES", mun = "Serra", lat = -20.0, lon = -40.0, gcAvg = 6.0, ref = "05/11/2026")),
+        postos = gc.map { (id, preco, data) ->
+            AnpStationDto(id = id, nome = "Posto", bandeira = "VIBRA", cityKey = "es_serra", uf = "ES", endereco = "Rua A, 1",
+                bairro = "", cep = "", lat = -20.0, lon = -40.0, gc = preco, ga = null, et = null, ds = null, data = data)
+        },
+    )
+
+    @Test
+    fun `atualizacao da base renova postos do mapa so quando a coleta da ANP e mais nova`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        // anpm_anp_1: preço da ANP de 01/11 -> a base traz 05/11 (mais nova) -> atualiza
+        dao.stations["anpm_anp_1"] = anpStation("anpm_anp_1", 6.00, "01/11/2026")
+        // anpm_anp_2: usuário informou preço em 10/11 -> a base traz 05/11 (mais velha) -> mantém o do usuário
+        dao.stations["anpm_anp_2"] = anpStation("anpm_anp_2", 5.50, "10/11/2026")
+        // anpm_anp_3: posto não existe mais na base -> some (será ligado de novo na próxima busca)
+        dao.stations["anpm_anp_3"] = anpStation("anpm_anp_3", 6.10, "01/11/2026")
+
+        FuelPriceRepository(dao = dao).ingestPayload(
+            payloadOf(Triple("anp_1", 6.40, "05/11/2026"), Triple("anp_2", 6.99, "05/11/2026")),
+        )
+
+        assertEquals(6.40, dao.stations["anpm_anp_1"]?.precoGasolina)
+        assertEquals("05/11/2026", dao.stations["anpm_anp_1"]?.dataColeta)
+        assertEquals(5.50, dao.stations["anpm_anp_2"]?.precoGasolina)
+        assertNull(dao.stations["anpm_anp_3"])
+    }
+
+    @Test
+    fun `seed novo troca a base antiga e preserva os postos do mapa`() = runBlocking {
+        val dao = FakeAnpFuelDao()
+        dao.stations["anp_oldhash"] = anpStation("anp_oldhash", 6.00, "01/01/2026")
+        dao.stations["anpm_anp_new"] = anpStation("anpm_anp_new", 6.00, "01/01/2026")
+        var version = 1
+        val gz = compressGzip(AnpFuelPayload.toJson(payloadOf(Triple("anp_new", 6.50, "05/11/2026"))))
+        val repo = FuelPriceRepository(
+            dao = dao,
+            assetLoader = { ByteArrayInputStream(gz) },
+            seedVersionGet = { version },
+            seedVersionSet = { version = it },
+        )
+
+        repo.ensureSeedLoaded()
+
+        assertNull(dao.stations["anp_oldhash"])
+        assertEquals("anp_new", dao.stations["anp_new"]?.id)
+        assertEquals(6.50, dao.stations["anpm_anp_new"]?.precoGasolina) // renovado pela base nova
+        assertEquals(FuelPriceRepository.SEED_VERSION, version)
     }
 }

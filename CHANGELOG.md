@@ -2,6 +2,18 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.9]
+
+### Alterado
+- **Base de preços da ANP ampliada**: a base embarcada agora vem da **série histórica de 12 meses** (nov/2025 a out/2026) da ANP, com **8.587 postos** (antes 4.628, só de uma semana), cada um com o preço da coleta mais recente por combustível.
+- **Atualização semanal por cima da base**: `sync_anp_fuel.py` baixa as 4 planilhas semanais mais recentes (`revendas_lpc_*.xlsx`) e aplica sobre a série histórica; a coleta mais nova de cada posto vence. O workflow semanal publica o resultado em `anp-data-latest`.
+- Postos do mapa já ligados à ANP recebem o preço novo a cada atualização da base (um preço informado pelo usuário vale até a ANP coletar depois).
+- Médias de cidade e estado usam só coletas dos últimos 45 dias da base.
+
+### Corrigido
+- O CNPJ (coluna 0 do XLSX semanal) era ignorado; agora é o id estável do posto (`anp_<cnpj>`).
+- Testes Python do ETL estavam desatualizados e falhavam; reescritos.
+
 ## [0.7.4]
 
 ### Adicionado e Corrigido

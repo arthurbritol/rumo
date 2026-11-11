@@ -37,6 +37,8 @@ class HunterApp : Application(), TripsGraph {
                     null
                 }
             },
+            seedVersionGet = { getSharedPreferences("anp_seed", MODE_PRIVATE).getInt("version", 0) },
+            seedVersionSet = { getSharedPreferences("anp_seed", MODE_PRIVATE).edit().putInt("version", it).apply() },
         )
     }
 

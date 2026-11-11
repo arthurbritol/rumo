@@ -59,6 +59,9 @@ data class FuelPriceReference(
 class FuelPriceRepository(
     private val dao: AnpFuelDao,
     private val assetLoader: (String) -> InputStream? = { null },
+    /** Versão do seed já carregado neste aparelho. O padrão (versão atual) desliga a migração. */
+    private val seedVersionGet: () -> Int = { SEED_VERSION },
+    private val seedVersionSet: (Int) -> Unit = {},
 ) {
 
     constructor(context: Context, dao: AnpFuelDao) : this(
@@ -77,9 +80,13 @@ class FuelPriceRepository(
      * caso o banco local de estados esteja vazio.
      */
     suspend fun ensureSeedLoaded() {
-        if (dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty()) return
+        val upToDate = seedVersionGet() >= SEED_VERSION
+        if (upToDate && dao.getAllCityStats().size >= 40 && dao.getAllStateStats().isNotEmpty()) return
         val stream = assetLoader("anp_fuel_seed.json.gz") ?: return
+        // Seed novo (série histórica de 12 meses): troca a base antiga, que tinha outros ids de posto.
+        if (!upToDate) dao.clearBaseStations()
         ingestGzipStream(stream)
+        seedVersionSet(SEED_VERSION)
     }
 
     /**
@@ -152,6 +159,24 @@ class FuelPriceRepository(
         dao.insertAllStateStats(stateEntities)
         dao.insertAllCityStats(cityEntities)
         dao.insertAllStations(stationEntities)
+        refreshMatchedStations(payload.postos)
+    }
+
+    /**
+     * Os postos do mapa ligados à ANP ("anpm_<id da ANP>") são cópias; quando a base muda (atualização semanal) eles
+     * recebem o preço novo se a coleta for mais recente que a que guardam (um preço informado hoje pelo usuário
+     * continua valendo até a ANP coletar depois), e somem se o posto não existe mais na base (serão ligados de novo).
+     */
+    private suspend fun refreshMatchedStations(postos: List<app.hunter.nav.AnpStationDto>) {
+        val byId = postos.associateBy { it.id }
+        for (row in dao.getMatchedStations()) {
+            val src = byId[row.id.removePrefix(MATCHED_PREFIX)]
+            if (src == null) {
+                dao.deleteStation(row.id)
+            } else if (dateKey(src.data) >= dateKey(row.dataColeta)) {
+                dao.updateStationPrices(row.id, src.gc, src.ga, src.et, src.ds, src.data)
+            }
+        }
     }
 
     /**
@@ -377,6 +402,15 @@ class FuelPriceRepository(
     companion object {
         /** Prefixo do id de um posto do mapa já ligado a um posto da ANP (o resto do id é o id da ANP). */
         const val MATCHED_PREFIX = "anpm_"
+
+        /** Sobe quando o seed embarcado muda de forma incompatível (v2: série histórica de 12 meses, ids por CNPJ). */
+        const val SEED_VERSION = 2
+
+        /** "dd/MM/aaaa" -> "aaaaMMdd" (comparável); data inválida vira "". */
+        fun dateKey(data: String): String {
+            val p = data.trim().split("/")
+            return if (p.size == 3 && p[2].length == 4) p[2] + p[1].padStart(2, '0') + p[0].padStart(2, '0') else ""
+        }
 
         fun detectBrand(name: String): String {
             val n = name.lowercase()
