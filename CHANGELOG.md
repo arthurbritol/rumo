@@ -2,6 +2,15 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.4]
+
+### Adicionado e Corrigido
+- **Integração direta com o Levantamento Semanal da ANP (`sync_anp_fuel.py`)**: crawler e extrator nativo em Python que acessa diretamente a página oficial de últimas semanas pesquisadas da ANP, processa o relatório semanal de revendas (`revendas_lpc_*.xlsx`) e extrai estritamente **Gasolina Comum**, **Gasolina Aditivada** e **Etanol** de todo o Brasil (405 cidades, 27 estados e 4.628 postos pesquisados), gerando o asset comprimido `anp_fuel_seed.json.gz`.
+- **Descoberta por proximidade estrita (`FuelStationFinder`)**: raio máximo rigoroso (`<= 8 km`) e ordenação automática por menor distância geométrica (`Geo.distanceM`), eliminando o bug de postos distantes aparecerem antes dos locais no mapa.
+- **Informe manual de preços na bomba (`EditFuelPricesDialog` e `FuelStationCard`)**: motociclistas podem informar ou atualizar em tempo real os preços praticados na bomba para Gasolina Comum, Aditivada e Etanol, com gravação persistente no Room (`updateStationPrices`) e atualização imediata nos cards e marcadores.
+- **Busca sob demanda na área visível (`MapScreen` e `FuelMapCoordinator`)**: botão flutuante estilizado Novare "Buscar postos nesta área" permitindo explorar livremente outras regiões do mapa sem depender apenas do deslocamento automático.
+- **Sincronização imediata de câmera com GPS no mapa (`HunterMap`)**: câmera posiciona na coordenada real do usuário na abertura em vez de reter coordenadas padrão.
+
 ## [0.7.3]
 
 ### Corrigido e Aprimorado
