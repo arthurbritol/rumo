@@ -76,7 +76,12 @@ class FuelStationFinder(
                 fun tag(k: String) = tags?.get(k)?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
                 val name = tag("name") ?: tag("brand") ?: tag("operator") ?: "Posto de combustível"
                 val d = Geo.distanceM(origin.lat, origin.lon, lat, lon)
-                Triple(d, name, Place(name, listOfNotNull(tag("addr:street"), "a ${(d / 100).toInt() / 10.0} km do ponto".replace('.', ',')).joinToString(" · "), lat, lon))
+                Triple(d, name, Place(
+                    name,
+                    listOfNotNull(tag("addr:street"), "a ${(d / 100).toInt() / 10.0} km do ponto".replace('.', ',')).joinToString(" · "),
+                    lat, lon,
+                    street = tag("addr:street"), houseNumber = tag("addr:housenumber"), postcode = tag("addr:postcode"),
+                ))
             }.sortedBy { it.first }.map { it.third }
         }
     }

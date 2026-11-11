@@ -449,59 +449,37 @@ class FuelPriceRepositoryTest {
     }
 
     @Test
-    fun `enrichAndSavePlaces enriquece postos do OSM com precos da ANP e persiste no DAO`() = runBlocking {
+    fun `enrichAndSavePlaces so guarda postos que casam com um posto da ANP e usa o preco desse posto`() = runBlocking {
         val dao = FakeAnpFuelDao()
-        dao.insertAllStateStats(listOf(
-            AnpStateStatsEntity("SP", -23.55, -46.63, gasolinaAvg = 5.79, etanolAvg = 3.85, dieselAvg = 5.69, dataReferencia = "2026-11-10")
-        ))
+        dao.insertAllStateStats(listOf(AnpStateStatsEntity("SP", -23.55, -46.63, gasolinaAvg = 5.79, etanolAvg = 3.85, dieselAvg = 5.69, dataReferencia = "2026-11-10")))
         dao.insertAllCityStats(listOf(
-            AnpCityStatsEntity(
-                cityKey = "sp_campinas",
-                uf = "SP",
-                municipio = "Campinas",
-                lat = -22.90,
-                lon = -47.06,
-                gasolinaAvg = 5.82,
-                gasolinaMin = 5.60,
-                gasolinaMax = 6.00,
-                gasolinaAditAvg = 6.05,
-                gasolinaAditMin = null,
-                gasolinaAditMax = null,
-                etanolAvg = 3.89,
-                etanolMin = 3.70,
-                etanolMax = 4.10,
-                dieselAvg = 5.72,
-                dieselMin = 5.50,
-                dieselMax = 5.90,
-                dataReferencia = "2026-11-10",
-            )
+            AnpCityStatsEntity(cityKey = "sp_campinas", uf = "SP", municipio = "Campinas", lat = -22.90, lon = -47.06,
+                gasolinaAvg = 5.82, gasolinaMin = null, gasolinaMax = null, gasolinaAditAvg = null, gasolinaAditMin = null,
+                gasolinaAditMax = null, etanolAvg = 3.89, etanolMin = null, etanolMax = null, dieselAvg = 5.72,
+                dieselMin = null, dieselMax = null, dataReferencia = "2026-11-10"),
         ))
+        fun anp(id: String, end: String, gc: Double) = AnpStationEntity(
+            id = id, nome = "POSTO X", bandeira = "RAIZEN", cityKey = "sp_campinas", uf = "SP", endereco = end,
+            bairro = "CENTRO", cep = "13000000", lat = -22.90, lon = -47.06, precoGasolina = gc, precoEtanol = 3.99,
+            dataColeta = "05/11/2026",
+        )
+        dao.insertAllStations(listOf(anp("anp_1", "AVENIDA BRASIL, 100", 6.11), anp("anp_2", "RUA DAS FLORES, 5", 5.55)))
 
         val repo = FuelPriceRepository(dao = dao)
-        val osmPlaces = listOf(
-            app.hunter.nav.Place(name = "Auto Posto Shell Guanabara", subtitle = "Av Brasil 100", lat = -22.89, lon = -47.07),
-            app.hunter.nav.Place(name = "Posto Rodovia Interior", subtitle = "BR 369", lat = -21.00, lon = -50.00),
+        val places = listOf(
+            app.hunter.nav.Place("Shell Guanabara", "Av Brasil", -22.89, -47.07, street = "Avenida Brasil", houseNumber = "100"),
+            app.hunter.nav.Place("Posto Sem Dados", "BR 369", -22.80, -47.00, street = "Rodovia BR-369", houseNumber = "5"),
         )
+        val enriched = repo.enrichAndSavePlaces(places)
 
-        val enriched = repo.enrichAndSavePlaces(osmPlaces)
-
-        assertEquals(2, enriched.size)
-        // 1. Posto perto de Campinas (<= 50km) recebe média municipal
-        val st1 = enriched[0]
-        assertEquals("Auto Posto Shell Guanabara", st1.nome)
-        assertEquals("Shell", st1.bandeira)
-        assertEquals(5.82, st1.precoGasolina)
-        assertEquals(6.05, st1.precoGasolinaAdit)
-        assertEquals(PriceSource.MEDIA_MUNICIPAL, st1.fonte)
-
-        // 2. Posto longe (> 50km) recebe média estadual
-        val st2 = enriched[1]
-        assertEquals("Branca", st2.bandeira)
-        assertEquals(5.79, st2.precoGasolina)
-        assertEquals(PriceSource.MEDIA_ESTADUAL, st2.fonte)
-
-        // Confere que foram salvos no banco
-        assertEquals(2, dao.stations.size)
+        assertEquals(1, enriched.size)
+        assertEquals(6.11, enriched[0].precoGasolina)          // preço DESTE posto, não a média 5,82
+        assertEquals(PriceSource.POSTO_ANP, enriched[0].fonte)
+        assertEquals("anpm_anp_1", enriched[0].id)
+        assertEquals(-22.89, enriched[0].lat, 1e-9)            // posição do mapa, não a da cidade
+        // No mapa só aparece o posto ligado; os da base da ANP (posição da cidade) não.
+        val box = app.hunter.model.GeoBox(-23.5, -47.5, -22.5, -46.5)
+        assertEquals(listOf("anpm_anp_1"), repo.getMapStations(box).map { it.id })
     }
 
     @Test

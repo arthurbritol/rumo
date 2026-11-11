@@ -35,6 +35,9 @@ data class ResolvedFuelStation(
     val dataRef: String,
 )
 
+/** Média estadual da ANP, mostrada no mapa só quando o zoom enquadra o estado inteiro. */
+data class StateAverage(val uf: String, val lat: Double, val lon: Double, val gasolina: Double?, val etanol: Double?)
+
 data class FuelPriceReference(
     val regiaoNome: String,
     val precoGasolina: Double?,
@@ -293,9 +296,19 @@ class FuelPriceRepository(
         )
     }
 
+    suspend fun stateAverages(): List<StateAverage> =
+        dao.getAllStateStats().map { StateAverage(it.uf, it.lat, it.lon, it.gasolinaAvg, it.etanolAvg) }
+
     /**
-     * Enriquece uma lista de postos (por exemplo, retornados pelo OpenStreetMap via Overpass)
-     * com os preços de combustíveis da ANP em 3 níveis (posto -> cidade -> estado) e persiste no Room.
+     * Postos para o mapa: só os que têm preço próprio da ANP (nunca a média da cidade ou do estado). A posição vem do
+     * mapa; o preço, do posto da ANP de mesmo endereço (ver [AnpMatcher]).
+     */
+    suspend fun getMapStations(box: GeoBox): List<ResolvedFuelStation> =
+        getStationsInBox(box).filter { it.id.startsWith(MATCHED_PREFIX) && it.fonte == PriceSource.POSTO_ANP }
+
+    /**
+     * Liga cada posto do mapa ao posto da ANP de mesmo endereço, grava (para aparecer na hora nas próximas vezes) e
+     * devolve só os que têm preço da ANP. Quem não casa fica de fora: sem preço próprio, sem marcador.
      */
     suspend fun enrichAndSavePlaces(places: List<Place>): List<ResolvedFuelStation> {
         if (places.isEmpty()) return emptyList()
@@ -305,54 +318,43 @@ class FuelPriceRepository(
         }
 
         val allCities = dao.getAllCityStats()
-        val allStates = dao.getAllStateStats()
-        val statesByUf = allStates.associateBy { it.uf.uppercase() }
+        val byCity = mutableMapOf<String, List<AnpStationEntity>>()
+        suspend fun anpStationsOf(cityKey: String) =
+            byCity.getOrPut(cityKey) { dao.getStationsByCity(cityKey).filter { it.id.startsWith("anp_") } }
 
-        val entities = places.map { place ->
-            val nearestCity = allCities
+        val entities = places.mapNotNull { place ->
+            val cityKeys = allCities
                 .map { it to Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
-                .minByOrNull { it.second }
-                ?.takeIf { it.second <= 50_000.0 }
-                ?.first
-
-            val nearestState = (nearestCity?.let { statesByUf[it.uf.uppercase()] })
-                ?: allStates.minByOrNull { Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
-
-            val brand = detectBrand(place.name)
-            val stationId = "osm_${place.lat.toString().replace('.', '_')}_${place.lon.toString().replace('.', '_')}"
-
-            val gc = nearestCity?.gasolinaAvg ?: nearestState?.gasolinaAvg
-            val ga = nearestCity?.gasolinaAditAvg
-            val et = nearestCity?.etanolAvg ?: nearestState?.etanolAvg
-            val ds = nearestCity?.dieselAvg ?: nearestState?.dieselAvg
-            val dateRef = nearestCity?.dataReferencia ?: nearestState?.dataReferencia.orEmpty()
-
+                .filter { it.second <= 30_000.0 }
+                .sortedBy { it.second }
+                .take(3)
+                .map { it.first.cityKey }
+            val candidates = cityKeys.flatMap { anpStationsOf(it) }
+            val anp = AnpMatcher.match(place, candidates) ?: return@mapNotNull null
+            if (anp.precoGasolina == null && anp.precoEtanol == null && anp.precoDiesel == null) return@mapNotNull null
+            val osmBrand = detectBrand(place.name)
             AnpStationEntity(
-                id = stationId,
-                nome = place.name,
-                bandeira = brand,
-                cityKey = nearestCity?.cityKey.orEmpty(),
-                uf = nearestCity?.uf ?: nearestState?.uf.orEmpty(),
-                endereco = place.subtitle.orEmpty(),
-                bairro = "",
-                cep = "",
+                id = MATCHED_PREFIX + anp.id,
+                nome = place.name.ifBlank { anp.nome },
+                bandeira = if (osmBrand != "Branca") osmBrand else anp.bandeira,
+                cityKey = anp.cityKey,
+                uf = anp.uf,
+                endereco = anp.endereco,
+                bairro = anp.bairro,
+                cep = anp.cep,
                 lat = place.lat,
                 lon = place.lon,
-                precoGasolina = gc,
-                precoGasolinaAdit = ga,
-                precoEtanol = et,
-                precoDiesel = ds,
-                dataColeta = dateRef,
+                precoGasolina = anp.precoGasolina,
+                precoGasolinaAdit = anp.precoGasolinaAdit,
+                precoEtanol = anp.precoEtanol,
+                precoDiesel = anp.precoDiesel,
+                dataColeta = anp.dataColeta,
             )
-        }
+        }.distinctBy { it.id }
 
         dao.insertNewStations(entities)
 
         return entities.map { st ->
-            val fonte = when {
-                st.cityKey.isNotBlank() -> PriceSource.MEDIA_MUNICIPAL
-                else -> PriceSource.MEDIA_ESTADUAL
-            }
             ResolvedFuelStation(
                 id = st.id,
                 nome = st.nome,
@@ -366,13 +368,16 @@ class FuelPriceRepository(
                 precoGasolinaAdit = st.precoGasolinaAdit,
                 precoEtanol = st.precoEtanol,
                 precoDiesel = st.precoDiesel,
-                fonte = fonte,
+                fonte = PriceSource.POSTO_ANP,
                 dataRef = st.dataColeta,
             )
         }
     }
 
     companion object {
+        /** Prefixo do id de um posto do mapa já ligado a um posto da ANP (o resto do id é o id da ANP). */
+        const val MATCHED_PREFIX = "anpm_"
+
         fun detectBrand(name: String): String {
             val n = name.lowercase()
             return when {

@@ -179,6 +179,18 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     /** Indicador se está buscando postos na web via Overpass. */
     val isSearchingFuelOnline: StateFlow<Boolean> get() = fuelCoordinator.isSearchingOnline
 
+    private val _stateAverages = MutableStateFlow<List<app.hunter.app.fuel.StateAverage>>(emptyList())
+
+    /** Média da ANP por estado, para a vista de zoom aberto. */
+    val stateAverages: StateFlow<List<app.hunter.app.fuel.StateAverage>> = _stateAverages.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            runCatching { fuelRepo.ensureSeedLoaded() }
+            _stateAverages.value = runCatching { fuelRepo.stateAverages() }.getOrDefault(emptyList())
+        }
+    }
+
     /** Motivo de a última busca de postos não ter achado nada (ou null). */
     val fuelSearchStatus: StateFlow<String?> get() = fuelCoordinator.searchStatus
 

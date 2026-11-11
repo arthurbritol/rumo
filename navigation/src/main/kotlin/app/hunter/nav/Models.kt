@@ -5,7 +5,16 @@ import app.hunter.model.Geo
 data class LatLon(val lat: Double, val lon: Double)
 
 /** Lugar escolhido como destino (resultado de busca, ponto no mapa ou salvo). */
-data class Place(val name: String, val subtitle: String?, val lat: Double, val lon: Double) {
+data class Place(
+    val name: String,
+    val subtitle: String?,
+    val lat: Double,
+    val lon: Double,
+    /** Endereço estruturado (quando a fonte informa): usado para casar o posto com o da ANP. */
+    val street: String? = null,
+    val houseNumber: String? = null,
+    val postcode: String? = null,
+) {
     val latLon get() = LatLon(lat, lon)
 }
 

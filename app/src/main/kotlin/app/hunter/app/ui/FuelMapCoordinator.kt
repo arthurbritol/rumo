@@ -53,7 +53,7 @@ class FuelMapCoordinator(
         debounceMs: Long = 200L,
     ) : this(
         scope = scope,
-        fetchStations = { box -> repository.getStationsInBox(box) },
+        fetchStations = { box -> repository.getMapStations(box) },
         searchNearbyStations = if (stationFinder != null) { center ->
             val places = try {
                 stationFinder.near(center, radiusM = 8_000, limit = 30)
@@ -106,7 +106,7 @@ class FuelMapCoordinator(
                     }
 
                     // 2. Se não há postos na área visível, dispara busca online em background
-                    if (localStations.isEmpty() && searchNearbyStations != null) {
+                    if (localStations.isEmpty() && searchNearbyStations != null && !isTooWide(box)) {
                         val center = LatLon((box.minLat + box.maxLat) / 2.0, (box.minLon + box.maxLon) / 2.0)
                         val alreadySearched = synchronized(searchedCenters) {
                             searchedCenters.any { Geo.distanceM(it.lat, it.lon, center.lat, center.lon) < 4_000.0 }
@@ -192,6 +192,10 @@ class FuelMapCoordinator(
     fun searchCurrentArea() {
         val box = _boundingBox.value ?: return
         if (searchNearbyStations == null || !_fuelLayerEnabled.value) return
+        if (isTooWide(box)) {
+            _searchStatus.value = "Aproxime o mapa para ver os postos."
+            return
+        }
         searchJob?.cancel()
         val center = LatLon((box.minLat + box.maxLat) / 2.0, (box.minLon + box.maxLon) / 2.0)
         searchJob = launchSearch(center, box)
@@ -209,7 +213,7 @@ class FuelMapCoordinator(
             val shown = refreshed.ifEmpty { fetched }
             _visibleFuelStations.value = shown
             _searchStatus.value = if (fetched.isEmpty()) {
-                "Nenhum posto achado aqui. Aproxime o mapa ou tente de novo."
+                "Nenhum posto com preço da ANP aqui. Aproxime o mapa ou tente de novo."
             } else {
                 "${shown.size} postos no mapa · toque para buscar de novo"
             }
@@ -226,5 +230,11 @@ class FuelMapCoordinator(
 
     private companion object {
         const val SEARCH_TIMEOUT_MS = 25_000L
+
+        /** Área larga demais (mais de ~40 km): é a vista do estado, em que se mostra a média e não postos. */
+        fun isTooWide(box: GeoBox): Boolean {
+            val midLat = Math.toRadians((box.minLat + box.maxLat) / 2.0)
+            return (box.maxLon - box.minLon) * 111.32 * Math.cos(midLat) > 40.0
+        }
     }
 }

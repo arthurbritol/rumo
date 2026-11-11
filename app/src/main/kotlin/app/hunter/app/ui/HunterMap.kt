@@ -117,6 +117,10 @@ private const val SRC_DEST = "dest-src"
 private const val SRC_FRIENDS = "friends-src"
 private const val SRC_ME = "me-src"
 private const val SRC_FUEL = "fuel-src"
+private const val SRC_FUEL_STATE = "fuel-state-src"
+
+/** Abaixo deste zoom aparece a média do estado; a partir dele, os postos com preço próprio. */
+private const val STATION_MIN_ZOOM = 9f
 
 /**
  * Mapa (MapLibre + OpenFreeMap, sem chave de API). Desenha: rota principal, rotas alternativas, trilha
@@ -130,6 +134,7 @@ fun HunterMap(
     me: TrackPoint? = null,
     friends: List<FriendMarker> = emptyList(),
     fuelStations: List<ResolvedFuelStation> = emptyList(),
+    stateAverages: List<app.hunter.app.fuel.StateAverage> = emptyList(),
     route: List<LatLon>? = null,
     altRoutes: List<List<LatLon>> = emptyList(),
     trail: List<TrackPoint>? = null,
@@ -276,6 +281,10 @@ fun HunterMap(
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
         src.setGeoJson(friendsFeatures(friends))
     }
+    LaunchedEffect(style, stateAverages) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_STATE) ?: return@LaunchedEffect
+        src.setGeoJson(stateAverageFeatures(stateAverages))
+    }
     LaunchedEffect(style, fuelStations) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL) ?: return@LaunchedEffect
         src.setGeoJson(fuelStationsFeatures(fuelStations))
@@ -388,7 +397,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
     st.addImage("fuel-station", fuelStationBitmap(density))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME, SRC_FUEL).forEach { st.addSource(GeoJsonSource(it)) }
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -422,14 +431,14 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
     st.addLayer(
         CircleLayer("fuel-circle", SRC_FUEL).withProperties(
             circleRadius(9f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2.5f),
-        ),
+        ).also { it.minZoom = STATION_MIN_ZOOM },
     )
     st.addLayer(
         SymbolLayer("fuel-symbol", SRC_FUEL).withProperties(
             iconImage("fuel-station"),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
-        ),
+        ).also { it.minZoom = STATION_MIN_ZOOM },
     )
     st.addLayer(
         SymbolLayer("fuel-label", SRC_FUEL).withProperties(
@@ -443,7 +452,18 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean) {
             textOffset(arrayOf(0f, 1.4f)),
             textAllowOverlap(true),
             textIgnorePlacement(false),
-        ),
+        ).also { it.minZoom = STATION_MIN_ZOOM },
+    )
+    st.addLayer(
+        SymbolLayer("fuel-state", SRC_FUEL_STATE).withProperties(
+            textField(Expression.get("label")),
+            textFont(arrayOf("Noto Sans Bold")),
+            textSize(13f),
+            textColor(if (dark) "#FFFFFF" else "#0F172A"),
+            textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
+            textHaloWidth(2f),
+            textAllowOverlap(true),
+        ).also { it.maxZoom = STATION_MIN_ZOOM },
     )
     st.addLayer(
         SymbolLayer("friends-symbol", SRC_FRIENDS).withProperties(
@@ -484,6 +504,18 @@ fun formatStationMapPrice(station: ResolvedFuelStation): String {
         PriceSource.POSTO_ANP -> formatted
         PriceSource.MEDIA_MUNICIPAL, PriceSource.MEDIA_ESTADUAL -> "~$formatted"
     }
+}
+
+/** Médias estaduais da ANP como rótulos ("ES
+R$ 6,48"), usadas na vista aberta do mapa. */
+fun stateAverageFeatures(states: List<app.hunter.app.fuel.StateAverage>): FeatureCollection {
+    val features = states.mapNotNull { st ->
+        val price = st.gasolina ?: return@mapNotNull null
+        val f = Feature.fromGeometry(Point.fromLngLat(st.lon, st.lat))
+        f.addStringProperty("label", st.uf + "\n" + String.format(Locale.forLanguageTag("pt-BR"), "~R$ %.2f", price))
+        f
+    }
+    return FeatureCollection.fromFeatures(features)
 }
 
 /** Converte lista de postos resolvidos em FeatureCollection para o MapLibre GeoJsonSource. */

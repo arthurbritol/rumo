@@ -68,7 +68,7 @@ class PhotonGeocoder(
                 p.str("city"),
                 p.str("state"),
             ).distinct().filter { it != name }.joinToString(", ").ifEmpty { p.str("country") }
-            return Place(name, sub, lat, lon)
+            return Place(name, sub, lat, lon, street = street, houseNumber = house, postcode = p.str("postcode"))
         }
     }
 }
