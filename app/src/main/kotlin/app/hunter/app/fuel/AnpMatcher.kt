@@ -77,7 +77,13 @@ object AnpMatcher {
      * O posto da ANP que corresponde a [place] entre [candidates] (todos da mesma cidade), ou null. Cada regra exige
      * UM único candidato: na dúvida, não casa (melhor sem marcador do que com o preço de outro posto).
      */
-    fun matchScored(place: Place, candidates: List<AnpStationEntity>): Match? {
+    fun matchScored(place: Place, allCandidates: List<AnpStationEntity>): Match? {
+        // CEP do mapa e da ANP começam igual dentro da mesma região: descarta postos de outra cidade.
+        val placeCep = digits(place.postcode).takeIf { it.length == 8 }
+        val candidates = if (placeCep == null) allCandidates else allCandidates.filter {
+            val c = digits(it.cep)
+            c.length != 8 || c.take(3) == placeCep.take(3)
+        }
         val key = streetKey(place.street ?: place.subtitle?.substringBefore(',')?.substringBefore(" · "))
         val num = number(place.houseNumber)
         val cep = digits(place.postcode).takeIf { it.length == 8 }

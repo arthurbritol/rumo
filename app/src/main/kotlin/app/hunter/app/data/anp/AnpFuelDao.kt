@@ -13,6 +13,10 @@ interface AnpFuelDao {
     @Query("SELECT * FROM anp_stations WHERE cityKey = :cityKey")
     suspend fun getStationsByCity(cityKey: String): List<AnpStationEntity>
 
+    /** Postos da base da ANP ("anp_...") de um estado. */
+    @Query("SELECT * FROM anp_stations WHERE uf = :uf AND id LIKE 'anp\\_%' ESCAPE '\\'")
+    suspend fun getBaseStationsByUf(uf: String): List<AnpStationEntity>
+
     @Query("SELECT * FROM anp_city_stats WHERE cityKey = :cityKey LIMIT 1")
     suspend fun getCityStats(cityKey: String): AnpCityStatsEntity?
 

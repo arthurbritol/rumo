@@ -362,18 +362,18 @@ class FuelPriceRepository(
         }
 
         val allCities = dao.getAllCityStats()
-        val byCity = mutableMapOf<String, List<AnpStationEntity>>()
-        suspend fun anpStationsOf(cityKey: String) =
-            byCity.getOrPut(cityKey) { dao.getStationsByCity(cityKey).filter { it.id.startsWith("anp_") } }
+        val allStates = dao.getAllStateStats()
+        // A base da ANP não traz a posição das cidades (várias dividem o centro do estado), então a comparação é feita
+        // com os postos do estado (os 2 mais próximos, por causa de divisa); o CEP evita misturar cidades.
+        val byUf = mutableMapOf<String, List<AnpStationEntity>>()
+        suspend fun anpStationsOfUf(uf: String) = byUf.getOrPut(uf) { dao.getBaseStationsByUf(uf) }
 
         val entities = places.map { place ->
-            val cityKeys = allCities
-                .map { it to Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
-                .filter { it.second <= 30_000.0 }
-                .sortedBy { it.second }
-                .take(3)
-                .map { it.first.cityKey }
-            val candidates = cityKeys.flatMap { anpStationsOf(it) }
+            val ufs = allStates
+                .sortedBy { Geo.distanceM(place.lat, place.lon, it.lat, it.lon) }
+                .take(2)
+                .map { it.uf }
+            val candidates = ufs.flatMap { anpStationsOfUf(it) }
             val scored = AnpMatcher.matchScored(place, candidates)
                 ?.takeIf { it.station.precoGasolina != null || it.station.precoEtanol != null || it.station.precoDiesel != null }
             val osmBrand = detectBrand(place.name)

@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.7.13]
+
+### Corrigido
+- **Nenhum posto com preço**: a ligação entre o posto do mapa e o da ANP escolhia "as 3 cidades mais próximas", mas a base da ANP usa o centro do estado como posição de quase todas as cidades (10 cidades do ES no mesmo ponto), então a escolha era sorteio. Agora compara com os postos do estado (os 2 estados mais próximos) e usa o CEP para não misturar cidades. Em teste com postos reais da Grande Vitória, 25 de 77 casaram com o preço do próprio posto.
+
 ## [0.7.12]
 
 ### Corrigido

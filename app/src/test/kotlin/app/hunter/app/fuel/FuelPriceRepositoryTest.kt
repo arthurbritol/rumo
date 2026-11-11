@@ -30,6 +30,9 @@ class FuelPriceRepositoryTest {
         override suspend fun getStationsInBox(minLat: Double, minLon: Double, maxLat: Double, maxLon: Double): List<AnpStationEntity> =
             stations.values.filter { it.lat in minLat..maxLat && it.lon in minLon..maxLon }
 
+        override suspend fun getBaseStationsByUf(uf: String): List<AnpStationEntity> =
+            stations.values.filter { it.uf == uf && it.id.startsWith("anp_") }
+
         override suspend fun getStationsByCity(cityKey: String): List<AnpStationEntity> =
             stations.values.filter { it.cityKey == cityKey }
 
