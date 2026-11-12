@@ -221,6 +221,15 @@ class FirebaseAuthGateway(private val appContext: Context) : AuthGateway {
         }
     }
 
+    override suspend fun idToken(forceRefresh: Boolean): String? =
+        try {
+            auth?.currentUser?.getIdToken(forceRefresh)?.await()?.token
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+
     override fun signOut() {
         pendingGoogle = null
         auth?.signOut()

@@ -45,6 +45,9 @@ interface AuthGateway {
     suspend fun deleteAuthUser(expectedUid: String): AuthResult
     fun signOut()
 
+    /** ID token do Firebase do usuário logado (vale 1 h); null se não há usuário ou a obtenção falhou. */
+    suspend fun idToken(forceRefresh: Boolean = false): String?
+
     /** Verdadeiro quando o usuário atual entra com e-mail/senha (reautenticação pede a senha, não o Google). */
     val providerIsPassword: Boolean
     val state: StateFlow<AuthState>

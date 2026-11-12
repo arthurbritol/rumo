@@ -136,6 +136,14 @@ private class FakeAuthGateway(val ev: Events) : AuthGateway {
         return deleteResults.removeFirstOrNull() ?: AuthResult.Ok
     }
     override fun signOut() { signOuts++; state.value = AuthState.Guest; ev.list += "sair" }
+
+    /** Token devolvido quando logado; [idTokenCalls] guarda cada `forceRefresh` recebido. */
+    var token: String? = "tok"
+    val idTokenCalls = mutableListOf<Boolean>()
+    override suspend fun idToken(forceRefresh: Boolean): String? {
+        idTokenCalls += forceRefresh
+        return if (state.value is AuthState.SignedIn) token else null
+    }
 }
 
 class AuthRepositoryTest {
@@ -146,6 +154,22 @@ class AuthRepositoryTest {
     private val flag = FakeFlag()
     private val repo = AuthRepository(gateway, SyncEngine(local, remote) { 1L }, flag)
     private val sujo = SyncDoc(Kind.FUELUP, "a", 1, false, emptyMap())
+
+    @Test
+    fun `idToken devolve null deslogado e o token configurado logado`() = runTest {
+        gateway.state.value = AuthState.Guest
+        assertNull(gateway.idToken())
+        gateway.state.value = AuthState.SignedIn("u", "Ana", "a@b.c", true)
+        assertEquals("tok", gateway.idToken())
+    }
+
+    @Test
+    fun `idToken repassa forceRefresh e o padrao e falso`() = runTest {
+        gateway.idToken()
+        gateway.idToken(forceRefresh = true)
+        gateway.idToken(false)
+        assertEquals(listOf(false, true, false), gateway.idTokenCalls)
+    }
 
     @Test
     fun `login com sucesso dispara a primeira sincronizacao`() = runTest {
