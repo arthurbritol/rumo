@@ -6,6 +6,7 @@ import app.hunter.nearby.parseServerMessage
 import app.hunter.nearby.toJson
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
@@ -52,6 +53,9 @@ class NearbyClient(
     private val baseUrl = url
     private val _events = MutableSharedFlow<NearbyEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val events: SharedFlow<NearbyEvent> = _events
+
+    private val _opened = MutableSharedFlow<String>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val opened: SharedFlow<String> = _opened
 
     private val _status = MutableStateFlow(NearbyStatus.DESCONECTADO)
     override val status: StateFlow<NearbyStatus> = _status
@@ -143,6 +147,15 @@ class NearbyClient(
         }
     }
 
+    /** Fecha com `close(1000)` (entrega antes o que está na fila, como um `Parar`) e cancela se não fechar a tempo. */
+    private fun closeGracefully(w: WebSocket) {
+        w.close(1000, null)
+        CoroutineScope(Dispatchers.Default).launch {
+            delay(CLOSE_GRACE_MS)
+            w.cancel()
+        }
+    }
+
     private sealed interface Outcome {
         data object Closed : Outcome
         data class Failed(val code: Int?) : Outcome
@@ -155,8 +168,9 @@ class NearbyClient(
 
         fun stop() {
             job.cancel()
-            ws?.cancel()
+            val w = ws
             ws = null
+            if (w != null) closeGracefully(w)
         }
 
         private fun mudar(s: NearbyStatus) {
@@ -194,6 +208,7 @@ class NearbyClient(
                         last401 = false
                         attempt = 0 // conexão que abriu zera a espera: a próxima queda recomeça do básico
                         mudar(NearbyStatus.CONECTADO)
+                        if (encId == null) _opened.tryEmit(cell)
                     }
 
                     override fun onMessage(webSocket: WebSocket, text: String) {
@@ -226,7 +241,7 @@ class NearbyClient(
                 val outcome = try {
                     withTimeoutOrNull(renewAfterMs) { done.await() }
                 } catch (e: CancellationException) {
-                    socket.cancel()
+                    closeGracefully(socket)
                     throw e
                 }
                 ws = null
@@ -260,6 +275,7 @@ class NearbyClient(
 
     companion object {
         private const val ENC = "enc"
+        private const val CLOSE_GRACE_MS = 1_000L
 
         private val defaultHttp: OkHttpClient = OkHttpClient.Builder()
             .pingInterval(25, TimeUnit.SECONDS)

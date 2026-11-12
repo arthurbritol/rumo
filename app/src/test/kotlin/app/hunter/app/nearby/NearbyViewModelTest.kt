@@ -26,6 +26,8 @@ import kotlin.test.assertTrue
 private class FakeLink : NearbyLink {
     val eventFlow = MutableSharedFlow<NearbyEvent>(extraBufferCapacity = 16)
     val statusFlow = MutableStateFlow(NearbyStatus.DESCONECTADO)
+    val openedFlow = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    override val opened: SharedFlow<String> = openedFlow
     override val events: SharedFlow<NearbyEvent> = eventFlow
     override val status: StateFlow<NearbyStatus> = statusFlow
 
@@ -216,14 +218,62 @@ class NearbyViewModelTest {
     }
 
     @Test
-    fun `conexao aberta anuncia de novo a procura e a posicao`() = runTest {
+    fun `quadrado que abre com o status ja conectado recebe procurar e posicao so nele`() = runTest {
+        val r = rig()
+        r.vm.ligar(pref)
+        r.positions.tryEmit(quina)
+        r.link.statusFlow.value = NearbyStatus.CONECTADO
+        r.link.sent.clear()
+        r.link.openedFlow.tryEmit("-22:-42")
+        assertEquals(2, r.link.sent.size)
+        assertEquals(ClientMessage.Procurar(pref) to "-22:-42", r.link.sent[0])
+        assertIs<ClientMessage.Posicao>(r.link.sent[1].first)
+        assertEquals("-22:-42", r.link.sent[1].second)
+        // Mudar o status agregado não anuncia nada em todos os quadrados.
+        r.link.sent.clear()
+        r.link.statusFlow.value = NearbyStatus.CONECTANDO
+        r.link.statusFlow.value = NearbyStatus.CONECTADO
+        assertTrue(r.link.sent.isEmpty())
+    }
+
+    @Test
+    fun `quadrado que reconecta e anunciado de novo e quadrado desconhecido e ignorado`() = runTest {
         val r = rig()
         r.vm.ligar(pref)
         r.positions.tryEmit(centro)
         r.link.sent.clear()
-        r.link.statusFlow.value = NearbyStatus.CONECTADO
-        assertEquals(ClientMessage.Procurar(pref), r.link.sent[0].first)
-        assertIs<ClientMessage.Posicao>(r.link.sent[1].first)
+        r.link.openedFlow.tryEmit("-21:-41")
+        r.link.openedFlow.tryEmit("-21:-41")
+        assertEquals(4, r.link.sent.size)
+        r.link.openedFlow.tryEmit("0:0")
+        assertEquals(4, r.link.sent.size)
+    }
+
+    @Test
+    fun `preferencia exposta e a ativa`() = runTest {
+        val r = rig()
+        assertEquals(null, r.vm.preferencia.value)
+        r.vm.ligar(pref)
+        assertEquals(pref, r.vm.preferencia.value)
+        r.positions.tryEmit(centro)
+        r.vm.mudarRaio(12)
+        assertEquals(pref.copy(raioKm = 12), r.vm.preferencia.value)
+        r.vm.desligar()
+        assertEquals(null, r.vm.preferencia.value)
+    }
+
+    @Test
+    fun `falha ao iniciar o servico desliga a busca com aviso`() = runTest {
+        val falhas = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        val link = FakeLink()
+        val vm = NearbyViewModel(
+            link = link, signedIn = { true }, positions = { MutableSharedFlow<TrackPoint>() },
+            startFailures = falhas, dispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+        vm.ligar(pref)
+        falhas.tryEmit(Unit)
+        assertEquals(NearbyUiState.Desligado(NEARBY_AVISO_SERVICO), vm.estado.value)
+        assertEquals(1, link.disconnects)
     }
 
     @Test

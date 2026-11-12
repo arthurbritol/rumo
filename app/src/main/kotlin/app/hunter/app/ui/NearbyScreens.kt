@@ -32,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.hunter.app.nearby.NearbyUiState
@@ -50,16 +51,20 @@ private const val RAIO_PADRAO_KM = 5
 @Composable
 fun NearbySheet(
     estado: NearbyUiState,
+    /** A preferência ativa (nula se não está procurando): a folha abre com ela. */
+    preferencia: Preferencia?,
     onLigar: (Preferencia) -> Unit,
     onDesligar: () -> Unit,
     onMudarRaio: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var ritmo by rememberSaveable { mutableStateOf(Ritmo.MODERADO.name) }
-    var distancia by rememberSaveable { mutableStateOf(Distancia.ATE50.name) }
-    var parada by rememberSaveable { mutableStateOf(Parada.SEM_PARADA.name) }
-    var raio by remember { mutableFloatStateOf(RAIO_PADRAO_KM.toFloat()) }
+    var ritmo by rememberSaveable { mutableStateOf((preferencia?.ritmo ?: Ritmo.MODERADO).name) }
+    var distancia by rememberSaveable { mutableStateOf((preferencia?.distancia ?: Distancia.ATE50).name) }
+    var parada by rememberSaveable { mutableStateOf((preferencia?.parada ?: Parada.SEM_PARADA).name) }
+    var raio by remember { mutableFloatStateOf((preferencia?.raioKm ?: RAIO_PADRAO_KM).toFloat()) }
     val ligado = estado !is NearbyUiState.Desligado
+    // Procurando, as três escolhas ficam travadas (só o raio muda); para mudar, pare e procure de novo.
+    val chipsModifier = if (ligado) Modifier.alpha(0.5f) else Modifier
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface) {
         Column(
@@ -75,15 +80,15 @@ fun NearbySheet(
 
             SectionTitle("Ritmo")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Ritmo.entries.forEach { SelectChip(it.rotulo, ritmo == it.name, { ritmo = it.name }) }
+                Ritmo.entries.forEach { SelectChip(it.rotulo, ritmo == it.name, { if (!ligado) ritmo = it.name }, chipsModifier) }
             }
             SectionTitle("Distância")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Distancia.entries.forEach { SelectChip(it.rotulo, distancia == it.name, { distancia = it.name }) }
+                Distancia.entries.forEach { SelectChip(it.rotulo, distancia == it.name, { if (!ligado) distancia = it.name }, chipsModifier) }
             }
             SectionTitle("Parada")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Parada.entries.forEach { SelectChip(it.rotulo, parada == it.name, { parada = it.name }) }
+                Parada.entries.forEach { SelectChip(it.rotulo, parada == it.name, { if (!ligado) parada = it.name }, chipsModifier) }
             }
 
             SectionTitle("Raio de busca")

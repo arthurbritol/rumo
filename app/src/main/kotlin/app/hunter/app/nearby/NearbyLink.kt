@@ -9,6 +9,9 @@ interface NearbyLink {
     val events: SharedFlow<NearbyEvent>
     val status: StateFlow<NearbyStatus>
 
+    /** Emite o id do quadrado cada vez que a conexão dele abre (inclusive reconexões). */
+    val opened: SharedFlow<String>
+
     /** Passa a manter exatamente uma conexão por quadrado de [cells]. */
     fun connect(cells: Set<String>)
 

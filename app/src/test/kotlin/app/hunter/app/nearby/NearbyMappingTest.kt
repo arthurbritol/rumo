@@ -27,6 +27,12 @@ class NearbyMappingTest {
     }
 
     @Test
+    fun `marcador proprio vira a moto laranja so enquanto procura`() {
+        assertEquals("rider-self", ownMarkerIcon(true))
+        assertEquals("me", ownMarkerIcon(false))
+    }
+
+    @Test
     fun `contagem de pessoas por perto`() {
         assertEquals("ninguém por perto ainda", pessoasPorPerto(0))
         assertEquals("1 pessoa por perto", pessoasPorPerto(1))

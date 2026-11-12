@@ -38,6 +38,7 @@ sealed interface NearbyUiState {
 }
 
 const val NEARBY_AVISO_ENTRAR = "Entre na sua conta para procurar rolê"
+const val NEARBY_AVISO_SERVICO = "Não foi possível manter a busca em segundo plano"
 const val NEARBY_AVISO_LOCALIZACAO = "Permita a localização para procurar rolê"
 
 /**
@@ -54,6 +55,8 @@ class NearbyViewModel(
     private val positions: () -> Flow<TrackPoint>,
     private val onActive: (Boolean) -> Unit = {},
     stopRequests: Flow<Unit> = emptyFlow(),
+    /** O serviço em primeiro plano não conseguiu subir: a busca não se sustentaria em segundo plano. */
+    startFailures: Flow<Unit> = emptyFlow(),
     private val clock: () -> Long = System::currentTimeMillis,
     /** Quanto "indisponível" precisa durar para aparecer (o cliente alterna conectando/indisponível ao tentar de novo). */
     private val debounceMs: Long = 5_000,
@@ -66,6 +69,11 @@ class NearbyViewModel(
     private val _estado = MutableStateFlow<NearbyUiState>(NearbyUiState.Desligado())
     val estado: StateFlow<NearbyUiState> = _estado.asStateFlow()
 
+    private val _preferencia = MutableStateFlow<Preferencia?>(null)
+
+    /** A preferência ativa (com o raio atual); nula quando não está procurando. */
+    val preferencia: StateFlow<Preferencia?> = _preferencia.asStateFlow()
+
     private var pref: Preferencia? = null
     private var state = NearbyState()
     private var cells: Set<String> = emptySet()
@@ -74,15 +82,16 @@ class NearbyViewModel(
     private var needProcurar = false
     private var conectou = false
     private var indisponivel = false
-    private var prevStatus = NearbyStatus.DESCONECTADO
 
     private var locationJob: Job? = null
     private var statusJob: Job? = null
     private var eventsJob: Job? = null
+    private var openedJob: Job? = null
     private var debounceJob: Job? = null
 
     init {
         scope.launch { stopRequests.collect { desligar() } }
+        scope.launch { startFailures.collect { parar(NEARBY_AVISO_SERVICO) } }
     }
 
     fun ligar(p: Preferencia) {
@@ -92,6 +101,7 @@ class NearbyViewModel(
             return
         }
         pref = p
+        _preferencia.value = p
         state = NearbyState()
         cells = emptySet()
         lastPoint = null
@@ -99,10 +109,10 @@ class NearbyViewModel(
         needProcurar = true
         conectou = false
         indisponivel = false
-        prevStatus = NearbyStatus.DESCONECTADO
         _estado.value = NearbyUiState.Ligando
         onActive(true)
         eventsJob = scope.launch { link.events.collect(::onEvent) }
+        openedJob = scope.launch { link.opened.collect(::onOpened) }
         statusJob = scope.launch { link.status.collect(::onStatus) }
         locationJob = scope.launch {
             try {
@@ -123,6 +133,7 @@ class NearbyViewModel(
         val novo = atual.copy(raioKm = km.coerceIn(5, 20))
         if (novo == atual) return
         pref = novo
+        _preferencia.value = novo
         needProcurar = true
         lastPoint?.let(::onPoint)
     }
@@ -137,12 +148,15 @@ class NearbyViewModel(
         locationJob?.cancel()
         statusJob?.cancel()
         eventsJob?.cancel()
+        openedJob?.cancel()
         debounceJob?.cancel()
         locationJob = null
         statusJob = null
         eventsJob = null
+        openedJob = null
         debounceJob = null
         pref = null
+        _preferencia.value = null
         state = NearbyState() // não há `limpar`: um estado novo descarta as listas antigas
         cells = emptySet()
         lastPoint = null
@@ -190,21 +204,12 @@ class NearbyViewModel(
     )
 
     private fun onStatus(s: NearbyStatus) {
-        val antes = prevStatus
-        prevStatus = s
         when (s) {
             NearbyStatus.CONECTADO -> {
                 debounceJob?.cancel()
                 debounceJob = null
                 indisponivel = false
                 conectou = true
-                // Conexão (re)aberta: o servidor não lembra de quem caiu, então anuncia de novo.
-                val atual = pref
-                val ponto = lastPoint
-                if (antes != NearbyStatus.CONECTADO && atual != null && ponto != null) {
-                    needProcurar = true
-                    publicar(ponto, atual)
-                }
             }
             NearbyStatus.INDISPONIVEL -> if (!indisponivel && debounceJob == null) {
                 debounceJob = scope.launch {
@@ -217,6 +222,14 @@ class NearbyViewModel(
             else -> Unit
         }
         refresh()
+    }
+
+    /** Conexão de um quadrado (re)aberta: o servidor não lembra de quem caiu, então anuncia só nela. */
+    private fun onOpened(cell: String) {
+        val atual = pref ?: return
+        if (cell !in cells) return
+        link.send(ClientMessage.Procurar(atual), cell)
+        lastPoint?.let { link.send(posicao(it), cell) }
     }
 
     private fun onEvent(e: NearbyEvent) {

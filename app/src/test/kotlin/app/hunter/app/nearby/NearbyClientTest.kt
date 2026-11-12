@@ -9,6 +9,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
@@ -341,5 +342,30 @@ class NearbyClientTest {
         assertTrue(NearbyClient.wsUrl("https://x.workers.dev/", "1:2", null, "k").startsWith("wss://x.workers.dev/ws?"))
         assertTrue(NearbyClient.wsUrl("http://localhost:8787", "1:2", "e", "k").startsWith("ws://localhost:8787/ws?"))
         assertTrue(NearbyClient.wsUrl("wss://a.b", "1:2", null, "k").startsWith("wss://a.b/ws?"))
+    }
+
+    @Test
+    fun openedEmiteUmaVezPorQuadradoAberto() = runBlocking {
+        server.enqueue(upgrade())
+        server.enqueue(upgrade())
+        val c = client()
+        val abertos = CopyOnWriteArrayList<String>()
+        val job = scope.launch { c.opened.collect { abertos += it } }
+        yield()
+        c.connect(setOf("-21:-41", "-21:-42"))
+        until { abertos.size == 2 }
+        assertEquals(setOf("-21:-41", "-21:-42"), abertos.toSet())
+        job.cancel()
+    }
+
+    @Test
+    fun pararEnviadoLogoAntesDeDesconectarChegaAoServidor() = runBlocking {
+        server.enqueue(upgrade())
+        val c = client()
+        c.connect(setOf("-21:-41"))
+        until { c.status.value == NearbyStatus.CONECTADO }
+        c.send(ClientMessage.Parar)
+        c.disconnect()
+        until { received.any { it.contains("parar") } }
     }
 }

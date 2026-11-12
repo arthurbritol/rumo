@@ -22,8 +22,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.hunter.app.fuel.PriceSource
 import app.hunter.app.fuel.ResolvedFuelStation
+import app.hunter.app.nearby.OWN_ICON_SEARCHING
 import app.hunter.app.nearby.RIDER_ICON
 import app.hunter.app.nearby.RIDER_ICON_COMBINA
+import app.hunter.app.nearby.ownMarkerIcon
 import app.hunter.app.nearby.toRiderFeature
 import app.hunter.nearby.Vizinho
 import app.hunter.model.GeoBox
@@ -144,6 +146,8 @@ fun HunterMap(
     friends: List<FriendMarker> = emptyList(),
     /** Motos anônimas de quem procura rolê por perto (só posição aproximada e rumo). */
     nearby: List<Vizinho> = emptyList(),
+    /** Procurando rolê: o próprio marcador vira a moto laranja ("rider-self"). */
+    nearbySearching: Boolean = false,
     fuelStations: List<ResolvedFuelStation> = emptyList(),
     stateAverages: List<app.hunter.app.fuel.StateAverage> = emptyList(),
     cityAverages: List<app.hunter.app.fuel.CityAverage> = emptyList(),
@@ -309,6 +313,9 @@ fun HunterMap(
     LaunchedEffect(style, nearby) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_NEARBY) ?: return@LaunchedEffect
         src.setGeoJson(nearbyFeatures(nearby))
+    }
+    LaunchedEffect(style, nearbySearching) {
+        style?.getLayer("me-symbol")?.setProperties(iconImage(ownMarkerIcon(nearbySearching)))
     }
     LaunchedEffect(style, cityAverages) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_CITY) ?: return@LaunchedEffect
@@ -486,6 +493,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addImage("fuel-station", fuelStationBitmap(density))
     // Uma imagem por variante (não por pessoa). A moto laranja do próprio usuário é o marcador "me".
     st.addImage(RIDER_ICON, riderBitmap(density, destaque = false, proprio = false))
+    st.addImage(OWN_ICON_SEARCHING, riderBitmap(density, destaque = false, proprio = true))
     st.addImage(RIDER_ICON_COMBINA, riderBitmap(density, destaque = true, proprio = false))
     listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_NEARBY, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
 

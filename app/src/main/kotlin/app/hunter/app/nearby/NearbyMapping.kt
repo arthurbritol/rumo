@@ -32,6 +32,12 @@ fun Vizinho.toRiderFeature(): RiderFeature = RiderFeature(
     icon = if (combina) RIDER_ICON_COMBINA else RIDER_ICON,
 )
 
+/** Imagem do marcador do próprio usuário: a moto laranja enquanto procura rolê, o marcador de sempre fora disso. */
+const val OWN_ICON_SEARCHING = "rider-self"
+const val OWN_ICON_DEFAULT = "me"
+
+fun ownMarkerIcon(procurando: Boolean): String = if (procurando) OWN_ICON_SEARCHING else OWN_ICON_DEFAULT
+
 private val PT_BR = Locale.forLanguageTag("pt-BR")
 
 /** "ninguém por perto ainda", "1 pessoa por perto", "N pessoas por perto". */

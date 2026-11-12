@@ -128,6 +128,7 @@ fun MapScreen(
     val nearbyAvailable = BuildConfig.NEARBY_URL.isNotBlank() && signedIn
     val nearbyState by nearbyVm.estado.collectAsStateWithLifecycle()
     val nearbyRiders = (nearbyState as? NearbyUiState.Procurando)?.vizinhos.orEmpty()
+    val nearbyPref by nearbyVm.preferencia.collectAsStateWithLifecycle()
     var showNearbySheet by remember { mutableStateOf(false) }
     var selectedRider by remember { mutableStateOf<String?>(null) }
     val rider = selectedRider?.let { id -> nearbyRiders.firstOrNull { it.sessao == id } }
@@ -223,6 +224,7 @@ fun MapScreen(
             me = live,
             friends = friends,
             nearby = nearbyRiders,
+            nearbySearching = nearbyState !is NearbyUiState.Desligado,
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
             stateAverages = if (fuelLayerEnabled) stateAverages else emptyList(),
             cityAverages = if (fuelLayerEnabled) cityAverages else emptyList(),
@@ -356,6 +358,7 @@ fun MapScreen(
         if (showNearbySheet && nearbyAvailable) {
             NearbySheet(
                 estado = nearbyState,
+                preferencia = nearbyPref,
                 onLigar = {
                     pendingNearbyPref = it
                     startNearby()

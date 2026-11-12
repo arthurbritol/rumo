@@ -45,7 +45,7 @@ class NearbyService : Service() {
         } catch (e: Exception) {
             // Sem permissão de localização, ou partida em segundo plano não permitida (Android 12+).
             Log.w(TAG, "não foi possível entrar em primeiro plano", e)
-            _stopRequests.tryEmit(Unit)
+            _startFailures.tryEmit(Unit)
             stopSelf()
         }
         return START_NOT_STICKY
@@ -90,12 +90,18 @@ class NearbyService : Service() {
         /** Pedidos de parada vindos da notificação (o botão "Parar"). */
         val stopRequests: SharedFlow<Unit> = _stopRequests
 
+        private val _startFailures = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+        /** O serviço não conseguiu entrar em primeiro plano (ou nem iniciou): o ViewModel desliga a busca. */
+        val startFailures: SharedFlow<Unit> = _startFailures
+
         /** Chamar com o app em primeiro plano e a localização já permitida. */
         fun start(context: Context) {
             try {
                 context.startForegroundService(Intent(context, NearbyService::class.java))
             } catch (e: Exception) {
                 Log.w(TAG, "não foi possível iniciar o serviço", e)
+                _startFailures.tryEmit(Unit)
             }
         }
 

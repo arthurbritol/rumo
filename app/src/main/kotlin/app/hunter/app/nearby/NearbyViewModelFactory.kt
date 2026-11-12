@@ -24,6 +24,7 @@ fun nearbyViewModelFactory(app: HunterApp): ViewModelProvider.Factory = viewMode
             positions = { AndroidLocationSource(app, includeNetwork = true).updates() },
             onActive = { ativo -> if (ativo) NearbyService.start(app) else NearbyService.stop(app) },
             stopRequests = NearbyService.stopRequests,
+            startFailures = NearbyService.startFailures,
             onDispose = { clientScope.cancel() },
         )
     }
