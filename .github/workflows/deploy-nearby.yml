@@ -1,0 +1,78 @@
+name: Servidor de rolê por perto
+
+# Publica o servidor do "Rolê por perto" (Cloudflare Worker + Durable Objects) em workers/nearby.
+# Segredos necessários: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, NEARBY_SECRET, ADMIN_TOKEN.
+# Sem eles o workflow só roda os testes (passo de publicação é pulado). Passo a passo em docs/ROLE-POR-PERTO.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workers/nearby/**"
+      - ".github/workflows/deploy-nearby.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Testar e publicar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Instalar dependências
+        working-directory: workers/nearby
+        run: npm ci
+
+      - name: Testes unitários do servidor
+        working-directory: workers/nearby
+        run: npm test
+
+      - name: Testes de integração do servidor
+        working-directory: workers/nearby
+        run: npm run test:int
+
+      - name: Verificar segredos
+        id: sec
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NB_SECRET: ${{ secrets.NEARBY_SECRET }}
+          ADM_TOK: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          if [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ] && [ -n "$NB_SECRET" ] && [ -n "$ADM_TOK" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Segredos da Cloudflare/rolê por perto ausentes: servidor NÃO foi publicado. Veja docs/ROLE-POR-PERTO.md."
+          fi
+
+      - name: Publicar na Cloudflare
+        id: deploy
+        if: steps.sec.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        env:
+          NEARBY_SECRET: ${{ secrets.NEARBY_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/nearby
+          command: deploy
+          secrets: |
+            NEARBY_SECRET
+            ADMIN_TOKEN
+
+      - name: Mostrar endereço do servidor
+        if: steps.sec.outputs.ok == 'true'
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          echo "Endereço do servidor (use na variável NEARBY_URL, sem barra no final): $DEPLOY_URL"
+          echo "Endereço do servidor (NEARBY_URL): $DEPLOY_URL" >> "$GITHUB_STEP_SUMMARY"
