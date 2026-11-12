@@ -110,7 +110,6 @@ class NearbyViewModel(
         conectou = false
         indisponivel = false
         _estado.value = NearbyUiState.Ligando
-        onActive(true)
         eventsJob = scope.launch { link.events.collect(::onEvent) }
         openedJob = scope.launch { link.opened.collect(::onOpened) }
         statusJob = scope.launch { link.status.collect(::onStatus) }
@@ -123,6 +122,8 @@ class NearbyViewModel(
                 parar(NEARBY_AVISO_LOCALIZACAO)
             }
         }
+        // Por último: se o serviço falhar na hora, `parar` roda aqui dentro e já encontra os jobs para cancelar.
+        onActive(true)
     }
 
     fun desligar() = parar(null)

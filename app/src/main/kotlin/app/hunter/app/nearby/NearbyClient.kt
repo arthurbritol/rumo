@@ -61,6 +61,7 @@ class NearbyClient(
     override val status: StateFlow<NearbyStatus> = _status
 
     private val lock = Any()
+    private val closing = java.util.concurrent.ConcurrentHashMap.newKeySet<WebSocket>()
     private val conns = LinkedHashMap<String, Conn>() // chave: quadrado, ou "enc|quadrado|id"
     private var encKey: String? = null
 
@@ -149,10 +150,12 @@ class NearbyClient(
 
     /** Fecha com `close(1000)` (entrega antes o que está na fila, como um `Parar`) e cancela se não fechar a tempo. */
     private fun closeGracefully(w: WebSocket) {
+        if (!closing.add(w)) return // já fechando (stop() e o cancelamento do job passam os dois por aqui)
         w.close(1000, null)
         CoroutineScope(Dispatchers.Default).launch {
             delay(CLOSE_GRACE_MS)
             w.cancel()
+            closing.remove(w)
         }
     }
 

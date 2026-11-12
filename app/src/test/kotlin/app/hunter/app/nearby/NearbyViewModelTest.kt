@@ -277,6 +277,27 @@ class NearbyViewModelTest {
     }
 
     @Test
+    fun `falha do servico emitida de dentro do ligar nao deixa nada rodando`() = runTest {
+        val falhas = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        val link = FakeLink()
+        val positions = MutableSharedFlow<TrackPoint>(extraBufferCapacity = 8)
+        val vm = NearbyViewModel(
+            link = link, signedIn = { true }, positions = { positions },
+            onActive = { if (it) falhas.tryEmit(Unit) },
+            startFailures = falhas, dispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+        vm.ligar(pref)
+        assertEquals(NearbyUiState.Desligado(NEARBY_AVISO_SERVICO), vm.estado.value)
+        assertEquals(null, vm.preferencia.value)
+        assertEquals(0, positions.subscriptionCount.value) // sem coleta de GPS
+        assertEquals(0, link.eventFlow.subscriptionCount.value)
+        assertEquals(0, link.openedFlow.subscriptionCount.value)
+        assertEquals(1, link.disconnects)
+        positions.tryEmit(centro)
+        assertTrue(link.connects.isEmpty())
+    }
+
+    @Test
     fun `a mesma sessao vinda de dois quadrados aparece uma vez`() = runTest {
         val r = rig()
         r.vm.ligar(pref.copy(raioKm = 5))
