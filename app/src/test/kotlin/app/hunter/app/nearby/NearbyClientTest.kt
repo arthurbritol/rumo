@@ -223,6 +223,119 @@ class NearbyClientTest {
         assertEquals("-21:-41", withTimeout(3_000) { ev.await() }.celula)
     }
 
+    private class RecordingBackoff : Backoff(baseMs = 20, maxMs = 80) {
+        val attempts = CopyOnWriteArrayList<Int>()
+        override fun nextDelayMs(attempt: Int): Long {
+            attempts += attempt
+            return super.nextDelayMs(attempt)
+        }
+    }
+
+    private val rawSockets = CopyOnWriteArrayList<java.net.Socket>()
+
+    private val recordingHttp = okhttp3.OkHttpClient.Builder()
+        .socketFactory(object : javax.net.SocketFactory() {
+            private val d = getDefault()
+            private fun <T : java.net.Socket> T.rec(): T = also { rawSockets += it }
+            override fun createSocket() = d.createSocket().rec()
+            override fun createSocket(h: String, p: Int) = d.createSocket(h, p).rec()
+            override fun createSocket(h: String, p: Int, a: java.net.InetAddress, lp: Int) = d.createSocket(h, p, a, lp).rec()
+            override fun createSocket(a: java.net.InetAddress, p: Int) = d.createSocket(a, p).rec()
+            override fun createSocket(a: java.net.InetAddress, p: Int, la: java.net.InetAddress, lp: Int) = d.createSocket(a, p, la, lp).rec()
+        })
+        .build()
+
+    private fun clientWith(backoff: Backoff) = NearbyClient(
+        url = server.url("/").toString().trimEnd('/'),
+        tokenProvider = { "tok" },
+        scope = scope,
+        backoff = backoff,
+        http = recordingHttp,
+    )
+
+    @Test
+    fun quedaPorFalhaDepoisDeAbrirRecomecaDoBasico() = runBlocking {
+        val bo = RecordingBackoff()
+        // Duas falhas antes de abrir fazem a espera crescer.
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(upgrade())
+        server.enqueue(upgrade())
+        val c = clientWith(bo)
+        c.connect(setOf("-21:-41"))
+        until { sockets.size == 1 && c.status.value == NearbyStatus.CONECTADO }
+        assertEquals(listOf(0, 1), bo.attempts.toList())
+        // Queda por falha (sem fechamento limpo) depois de aberta.
+        rawSockets.forEach { it.close() } // queda abrupta do TCP: chega como onFailure
+        until { sockets.size == 2 }
+        assertEquals(listOf(0, 1, 0), bo.attempts.toList())
+    }
+
+    @Test
+    fun falhasAntesDeAbrirContinuamCrescendo() = runBlocking {
+        val bo = RecordingBackoff()
+        repeat(4) { server.enqueue(MockResponse().setResponseCode(503)) }
+        server.enqueue(upgrade())
+        val c = clientWith(bo)
+        c.connect(setOf("-21:-41"))
+        until { sockets.size == 1 }
+        assertEquals(listOf(0, 1, 2, 3), bo.attempts.toList())
+    }
+
+    @Test
+    fun doisCasosDe401SeguidosFicamIndisponiveisComEspera() = runBlocking {
+        val bo = RecordingBackoff()
+        repeat(3) { server.enqueue(MockResponse().setResponseCode(401)) }
+        server.enqueue(upgrade())
+        val calls = CopyOnWriteArrayList<Boolean>()
+        val c = NearbyClient(
+            url = server.url("/").toString().trimEnd('/'),
+            tokenProvider = { f -> calls += f; "tok" },
+            scope = scope,
+            backoff = bo,
+        )
+        c.connect(setOf("-21:-41"))
+        until { c.status.value == NearbyStatus.INDISPONIVEL }
+        assertTrue(bo.attempts.isNotEmpty())
+        assertEquals(listOf(false, true), calls.take(2))
+        until { sockets.size == 1 }
+    }
+
+    @Test
+    fun envioSemQuadradoVaiParaTodasEComQuadradoSoParaUma() = runBlocking {
+        val porQuadrado = CopyOnWriteArrayList<String>()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                val cell = request.requestUrl!!.queryParameter("cell")
+                return MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        sockets += webSocket
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        porQuadrado += "$cell|$text"
+                    }
+                })
+            }
+        }
+        val c = client()
+        c.connect(setOf("-21:-41", "-21:-42"))
+        until { sockets.size == 2 && c.status.value == NearbyStatus.CONECTADO }
+        // As duas conexões abrem ao mesmo tempo; espera as duas ficarem prontas.
+        delay(200)
+        c.send(ClientMessage.Parar)
+        until { porQuadrado.size == 2 }
+        assertEquals(setOf("-21:-41", "-21:-42"), porQuadrado.map { it.substringBefore("|") }.toSet())
+        c.send(ClientMessage.Parar, "-21:-41")
+        until { porQuadrado.size == 3 }
+        delay(200)
+        assertEquals(3, porQuadrado.size)
+        assertEquals("-21:-41", porQuadrado[2].substringBefore("|"))
+        c.send(ClientMessage.Parar, "7:7")
+        delay(200)
+        assertEquals(3, porQuadrado.size)
+    }
+
     @Test
     fun convertePrefixoDeEsquema() {
         assertTrue(NearbyClient.wsUrl("https://x.workers.dev/", "1:2", null, "k").startsWith("wss://x.workers.dev/ws?"))

@@ -105,10 +105,16 @@ class NearbyClient(
         }
     }
 
-    /** Manda a mensagem por todas as conexões de quadrado abertas. */
-    fun send(msg: ClientMessage) {
+    /**
+     * Manda a mensagem por todas as conexões de quadrado abertas ([cell] nulo: posicao, procurar, parar)
+     * ou só pela do quadrado [cell] (proposta, entrar, cancelar, sair). Quadrado não conectado: não faz nada.
+     */
+    fun send(msg: ClientMessage, cell: String? = null) {
         val text = msg.toJson()
-        val alvo = synchronized(lock) { conns.filterKeys { !it.startsWith(ENC) }.values.toList() }
+        val alvo = synchronized(lock) {
+            if (cell == null) conns.filterKeys { !it.startsWith(ENC) }.values.toList()
+            else listOfNotNull(conns[cell])
+        }
         alvo.forEach { it.ws?.send(text) }
     }
 
@@ -186,6 +192,7 @@ class NearbyClient(
                 val listener = object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         last401 = false
+                        attempt = 0 // conexão que abriu zera a espera: a próxima queda recomeça do básico
                         mudar(NearbyStatus.CONECTADO)
                     }
 
