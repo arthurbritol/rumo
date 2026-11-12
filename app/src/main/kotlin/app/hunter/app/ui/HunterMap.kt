@@ -22,6 +22,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.hunter.app.fuel.PriceSource
 import app.hunter.app.fuel.ResolvedFuelStation
+import app.hunter.app.nearby.RIDER_ICON
+import app.hunter.app.nearby.RIDER_ICON_COMBINA
+import app.hunter.app.nearby.toRiderFeature
+import app.hunter.nearby.Vizinho
 import app.hunter.model.GeoBox
 import app.hunter.model.TrackPoint
 import app.hunter.nav.LatLon
@@ -117,6 +121,7 @@ private const val SRC_DEST = "dest-src"
 private const val SRC_FRIENDS = "friends-src"
 private const val SRC_ME = "me-src"
 private const val SRC_FUEL = "fuel-src"
+private const val SRC_NEARBY = "nearby-src"
 private const val SRC_FUEL_STATE = "fuel-state-src"
 private const val SRC_FUEL_CITY = "fuel-city-src"
 
@@ -137,6 +142,8 @@ fun HunterMap(
     dark: Boolean = LocalDark.current,
     me: TrackPoint? = null,
     friends: List<FriendMarker> = emptyList(),
+    /** Motos anônimas de quem procura rolê por perto (só posição aproximada e rumo). */
+    nearby: List<Vizinho> = emptyList(),
     fuelStations: List<ResolvedFuelStation> = emptyList(),
     stateAverages: List<app.hunter.app.fuel.StateAverage> = emptyList(),
     cityAverages: List<app.hunter.app.fuel.CityAverage> = emptyList(),
@@ -155,6 +162,8 @@ fun HunterMap(
     interactive: Boolean = true,
     onLongPress: ((LatLon) -> Unit)? = null,
     onFuelStationClick: (ResolvedFuelStation) -> Unit = {},
+    /** Toque numa moto por perto: recebe o id da sessão (aleatório, sem nome). */
+    onNearbyClick: (String) -> Unit = {},
     onBoundingBoxChanged: (GeoBox) -> Unit = {},
     onUserGesture: () -> Unit = {},
 ) {
@@ -176,6 +185,7 @@ fun HunterMap(
     val latestGesture by rememberUpdatedState(onUserGesture)
     val latestFuelStations by rememberUpdatedState(fuelStations)
     val latestFuelClick by rememberUpdatedState(onFuelStationClick)
+    val latestNearbyClick by rememberUpdatedState(onNearbyClick)
     val latestBoxChanged by rememberUpdatedState(onBoundingBoxChanged)
 
     DisposableEffect(lifecycle, mapView) {
@@ -210,6 +220,13 @@ fun HunterMap(
             }
             m.addOnMapClickListener { latLng ->
                 val screenPoint = m.projection.toScreenLocation(latLng)
+                val riders = m.queryRenderedFeatures(screenPoint, "nearby-riders")
+                if (riders.isNotEmpty()) {
+                    riders.first().getStringProperty("id")?.let { id ->
+                        latestNearbyClick(id)
+                        return@addOnMapClickListener true
+                    }
+                }
                 val features = m.queryRenderedFeatures(screenPoint, "fuel-symbol")
                 if (features.isNotEmpty()) {
                     val stationId = features.first().getStringProperty("id")
@@ -288,6 +305,10 @@ fun HunterMap(
     LaunchedEffect(style, friends) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
         src.setGeoJson(friendsFeatures(friends))
+    }
+    LaunchedEffect(style, nearby) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_NEARBY) ?: return@LaunchedEffect
+        src.setGeoJson(nearbyFeatures(nearby))
     }
     LaunchedEffect(style, cityAverages) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_CITY) ?: return@LaunchedEffect
@@ -415,6 +436,20 @@ private fun trailFeatures(points: List<TrackPoint>?): FeatureCollection {
     return FeatureCollection.fromFeatures(out)
 }
 
+/** Motos anônimas: só `id` (sessão aleatória), `rumo`, `destaque` e a imagem; nada que identifique a pessoa. */
+private fun nearbyFeatures(riders: List<Vizinho>): FeatureCollection =
+    FeatureCollection.fromFeatures(
+        riders.map { v ->
+            val r = v.toRiderFeature()
+            Feature.fromGeometry(Point.fromLngLat(r.lon, r.lat)).also { f ->
+                f.addStringProperty("id", r.id)
+                f.addNumberProperty("rumo", r.rumo)
+                f.addBooleanProperty("destaque", r.destaque)
+                f.addStringProperty("icon", r.icon)
+            }
+        },
+    )
+
 private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
     if (friends.isEmpty()) return FeatureCollection.fromFeatures(emptyList())
     val features = friends.map { f ->
@@ -449,7 +484,10 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
     st.addImage("fuel-station", fuelStationBitmap(density))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
+    // Uma imagem por variante (não por pessoa). A moto laranja do próprio usuário é o marcador "me".
+    st.addImage(RIDER_ICON, riderBitmap(density, destaque = false, proprio = false))
+    st.addImage(RIDER_ICON_COMBINA, riderBitmap(density, destaque = true, proprio = false))
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_NEARBY, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -534,6 +572,15 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
             textOffset(arrayOf(0f, 1.6f)),
             textAllowOverlap(true),
             textIgnorePlacement(false),
+        ),
+    )
+    st.addLayer(
+        SymbolLayer("nearby-riders", SRC_NEARBY).withProperties(
+            iconImage(Expression.get("icon")),
+            iconRotate(Expression.get("rumo")),
+            iconRotationAlignment("map"),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
         ),
     )
     st.addLayer(

@@ -2,6 +2,13 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [Não lançado]
+
+### Adicionado
+- **Rolê por perto, etapa 1 (ver quem procura rolê)**: botão da moto no mapa (só com o servidor configurado e conta logada) abre a folha "Procurando rolê" com ritmo (Tranquilo, Moderado, Animado), distância (Até 50 km, 50 a 150 km, Mais de 150 km), parada (Café ou lanche, Mirante, Só estrada, Sem parada) e raio de 5 a 20 km. Ao procurar, um serviço em primeiro plano com a notificação "Procurando rolê" (botão "Parar") mantém o app publicando a posição, sem pedir localização em segundo plano. Os outros aparecem como motos anônimas (cinza; com anel laranja claro quando combinam com você), giram com o rumo, e ao tocar mostram a distância aproximada e as três escolhas, sem nome nem modelo. Faixa no mapa: "Procurando rolê · N pessoas por perto". Parar de procurar encerra o serviço e as conexões.
+- Quadrados de 1° x 1° do raio calculados no app (`cellsInRadius`), com a mesma regra do servidor.
+- Roteiro de teste com dois aparelhos em `docs/TESTES-MANUAIS-ROLE-POR-PERTO.md`.
+
 ## [0.7.19]
 
 ### Adicionado

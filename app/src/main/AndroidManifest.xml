@@ -23,6 +23,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Rolê por perto: a notificação contínua mantém o app vivo enquanto a pessoa procura (sem localização em segundo plano). -->
+        <service
+            android:name=".nearby.NearbyService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.updates"

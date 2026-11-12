@@ -48,20 +48,20 @@ class NearbyClient(
     private val backoff: Backoff = Backoff(),
     private val renewAfterMs: Long = 55 * 60_000L,
     private val http: OkHttpClient = defaultHttp,
-) {
+) : NearbyLink {
     private val baseUrl = url
     private val _events = MutableSharedFlow<NearbyEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    val events: SharedFlow<NearbyEvent> = _events
+    override val events: SharedFlow<NearbyEvent> = _events
 
     private val _status = MutableStateFlow(NearbyStatus.DESCONECTADO)
-    val status: StateFlow<NearbyStatus> = _status
+    override val status: StateFlow<NearbyStatus> = _status
 
     private val lock = Any()
     private val conns = LinkedHashMap<String, Conn>() // chave: quadrado, ou "enc|quadrado|id"
     private var encKey: String? = null
 
     /** Passa a manter exatamente uma conexão por quadrado de [cells]; fecha as que saíram. */
-    fun connect(cells: Set<String>) {
+    override fun connect(cells: Set<String>) {
         synchronized(lock) {
             for (k in conns.keys.filter { !it.startsWith(ENC) && it !in cells }) conns.remove(k)?.stop()
             for (cell in cells) if (cell !in conns) conns[cell] = startConn(cell, cell, null)
@@ -96,7 +96,7 @@ class NearbyClient(
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         synchronized(lock) {
             conns.values.forEach { it.stop() }
             conns.clear()
@@ -109,7 +109,7 @@ class NearbyClient(
      * Manda a mensagem por todas as conexões de quadrado abertas ([cell] nulo: posicao, procurar, parar)
      * ou só pela do quadrado [cell] (proposta, entrar, cancelar, sair). Quadrado não conectado: não faz nada.
      */
-    fun send(msg: ClientMessage, cell: String? = null) {
+    override fun send(msg: ClientMessage, cell: String?) {
         val text = msg.toJson()
         val alvo = synchronized(lock) {
             if (cell == null) conns.filterKeys { !it.startsWith(ENC) }.values.toList()

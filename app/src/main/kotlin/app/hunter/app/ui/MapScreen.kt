@@ -69,10 +69,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import app.hunter.app.BuildConfig
+import app.hunter.app.HunterApp
 import app.hunter.app.HunterViewModel
 import app.hunter.app.PreviewUi
 import app.hunter.app.R
+import app.hunter.app.account.AuthState
 import app.hunter.app.fuel.ResolvedFuelStation
+import app.hunter.app.nearby.NearbyUiState
+import app.hunter.app.nearby.NearbyViewModel
+import app.hunter.app.nearby.distanciaAproximada
+import app.hunter.app.nearby.nearbyViewModelFactory
+import app.hunter.nearby.Preferencia
 import app.hunter.nav.Place
 import app.hunter.nav.RouteProfile
 import app.hunter.trips.service.TrackingService
@@ -91,6 +100,7 @@ private val IDLE_CAMERA = MapCamera.Follow(zoom = 15.0)
 fun MapScreen(
     vm: HunterViewModel,
     friends: List<FriendMarker> = emptyList(),
+    nearbyVm: NearbyViewModel = viewModel(factory = nearbyViewModelFactory(LocalContext.current.applicationContext as HunterApp)),
 ) {
     val context = LocalContext.current
     val live by vm.live.collectAsStateWithLifecycle()
@@ -112,6 +122,17 @@ fun MapScreen(
     val visibleFuelStations by vm.visibleFuelStations.collectAsStateWithLifecycle()
     val selectedFuelStation by vm.selectedFuelStation.collectAsStateWithLifecycle()
 
+    // Rolê por perto: o botão só existe com o servidor configurado e com conta logada (como o de trânsito).
+    val authState by (context.applicationContext as HunterApp).account.gateway.state.collectAsStateWithLifecycle()
+    val signedIn = authState is AuthState.SignedIn
+    val nearbyAvailable = BuildConfig.NEARBY_URL.isNotBlank() && signedIn
+    val nearbyState by nearbyVm.estado.collectAsStateWithLifecycle()
+    val nearbyRiders = (nearbyState as? NearbyUiState.Procurando)?.vizinhos.orEmpty()
+    var showNearbySheet by remember { mutableStateOf(false) }
+    var selectedRider by remember { mutableStateOf<String?>(null) }
+    val rider = selectedRider?.let { id -> nearbyRiders.firstOrNull { it.sessao == id } }
+    var pendingNearbyPref by remember { mutableStateOf<Preferencia?>(null) }
+
     var searching by remember { mutableStateOf(false) }
     var follow by remember { mutableStateOf(true) }
     var nonce by remember { mutableIntStateOf(0) }
@@ -125,6 +146,10 @@ fun MapScreen(
         }
     }
 
+    // Saiu da conta com a procura ligada: para tudo.
+    LaunchedEffect(signedIn) { if (!signedIn) nearbyVm.desligar() }
+    LaunchedEffect(nearbyState) { if (nearbyState is NearbyUiState.Desligado) selectedRider = null }
+
     val hasLocation = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
     val askLocation = rememberPermissionAction(ridePerms(), listOf(Manifest.permission.ACCESS_FINE_LOCATION)) { locationOk = true }
     val beginNav = rememberPermissionAction(ridePerms(), listOf(Manifest.permission.ACCESS_FINE_LOCATION)) {
@@ -133,6 +158,10 @@ fun MapScreen(
             nonce++
             TrackingService.start(context)
         }
+    }
+    val startNearby = rememberPermissionAction(ridePerms(), listOf(Manifest.permission.ACCESS_FINE_LOCATION)) {
+        pendingNearbyPref?.let { nearbyVm.ligar(it) }
+        pendingNearbyPref = null
     }
     val startRecording = rememberPermissionAction(ridePerms(), listOf(Manifest.permission.ACCESS_FINE_LOCATION)) {
         follow = true
@@ -193,6 +222,7 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize(),
             me = live,
             friends = friends,
+            nearby = nearbyRiders,
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
             stateAverages = if (fuelLayerEnabled) stateAverages else emptyList(),
             cityAverages = if (fuelLayerEnabled) cityAverages else emptyList(),
@@ -207,6 +237,7 @@ fun MapScreen(
             paddingBottomDp = if (navigating) 120 else if (preview != null) 440 else if (selectedFuelStation != null) 360 else 0,
             onLongPress = { if (!navigating) vm.previewAt(it) },
             onFuelStationClick = { vm.selectFuelStation(it) },
+            onNearbyClick = { selectedRider = it },
             onBoundingBoxChanged = { vm.updateMapBoundingBox(it) },
             onUserGesture = {
                 if (preview == null) {
@@ -225,6 +256,7 @@ fun MapScreen(
                         end = 16.dp,
                         bottom = when {
                             selectedFuelStation != null -> 340.dp
+                            rider != null && !navigating -> 250.dp
                             navigating -> 190.dp
                             rec.isRecording -> 210.dp
                             else -> 190.dp
@@ -245,6 +277,14 @@ fun MapScreen(
                         description = "Camada de trânsito",
                         selected = trafficEnabled,
                         onClick = { vm.toggleTraffic() },
+                    )
+                }
+                if (nearbyAvailable) {
+                    SquircleIconButton(
+                        iconRes = R.drawable.fa_motorcycle,
+                        description = "Procurar rolê",
+                        selected = nearbyState !is NearbyUiState.Desligado,
+                        onClick = { showNearbySheet = true },
                     )
                 }
                 if (!follow) {
@@ -304,6 +344,28 @@ fun MapScreen(
             }
         }
 
+        // ----- Rolê por perto: cartão da moto tocada e folha de ajustes -----
+        if (rider != null && !navigating && pv == null && selectedFuelStation == null) {
+            NearbyRiderCard(
+                vizinho = rider,
+                distancia = live?.let { distanciaAproximada(it.latitude, it.longitude, rider) },
+                onClose = { selectedRider = null },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
+            )
+        }
+        if (showNearbySheet && nearbyAvailable) {
+            NearbySheet(
+                estado = nearbyState,
+                onLigar = {
+                    pendingNearbyPref = it
+                    startNearby()
+                },
+                onDesligar = { nearbyVm.desligar() },
+                onMudarRaio = nearbyVm::mudarRaio,
+                onDismiss = { showNearbySheet = false },
+            )
+        }
+
         editingFuelStation?.let { st ->
             EditFuelPricesDialog(
                 station = st,
@@ -321,6 +383,9 @@ fun MapScreen(
                 Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).fillMaxWidth(),
             ) {
                 SearchPill(onClick = { searching = true })
+                if (nearbyAvailable) {
+                    NearbyStrip(nearbyState, onClick = { showNearbySheet = true }, modifier = Modifier.padding(top = 8.dp))
+                }
                 if (!online) {
                     Surface(
                         shape = RoundedCornerShape(50),
@@ -384,7 +449,9 @@ fun MapScreen(
                 Modifier.align(Alignment.BottomCenter).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (!hasLocation && !locationOk) {
+                if (rider != null) {
+                    // O cartão da moto tocada ocupa o lugar do painel inferior.
+                } else if (!hasLocation && !locationOk) {
                     FloatingCard {
                         Text("Permita a localização", style = MaterialTheme.typography.titleMedium)
                         Text("O mapa precisa saber onde você está para traçar rotas e gravar suas viagens.", color = MaterialTheme.colorScheme.onSurfaceVariant)
