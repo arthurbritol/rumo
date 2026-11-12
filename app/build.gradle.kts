@@ -30,6 +30,8 @@ android {
         fun quoted(name: String) = "\"" + ((project.findProperty(name) as String?) ?: "").trim().replace("\"", "") + "\""
         buildConfigField("String", "TRAFFIC_TILE_URL", quoted("trafficTileUrl"))
         buildConfigField("String", "TRAFFIC_TOKEN", quoted("trafficToken"))
+        // Rolê por perto: endereço do Worker nearby (vem do CI; vazio = recurso desligado).
+        buildConfigField("String", "NEARBY_URL", quoted("nearbyUrl"))
     }
 
     // Chave fixa de release (vem do CI ou de variáveis de ambiente). Sem ela cai na chave de debug.
@@ -106,10 +108,12 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+    implementation(libs.okhttp)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
     // Só para Migration2To3Test (JVM puro): SQLite real em memória para exercitar o SQL da migração.
     testImplementation(libs.sqlite.jdbc)
 }
