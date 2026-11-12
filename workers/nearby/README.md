@@ -34,3 +34,24 @@ O teste `hibernação: o estado é reconstruído dos anexos dos WebSockets` cobr
 A `Celula` só é alcançada pelo Worker, que já verificou o ID token. O pedido de upgrade leva:
 `x-rumo-uid` (obrigatório) e `x-rumo-exp` (opcional, `exp` do token em segundos; a conexão é
 fechada 300 s depois dele). O servidor nunca devolve `uid`, nome nem posição real.
+
+## Roteador (`src/index.js`)
+
+- `GET /health` responde `200 ok`.
+- `GET /ws?cell=<lat>:<lon>&t=<idToken>` com `Upgrade: websocket`: confere o ID token do Firebase
+  (`FIREBASE_PROJECT_ID`) e repassa à `Celula` do quadrado. `cell` precisa casar `^-?\d+:-?\d+$` e
+  cruzar o Brasil (404 se não); sem `Upgrade` 426; token ausente ou inválido 401.
+- Sem `FIREBASE_PROJECT_ID` ou `NEARBY_SECRET` no ambiente: `500 server not configured`.
+- Segurança: o roteador apaga `x-rumo-uid` e `x-rumo-exp` vindos do cliente e define só os do token
+  verificado; o parâmetro `t` não é repassado à `Celula` e nada disso vai para log.
+
+## Variáveis e segredos
+
+| Nome | Onde | Uso |
+| --- | --- | --- |
+| `FIREBASE_PROJECT_ID` | `[vars]` do `wrangler.toml` (público) | confere `iss`/`aud` do token |
+| `NEARBY_SECRET` | segredo do Worker | desvio de posição por pessoa e dia |
+| `ADMIN_TOKEN` | segredo do Worker | rotas administrativas (etapa posterior) |
+
+A publicação é feita pelo workflow `.github/workflows/deploy-nearby.yml`. Passo a passo em
+`docs/ROLE-POR-PERTO.md`.

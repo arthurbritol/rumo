@@ -3,6 +3,11 @@ main = "src/index.js"
 compatibility_date = "2026-01-01"
 workers_dev = true
 
+# Variável pública (id do projeto Firebase, de app/google-services.json).
+# Os segredos NEARBY_SECRET e ADMIN_TOKEN entram pelo workflow de deploy.
+[vars]
+FIREBASE_PROJECT_ID = "rumo-nov"
+
 # Durable Objects: uma Celula por quadrado de 1° x 1° e uma Conta por pessoa.
 [[durable_objects.bindings]]
 name = "CELULA"
