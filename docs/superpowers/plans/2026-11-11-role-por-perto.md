@@ -1,6 +1,8 @@
 # Rolê por perto — Plano de implementação
 
-> **Para quem executa:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development (recomendado) ou superpowers:executing-plans para executar este plano tarefa por tarefa. Os passos usam caixas de seleção (`- [ ]`).
+> **Para quem executa:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development (recomendado) ou superpowers:executing-plans para executar este plano tarefa por tarefa. Os passos usam caixas de seleção (`- [x]`).
+
+> **Status (2026-11-12):** as Tarefas 1 a 9 estão concluídas (passos marcados abaixo) e a 10 em diante estão pendentes; veja [2026-11-11-role-por-perto-progresso.md](2026-11-11-role-por-perto-progresso.md).
 
 **Objetivo:** motociclistas logados ligam "procurando rolê", se veem como motos anônimas num raio de 5 a 20 km, propõem e entram em encontros num ponto do mapa, e terminam como amigos, com bloqueio e denúncia.
 
@@ -50,15 +52,15 @@ Cada linha tem um teste na tarefa dona do código.
   - `fuzzOffset(uid: string, dayIso: string, secret: string): Promise<{eastM: number, northM: number}>` → desvio determinístico em metros (HMAC-SHA256 de `uid|dayIso` com `secret`), módulo entre 200 e 400 m e direção derivada do hash.
   - `applyOffset(lat, lon, off: {eastM, northM}): {lat, lon}` → converte metros em graus (`dLat = northM / 111320`, `dLon = eastM / (111320 * cos(lat))`).
 
-- [ ] **Passo 1: escrever os testes** em `test/geo.test.js`:
+- [x] **Passo 1: escrever os testes** em `test/geo.test.js`:
   - `cellId(-20.31, -40.31) === "-21:-41"` e `cellId(0.5, 0.5) === "0:0"`.
   - `cellsInRadius` a 20 km do centro de um quadrado devolve 1 id; a 5 km da quina entre quatro quadrados devolve 4 ids distintos.
   - `distanceM` entre dois pontos a ~1 km de distância fica entre 990 e 1010 m (use pontos reais da Grande Vitória).
   - `fuzzOffset` com os mesmos `uid`, dia e segredo devolve o mesmo desvio; com dia diferente devolve outro; o módulo `sqrt(eastM²+northM²)` fica em `[200, 400]` para 200 `uid`s gerados.
-- [ ] **Passo 2:** rodar `cd workers/nearby && npm test` → falha (módulo não existe).
-- [ ] **Passo 3:** implementar `geo.js` com as assinaturas acima (Web Crypto `crypto.subtle` para o HMAC; módulo = `200 + (byte0/255)*200`; ângulo = `(bytes 1..2)/65535 * 2π`).
-- [ ] **Passo 4:** `wrangler.toml` com `name = "rumo-nearby"`, `main = "src/index.js"`, `compatibility_date = "2026-01-01"`, `workers_dev = true`, bindings de Durable Objects `CELULA` (classe `Celula`) e `CONTA` (classe `Conta`) e `[[migrations]]` `tag = "v1"`, `new_sqlite_classes = ["Celula", "Conta"]`.
-- [ ] **Passo 5:** rodar `npm test` → passa. Commit.
+- [x] **Passo 2:** rodar `cd workers/nearby && npm test` → falha (módulo não existe).
+- [x] **Passo 3:** implementar `geo.js` com as assinaturas acima (Web Crypto `crypto.subtle` para o HMAC; módulo = `200 + (byte0/255)*200`; ângulo = `(bytes 1..2)/65535 * 2π`).
+- [x] **Passo 4:** `wrangler.toml` com `name = "rumo-nearby"`, `main = "src/index.js"`, `compatibility_date = "2026-01-01"`, `workers_dev = true`, bindings de Durable Objects `CELULA` (classe `Celula`) e `CONTA` (classe `Conta`) e `[[migrations]]` `tag = "v1"`, `new_sqlite_classes = ["Celula", "Conta"]`.
+- [x] **Passo 5:** rodar `npm test` → passa. Commit.
 
 ### Tarefa 2: Verificação do ID token do Firebase
 
@@ -69,12 +71,12 @@ Cada linha tem um teste na tarefa dona do código.
 - Produz: `verifyIdToken(token: string, opts: {projectId: string, now?: number, getKeys: () => Promise<Record<string, CryptoKey|JsonWebKey>>}): Promise<{uid: string, exp: number}>` — lança `Error("token inválido: <motivo>")`. Confere: 3 partes; cabeçalho `alg=RS256` e `kid` conhecido; assinatura RS256; `iss === "https://securetoken.google.com/<projectId>"`; `aud === projectId`; `sub` não vazio; `exp` no futuro e `iat` no passado, **ambos com tolerância de 300 s** para relógio.
 - Produz: `fetchGoogleKeys(fetchFn = fetch): Promise<Record<string, JsonWebKey>>` — baixa `https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com`, guarda em cache pelo `max-age` da resposta (mínimo 60 s, padrão 3600 s).
 
-- [ ] **Passo 1: testes** (gere um par RSA com `crypto.subtle.generateKey` no próprio teste e assine tokens de verdade):
+- [x] **Passo 1: testes** (gere um par RSA com `crypto.subtle.generateKey` no próprio teste e assine tokens de verdade):
   - token válido devolve `{uid, exp}`.
   - rejeita: assinatura de outra chave, `aud` errado, `iss` errado, `alg=none`, `kid` desconhecido, token com 2 partes, `exp` vencido há mais de 300 s.
   - **aceita** token com `exp` vencido há 200 s (relógio atrasado) e com `iat` 200 s no futuro (ponto de atenção 5).
   - `fetchGoogleKeys` chama a rede uma vez em duas chamadas seguidas (cache) e de novo após o prazo.
-- [ ] **Passo 2:** falha. **Passo 3:** implementar. **Passo 4:** `npm test` verde. Commit.
+- [x] **Passo 2:** falha. **Passo 3:** implementar. **Passo 4:** `npm test` verde. Commit.
 
 ### Tarefa 3: Protocolo e regra de "combina"
 
@@ -89,8 +91,8 @@ Cada linha tem um teste na tarefa dona do código.
   - Etapas seguintes acrescentam `proposta`, `cancelar`, `entrar`, `sair`, `bloquear`, `denunciar`, `amigo` (Etapas 2 a 4). Mensagem com `t` desconhecido, JSON inválido, tamanho > 2 KB ou número `NaN` é recusada.
 - `match.js`: `combina(a: {ritmo,distancia,parada}, b: {ritmo,distancia,parada}): boolean` com a regra das restrições globais.
 
-- [ ] **Passo 1: testes**: cada mensagem válida passa; cada campo fora de faixa ou lista é recusado; 2 KB + 1 byte recusado; `combina` cobre: tudo igual → true; ritmo diferente → false; `ate50` com `mais150` → false (não vizinhas); `ate50` com `50a150` → true; parada `sem_parada` com `so_estrada` → true; `cafe` com `mirante` → false.
-- [ ] **Passos 2 a 4:** falhar, implementar, passar. Commit.
+- [x] **Passo 1: testes**: cada mensagem válida passa; cada campo fora de faixa ou lista é recusado; 2 KB + 1 byte recusado; `combina` cobre: tudo igual → true; ritmo diferente → false; `ate50` com `mais150` → false (não vizinhas); `ate50` com `50a150` → true; parada `sem_parada` com `so_estrada` → true; `cafe` com `mirante` → false.
+- [x] **Passos 2 a 4:** falhar, implementar, passar. Commit.
 
 ### Tarefa 4: Presença (lógica pura) e Durable Object `Celula`
 
@@ -106,15 +108,15 @@ Cada linha tem um teste na tarefa dona do código.
   - `expire(): string[]` → remove quem está sem `update` há mais de 120 s e devolve as conexões removidas.
 - `celula.js`: classe Durable Object `Celula` que aceita WebSockets com a API de hibernação, usa `Presence`, atende `procurar`, `parar`, `posicao`, reenvia `{t:"vizinhos", lista:[...]}` a cada conexão quando algo muda (no máximo a cada 2 s por conexão), usa `alarm()` a cada 30 s para `expire()`.
 
-- [ ] **Passo 1: testes de `presence.test.js`**:
+- [x] **Passo 1: testes de `presence.test.js`**:
   - **nenhum campo `uid` aparece** em `JSON.stringify(await neighborsFor(...))` (a string do uid usado no teste não pode aparecer).
   - a posição enviada difere da real entre 200 e 400 m e é **a mesma** em duas chamadas e depois de `leave`+`join` no mesmo dia (anti-média); em outro dia muda.
   - pessoa fora do raio (6 km com `raioKm: 5`) não aparece; a 4 km aparece; ao aumentar `raioKm` para 10, a de 6 km aparece.
   - `combina` vem `true`/`false` conforme `match.js`.
   - sem `update` por 121 s `expire()` remove e a pessoa some de `neighborsFor` dos outros (ponto de atenção 3); com `update` a 119 s continua.
   - velocidade 300 km/h → erro `posição implausível`.
-- [ ] **Passo 2:** `celula.integration.test.js`: abre 2 WebSockets falsos contra a classe `Celula` (use o pool de testes de Workers da Cloudflare, `@cloudflare/vitest-pool-workers`, ou `unstable_dev` do `wrangler`; escolha o que funcionar e documente em `workers/nearby/README.md`), ambos `procurar` + `posicao` próximos; cada um recebe `vizinhos` com o outro, sem `uid`; fechar um socket faz o outro receber lista vazia em até 3 s.
-- [ ] **Passos 3 a 5:** falhar, implementar, passar. Commit.
+- [x] **Passo 2:** `celula.integration.test.js`: abre 2 WebSockets falsos contra a classe `Celula` (use o pool de testes de Workers da Cloudflare, `@cloudflare/vitest-pool-workers`, ou `unstable_dev` do `wrangler`; escolha o que funcionar e documente em `workers/nearby/README.md`), ambos `procurar` + `posicao` próximos; cada um recebe `vizinhos` com o outro, sem `uid`; fechar um socket faz o outro receber lista vazia em até 3 s.
+- [x] **Passos 3 a 5:** falhar, implementar, passar. Commit.
 
 ### Tarefa 5: Roteador, publicação e documentação do servidor
 
@@ -126,10 +128,10 @@ Cada linha tem um teste na tarefa dona do código.
 - O app abre **uma conexão por quadrado** que o raio toca (`cellsInRadius`).
 - Variáveis/segredos: `FIREBASE_PROJECT_ID` (variável pública do `wrangler.toml`), `NEARBY_SECRET` (segredo do desvio), `ADMIN_TOKEN` (usado na Etapa 3).
 
-- [ ] **Passo 1: testes** `index.test.js`: `/health` 200; sem token 401; token inválido 401; `cell` mal formada ou fora do Brasil 404; sem `Upgrade` 426 (use token falso via `getKeys` injetável).
-- [ ] **Passo 2:** implementar o roteador. **Passo 3:** `npm test` verde.
-- [ ] **Passo 4:** criar `deploy-nearby.yml` (**commit separado, só do workflow e do worker, sem tocar no app**) no padrão de `deploy-traffic-proxy.yml`: testes → verificação dos segredos `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `NEARBY_SECRET`, `ADMIN_TOKEN` → `wrangler deploy` com `secrets: NEARBY_SECRET`, `ADMIN_TOKEN`. Gatilho: `workers/nearby/**` e o próprio workflow.
-- [ ] **Passo 5:** documentar em `docs/ROLE-POR-PERTO.md` os segredos que o dono precisa criar (`NEARBY_SECRET` e `ADMIN_TOKEN`: textos longos aleatórios) e a variável `NEARBY_URL`. Parar aqui e **pedir ao dono** para criar os segredos e rodar o workflow; só seguir quando o endereço do servidor existir (o código do app da Tarefa 8 em diante só precisa da variável `NEARBY_URL` na hora de publicar).
+- [x] **Passo 1: testes** `index.test.js`: `/health` 200; sem token 401; token inválido 401; `cell` mal formada ou fora do Brasil 404; sem `Upgrade` 426 (use token falso via `getKeys` injetável).
+- [x] **Passo 2:** implementar o roteador. **Passo 3:** `npm test` verde.
+- [x] **Passo 4:** criar `deploy-nearby.yml` (**commit separado, só do workflow e do worker, sem tocar no app**) no padrão de `deploy-traffic-proxy.yml`: testes → verificação dos segredos `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `NEARBY_SECRET`, `ADMIN_TOKEN` → `wrangler deploy` com `secrets: NEARBY_SECRET`, `ADMIN_TOKEN`. Gatilho: `workers/nearby/**` e o próprio workflow.
+- [x] **Passo 5:** documentar em `docs/ROLE-POR-PERTO.md` os segredos que o dono precisa criar (`NEARBY_SECRET` e `ADMIN_TOKEN`: textos longos aleatórios) e a variável `NEARBY_URL`. Parar aqui e **pedir ao dono** para criar os segredos e rodar o workflow; só seguir quando o endereço do servidor existir (o código do app da Tarefa 8 em diante só precisa da variável `NEARBY_URL` na hora de publicar).
 
 ### Tarefa 6: O app consegue o ID token
 
@@ -140,7 +142,7 @@ Cada linha tem um teste na tarefa dona do código.
 **Interfaces:**
 - Produz: `suspend fun idToken(forceRefresh: Boolean = false): String?` em `AuthGateway` (null se não há usuário logado). Em `FirebaseAuthGateway`: `auth?.currentUser?.getIdToken(forceRefresh)?.await()?.token`, capturando exceção e devolvendo null.
 
-- [ ] **Passo 1:** teste: o gateway falso devolve null deslogado e o token configurado logado; `forceRefresh` é repassado. **Passos 2 a 4:** implementar, compilar o app inteiro (`:app:testDebugUnitTest`), passar. Commit.
+- [x] **Passo 1:** teste: o gateway falso devolve null deslogado e o token configurado logado; `forceRefresh` é repassado. **Passos 2 a 4:** implementar, compilar o app inteiro (`:app:testDebugUnitTest`), passar. Commit.
 
 ### Tarefa 7: Modelos e estado do rolê por perto no `sync-core`
 
@@ -154,8 +156,8 @@ Cada linha tem um teste na tarefa dona do código.
 - Mensagens do servidor como `sealed interface ServerMessage` (`Vizinhos(lista)`, `Erro(codigo)`, mais as da Etapa 2) e `ClientMessage` (`Procurar`, `Parar`, `Posicao`), com `fun ClientMessage.toJson(): String` e `fun parseServerMessage(json: String): ServerMessage?` (null para JSON/tipo desconhecido). Usar `kotlinx.serialization`.
 - `class NearbyState` imutável com `fun reduce(state, msg): NearbyState` que guarda a lista de vizinhos ordenada com os que combinam primeiro e remove duplicados pela `sessao` (ponto de atenção 4: o mesmo vizinho vindo de dois quadrados).
 
-- [ ] **Passo 1: testes**: `toJson` de `Procurar` produz o JSON exato do protocolo; `parseServerMessage` de lista com 2 vizinhos; JSON inválido → null; `reduce` ordena `combina` primeiro; vizinho repetido (mesma `sessao`) aparece uma vez com a posição mais nova; `Preferencia(raioKm = 4)` lança `IllegalArgumentException`.
-- [ ] **Passos 2 a 4:** falhar, implementar, passar (`./gradlew.bat :sync-core:test`). Commit.
+- [x] **Passo 1: testes**: `toJson` de `Procurar` produz o JSON exato do protocolo; `parseServerMessage` de lista com 2 vizinhos; JSON inválido → null; `reduce` ordena `combina` primeiro; vizinho repetido (mesma `sessao`) aparece uma vez com a posição mais nova; `Preferencia(raioKm = 4)` lança `IllegalArgumentException`.
+- [x] **Passos 2 a 4:** falhar, implementar, passar (`./gradlew.bat :sync-core:test`). Commit.
 
 ### Tarefa 8: Cliente WebSocket do app
 
@@ -168,9 +170,9 @@ Cada linha tem um teste na tarefa dona do código.
 - `class Backoff(val baseMs: Long = 1_000, val maxMs: Long = 30_000)` com `fun nextDelayMs(attempt: Int): Long` (dobra até o máximo).
 - `class NearbyClient(url: String, tokenProvider: suspend (Boolean) -> String?, scope: CoroutineScope)` com `fun connect(cells: Set<String>)`, `fun send(msg: ClientMessage)`, `val events: SharedFlow<ServerMessage>`, `val status: StateFlow<NearbyStatus>` (`DESCONECTADO`, `CONECTANDO`, `CONECTADO`, `INDISPONIVEL`). Reconecta com `Backoff`; em 401 ou ao se aproximar de 55 min de conexão, pede `tokenProvider(true)` (token novo) e reconecta (ponto de atenção 1); sem internet ou resposta 5xx vira `INDISPONIVEL` com mensagem "Rolê por perto indisponível agora" (ponto de atenção 6). Usa uma conexão por quadrado em `cells`.
 
-- [ ] **Passo 1: testes** (JVM, sem rede): `PositionThrottle` — primeira posição envia; 5 s depois não; 31 s depois sim; em encontro 11 s depois sim; andou 150 m em 12 s envia, em 5 s não; `Backoff` — 1 s, 2 s, 4 s ... 30 s, sem passar de 30 s.
-- [ ] **Passo 2:** `NearbyClient` testado com um `MockWebServer` do OkHttp (dependência de teste `mockwebserver`): conecta com `?t=<token>`, recebe `vizinhos`, reconecta após queda com `Backoff`, renova o token em 401.
-- [ ] **Passos 3 a 5:** implementar, passar, commit.
+- [x] **Passo 1: testes** (JVM, sem rede): `PositionThrottle` — primeira posição envia; 5 s depois não; 31 s depois sim; em encontro 11 s depois sim; andou 150 m em 12 s envia, em 5 s não; `Backoff` — 1 s, 2 s, 4 s ... 30 s, sem passar de 30 s.
+- [x] **Passo 2:** `NearbyClient` testado com um `MockWebServer` do OkHttp (dependência de teste `mockwebserver`): conecta com `?t=<token>`, recebe `vizinhos`, reconecta após queda com `Backoff`, renova o token em 401.
+- [x] **Passos 3 a 5:** implementar, passar, commit.
 
 ### Tarefa 9: Serviço, ViewModel, tela "procurando rolê" e motos no mapa
 
@@ -183,9 +185,9 @@ Cada linha tem um teste na tarefa dona do código.
 - `NearbyMarkers.kt`: `fun riderBitmap(density: Float, destaque: Boolean, proprio: Boolean): Bitmap` — **ícone A aprovado**: moto vista de cima (duas rodas, tanque oval com gradiente, guidão, ombros e capacete); cinza para outros (`#7f93b2` a `#c7d3e6`), laranja para o próprio (`#d9600a` a `#ffa14d`), com anel laranja claro quando `destaque`. A imagem gira com o `rumo` pela propriedade do MapLibre (`iconRotate` + `iconRotationAlignment("map")`).
 - Folha "Procurando rolê": três listas (ritmo, distância, parada, textos em pt-BR), controle de raio 5 a 20 km (padrão 5), botão "Procurar rolê" / "Parar de procurar rolê"; faixa no mapa "Procurando rolê · N pessoas por perto".
 
-- [ ] **Passo 1: testes**: o mapeamento `Vizinho` → propriedades do mapa (`id`, `rumo`, `destaque`) e a contagem "N pessoas por perto" (0 → "ninguém por perto ainda"); `NearbyViewModel` com `NearbyClient` falso: `ligar` envia `procurar` e depois `posicao`; `desligar` envia `parar` e encerra; sem login não liga; `INDISPONIVEL` vira estado com mensagem.
-- [ ] **Passo 2:** implementar. **Passo 3:** verificação visual no emulador **se disponível** (`docs/TESTES-MANUAIS-ROLE-POR-PERTO.md` descreve o roteiro de 2 aparelhos).
-- [ ] **Passo 4:** suíte inteira do app verde. Commit.
+- [x] **Passo 1: testes**: o mapeamento `Vizinho` → propriedades do mapa (`id`, `rumo`, `destaque`) e a contagem "N pessoas por perto" (0 → "ninguém por perto ainda"); `NearbyViewModel` com `NearbyClient` falso: `ligar` envia `procurar` e depois `posicao`; `desligar` envia `parar` e encerra; sem login não liga; `INDISPONIVEL` vira estado com mensagem.
+- [x] **Passo 2:** implementar. **Passo 3:** verificação visual no emulador **se disponível** (`docs/TESTES-MANUAIS-ROLE-POR-PERTO.md` descreve o roteiro de 2 aparelhos).
+- [x] **Passo 4:** suíte inteira do app verde. Commit.
 
 ### Tarefa 10: Publicar a Etapa 1
 
