@@ -36,6 +36,7 @@ const DENUNCIA_DEDUP_MS = 24 * 3_600_000;
 const PARES_MS = 24 * 3_600_000; // quem esteve no mesmo encontro pode bloquear/denunciar por 24 h
 const MAX_PARES_PESSOAS = 500; // 500 pessoas x 30 pares x ~100 B < 1,5 MB; ao encher, descarta os mais antigos
 const MAX_PARES_POR_PESSOA = 30;
+const MAX_FALSOS = 500;
 
 const INTERVALO_MIN_ENVIO_MS = 2000; // no máximo uma lista a cada 2 s por conexão
 const ALARME_MS = 30_000; // varredura de quem ficou sem sinal
@@ -93,6 +94,8 @@ export class Celula {
         }),
       );
       try {
+        await ctx.storage.delete("pares"); // chave antiga (um único valor): hoje é uma chave por pessoa
+        for (const [k, v] of Object.entries((await ctx.storage.get("falsos")) ?? {})) this.falsos.set(k, v);
         for (const [k, v] of await ctx.storage.list({ prefix: "par:" })) this.pares[k.slice(4)] = v;
       } catch (e) {
         console.error("falha ao ler os pares", e?.message);
@@ -804,17 +807,59 @@ export class Celula {
     this.erro(ws, "inexistente");
   }
 
-  // Alvo (par de 24 h) que me bloqueou: "ok" idêntico ao de um alvo válido, sem gravar nada, com o
-  // mesmo padrão de chamadas à Conta (leituras) e o mesmo atalho local nas repetições.
-  async falsoOk(ws, a, ref, uidAlvo, chamadas) {
+  // Alvo (par de 24 h) que me bloqueou: "ok" idêntico ao de um alvo válido, sem gravar nada de
+  // verdade, com as MESMAS idas à Conta, em sequência, e a mesma cota (espera/limite) do caminho real.
+  async falsoOk(ws, a, ref, uidAlvo) {
     const chave = `${ref}:${a.uid}>${uidAlvo}`;
-    if (this.now() - (this.falsos.get(chave) ?? -Infinity) >= DENUNCIA_DEDUP_MS) {
-      await Promise.allSettled(
-        Array.from({ length: chamadas }, () => this.chamarConta(a.uid, "/bloqueios", "GET", PRAZO_CONTA_MS)),
-      );
-      this.falsos.set(chave, this.now());
+    if (this.now() - (this.falsos.get(chave) ?? -Infinity) < DENUNCIA_DEDUP_MS) return this.ok(ws, ref); // atalho local
+    const ele = encodeURIComponent(uidAlvo);
+    const lerAlvo = () => this.chamarConta(uidAlvo, "/bloqueios", "GET", PRAZO_CONTA_MS); // no lugar da gravação no alvo
+    let reservou = false;
+    try {
+      if (ref === "bloqueio") {
+        // 1) confere o teto de bloqueados sem gravar (simular), 2) "grava" no alvo (leitura)
+        const r = await this.chamarConta(a.uid, `/bloquear?uid=${ele}&sentido=bloqueou&simular=1`, "POST", PRAZO_CONTA_MS);
+        if (r.status === 409 && r.corpo.erro === "limite") return this.erro(ws, "limite", { max: MAX_BLOQUEADOS });
+        if (r.status !== 200 || r.corpo.ok !== true) throw new Error(`status ${r.status}`);
+        await lerAlvo();
+        this.guardarFalso(chave);
+      } else {
+        // 1) reserva a cota de verdade, 2) "grava" no alvo (leitura), 3) confirma a cota
+        const c = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}`, "POST", PRAZO_CONTA_MS);
+        if (c.status === 409 && c.corpo.erro === "espera") return this.erro(ws, "espera", { restanteMs: c.corpo.restanteMs });
+        if (c.status !== 200 || c.corpo.ok !== true) throw new Error(`status ${c.status}`);
+        if (c.corpo.duplicada) {
+          if (!c.corpo.pendente) this.guardarFalso(chave);
+          return this.ok(ws, ref);
+        }
+        reservou = true;
+        await lerAlvo();
+        const conf = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&confirmar=1`, "POST", PRAZO_CONTA_MS).catch(() => null);
+        if (conf?.status === 200) this.guardarFalso(chave);
+      }
+    } catch (e) {
+      console.error("falha na resposta de segurança", e?.message);
+      if (reservou) await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&desfazer=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
+      return this.erro(ws, "indisponivel");
     }
     this.ok(ws, ref);
+  }
+
+  // Atalho local do falsoOk. Os de bloqueio persistem (o caminho real também sobrevive à hibernação,
+  // pois "já bloqueado" vem da Conta); os de denúncia ficam só em memória, como o denLocal real.
+  guardarFalso(chave) {
+    this.falsos.delete(chave);
+    this.falsos.set(chave, this.now());
+    if (chave.startsWith("bloqueio:")) {
+      for (const k of [...this.falsos.keys()].filter((x) => x.startsWith("bloqueio:")).slice(0, -MAX_FALSOS)) this.falsos.delete(k);
+      this.persistirFalsos();
+    }
+  }
+
+  persistirFalsos() {
+    const o = {};
+    for (const [k, t] of this.falsos) if (k.startsWith("bloqueio:")) o[k] = t;
+    Promise.resolve(this.ctx.storage.put("falsos", o)).catch((e) => console.error("falha ao gravar falsos", e?.message));
   }
 
   // Limite de ritmo por conexão para bloquear/denunciar (1 a cada 2 s). true se pode seguir.
@@ -842,7 +887,7 @@ export class Celula {
     const alvo = this.resolverSessao(msg.sessao, a.uid);
     if (!alvo) return this.inexistenteIgual(ws, a);
     if (this.alvoInvisivel(a, alvo.uid)) {
-      return alvo.par ? this.falsoOk(ws, a, "bloqueio", alvo.uid, 2) : this.inexistenteIgual(ws, a);
+      return alvo.par ? this.falsoOk(ws, a, "bloqueio", alvo.uid) : this.inexistenteIgual(ws, a);
     }
     if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
     const minha = this.bloq.get(a.connId);
@@ -899,7 +944,7 @@ export class Celula {
     // se nunca foram pares, é "inexistente"; se foram, recebe o mesmo "ok" de um alvo válido (sem gravar).
     if (!alvo) return this.inexistenteIgual(ws, a);
     if (this.alvoInvisivel(a, alvo.uid)) {
-      return alvo.par ? this.falsoOk(ws, a, "denuncia", alvo.uid, 3) : this.inexistenteIgual(ws, a);
+      return alvo.par ? this.falsoOk(ws, a, "denuncia", alvo.uid) : this.inexistenteIgual(ws, a);
     }
     if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
     const chave = `${a.uid}>${alvo.uid}`;
@@ -998,7 +1043,14 @@ export class Celula {
       else this.pares[uid] = viva;
     }
     for (const [k, t] of this.denLocal) if (agora - t >= DENUNCIA_DEDUP_MS) this.denLocal.delete(k);
-    for (const [k, t] of this.falsos) if (agora - t >= DENUNCIA_DEDUP_MS) this.falsos.delete(k);
+    let podouFalso = false;
+    for (const [k, t] of this.falsos) {
+      if (agora - t >= DENUNCIA_DEDUP_MS) {
+        this.falsos.delete(k);
+        podouFalso = true;
+      }
+    }
+    if (podouFalso) this.persistirFalsos();
   }
 
   async gravarPar(uid) {

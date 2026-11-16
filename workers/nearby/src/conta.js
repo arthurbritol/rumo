@@ -109,7 +109,8 @@ export class Conta {
           if (lista.length >= MAX_BLOQUEADO_POR) return json({ ok: false, erro: "limite" }, 409);
           lista.push(alvo);
         }
-        await this.ctx.storage.put("bloqueios", b);
+        // `simular=1`: só confere os tetos (a Celula usa para responder igual sem gravar).
+        if (url.searchParams.get("simular") !== "1") await this.ctx.storage.put("bloqueios", b);
       }
       return json({ ok: true });
     }

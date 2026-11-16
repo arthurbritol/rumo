@@ -138,3 +138,19 @@ test("reserva de cota não confirmada expira em 30 s; confirmar a torna definiti
   relogio.t += 24 * 3_600_000;
   assert.equal((await chamar("/cota-denuncia?alvo=q")).corpo.duplicada, undefined);
 });
+
+test("cota: duplicada devolve pendente:true com a reserva aberta e pendente:false depois de confirmar", async () => {
+  const { chamar } = nova();
+  await chamar("/cota-denuncia?alvo=k");
+  assert.deepEqual((await chamar("/cota-denuncia?alvo=k")).corpo, { ok: true, duplicada: true, pendente: true });
+  await chamar("/cota-denuncia?alvo=k&confirmar=1");
+  assert.deepEqual((await chamar("/cota-denuncia?alvo=k")).corpo, { ok: true, duplicada: true, pendente: false });
+});
+
+test("bloquear com simular=1 só confere o teto e não grava", async () => {
+  const { chamar } = nova();
+  assert.equal((await chamar("/bloquear?uid=zz&simular=1")).status, 200);
+  assert.deepEqual((await chamar("/bloqueios", "GET")).corpo.bloqueados, []);
+  for (let i = 0; i < MAX_BLOQUEADOS; i++) await chamar(`/bloquear?uid=u${i}`);
+  assert.equal((await chamar("/bloquear?uid=zz&simular=1")).status, 409);
+});

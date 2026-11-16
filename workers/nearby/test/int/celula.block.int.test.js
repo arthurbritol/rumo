@@ -544,3 +544,97 @@ describe("pares: oráculo, saídas e armazenamento", { timeout: 25000 }, () => {
     });
   });
 });
+
+describe("segurança: cota do caminho falso e denLocal", { timeout: 25000 }, () => {
+  const conta = (uid) => env.CONTA.get(env.CONTA.idFromName(uid));
+
+  async function duasPessoas() {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b");
+    const a = await pessoa(stub, uA);
+    const b = await pessoa(stub, uB, 0.001);
+    expect(await esperar(() => lista(a)?.length === 1 && lista(b)?.length === 1)).toBe(true);
+    return { stub, uA, uB, a, b, sB: unicaSessao(a) };
+  }
+  const espiar = (stub, f) => runInDurableObject(stub, (inst) => {
+    const orig = inst.chamarConta.bind(inst);
+    inst.chamadas = [];
+    inst.chamarConta = (uid, caminho, ...r) => {
+      inst.chamadas.push(caminho);
+      return f ? f(caminho, orig, uid, r) : orig(uid, caminho, ...r);
+    };
+  });
+
+  it("duplicada+pendente responde ok sem gravar denLocal e sem gravar a denúncia", async () => {
+    const { stub, a, sB, uB } = await duasPessoas();
+    await espiar(stub, (caminho, orig, uid, r) =>
+      caminho.startsWith("/cota-denuncia")
+        ? Promise.resolve({ status: 200, corpo: { ok: true, duplicada: true, pendente: true } })
+        : orig(uid, caminho, ...r));
+    a.enviar({ t: "denunciar", sessao: sB, motivo: "outro" });
+    expect(await esperar(() => ok(a, "denuncia"))).toBe(true);
+    expect(await runInDurableObject(stub, (inst) => [inst.denLocal.size, inst.chamadas.some((c) => c.startsWith("/denunciar"))])).toEqual([0, false]);
+    expect((await (await conta(uB).fetch("https://conta/denuncias")).json()).denuncias).toEqual([]);
+  });
+
+  it("confirmação que falha não grava denLocal (mas a denúncia foi gravada)", async () => {
+    const { stub, a, sB, uB } = await duasPessoas();
+    await espiar(stub, (caminho, orig, uid, r) =>
+      caminho.includes("confirmar=1")
+        ? Promise.resolve({ status: 500, corpo: { ok: false } })
+        : orig(uid, caminho, ...r));
+    a.enviar({ t: "denunciar", sessao: sB, motivo: "outro" });
+    expect(await esperar(() => ok(a, "denuncia"))).toBe(true);
+    expect(await runInDurableObject(stub, (inst) => inst.denLocal.size)).toBe(0);
+    expect((await (await conta(uB).fetch("https://conta/denuncias")).json()).denuncias.length).toBe(1);
+  });
+
+  it("caminho falso (par que me bloqueou): mesma cota, mesmas idas em sequência, limite e espera iguais ao real", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b");
+    const a = await pessoa(stub, uA);
+    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 4 });
+    expect(await esperar(() => ultimo(a, "encontro"))).toBeTruthy();
+    const id = ultimo(a, "encontro").id;
+    const b = await conectar(stub, uB, { "x-rumo-enc": id });
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(b, "encontro") && ultimo(a, "encontro")?.participantes.length === 2)).toBe(true);
+    const sA = ultimo(a, "encontro").eu, sB = ultimo(b, "encontro").eu;
+    a.enviar({ t: "bloquear", sessao: sB });
+    expect(await esperar(() => ok(a, "bloqueio"))).toBe(true);
+    await livre(stub);
+    await espiar(stub);
+
+    // Denúncia de B contra A (falsa): reserva, leitura no alvo, confirmação; cota consumida de verdade.
+    b.enviar({ t: "denunciar", sessao: sA, motivo: "outro" });
+    expect(await esperar(() => ok(b, "denuncia"))).toBe(true);
+    const cham = await runInDurableObject(stub, (inst) => inst.chamadas.map((c) => c.split("?")[0] + (c.includes("confirmar") ? "+c" : "")));
+    expect(cham).toEqual(["/cota-denuncia", "/bloqueios", "/cota-denuncia+c"]);
+    expect((await (await conta(uB).fetch(`https://conta/cota-denuncia?alvo=${uA}`, { method: "POST" })).json())).toMatchObject({ duplicada: true, pendente: false });
+    expect((await (await conta(uA).fetch("https://conta/denuncias")).json()).denuncias).toEqual([]);
+
+    // Bloqueio falso: com o teto cheio devolve limite, como o caminho real.
+    for (let i = 0; i < 500; i++) await conta(uB).fetch(`https://conta/bloquear?uid=cheio-${i}`, { method: "POST" });
+    await livre(stub);
+    b.enviar({ t: "bloquear", sessao: sA });
+    expect(await esperar(() => erro(b, "limite"))).toBe(true);
+    expect((await (await conta(uB).fetch("https://conta/bloqueios")).json()).bloqueados).not.toContain(uA);
+  });
+
+  it("bloqueio falso repetido não chama a Conta e o atalho persiste (storage 'falsos'); chave antiga 'pares' é apagada", async () => {
+    const { stub } = await duasPessoas();
+    await runInDurableObject(stub, async (inst) => {
+      inst.guardarFalso("bloqueio:x>y");
+      await new Promise((r) => setTimeout(r, 50));
+      expect((await inst.ctx.storage.get("falsos"))["bloqueio:x>y"]).toBeGreaterThan(0);
+      await inst.ctx.storage.put("pares", { velho: [] });
+    });
+    // Reinício: o construtor lê "falsos" e apaga a chave antiga.
+    await runInDurableObject(stub, async (inst) => {
+      const novo = new inst.constructor(inst.ctx, inst.env);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(novo.falsos.has("bloqueio:x>y")).toBe(true);
+      expect(await inst.ctx.storage.get("pares")).toBeUndefined();
+    });
+  });
+});
