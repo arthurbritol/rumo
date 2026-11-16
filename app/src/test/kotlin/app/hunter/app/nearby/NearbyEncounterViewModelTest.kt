@@ -434,4 +434,34 @@ class NearbyEncounterViewModelTest {
         // Durante Aguardando a proposta segue na lista (o cartão mostra "Entrando…").
         assertEquals(1, (r.vm.estado.value as NearbyUiState.Procurando).propostas.size)
     }
+
+    @Test
+    fun `reentrada sem encontro reenvia entrar por timeout e depois encerra`() = runTest {
+        val r = rig()
+        r.noEncontroComoConvidado()
+        r.link.openedEncFlow.tryEmit(idEnc)
+        r.link.sentEnc.clear()
+        advanceTimeBy(15_100)
+        assertIs<EncontroUiState.Ativo>(r.vm.encontro.value)
+        advanceTimeBy(3_100)
+        assertEquals(1, r.link.sentEnc.count { it == ClientMessage.Entrar(idEnc) })
+        advanceTimeBy(100_000)
+        assertEquals(3, r.link.sentEnc.count { it == ClientMessage.Entrar(idEnc) })
+        assertEquals(EncontroUiState.Encerrado(MotivoFim.SAIU), r.vm.encontro.value)
+        assertEquals(1, r.link.encDisconnects)
+    }
+
+    @Test
+    fun `qualquer erro com a reentrada pendente reenvia entrar`() = runTest {
+        val r = rig()
+        r.noEncontroComoConvidado()
+        r.link.openedEncFlow.tryEmit(idEnc)
+        r.link.sentEnc.clear()
+        r.emit(ServerMessage.Erro("espera", 1_000), extra = true)
+        assertIs<EncontroUiState.Ativo>(r.vm.encontro.value)
+        advanceTimeBy(3_100)
+        assertEquals(listOf<ClientMessage>(ClientMessage.Entrar(idEnc)), r.link.sentEnc)
+        repeat(3) { r.emit(ServerMessage.Erro("cheio"), extra = true) }
+        assertEquals(EncontroUiState.Encerrado(MotivoFim.SAIU), r.vm.encontro.value)
+    }
 }

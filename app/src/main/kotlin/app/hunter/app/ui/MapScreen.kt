@@ -289,6 +289,7 @@ fun MapScreen(
             onProposalClick = {
                 // Em encontro (ou esperando resposta) as propostas dos outros não abrem cartão.
                 if (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado) {
+                    nearbyVm.limparFim() // o cartão de fim sai e o da proposta aparece
                     selectedProposal = it
                     selectedRider = null
                     proposalPoint = null
