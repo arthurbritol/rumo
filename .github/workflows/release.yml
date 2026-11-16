@@ -83,6 +83,8 @@ jobs:
           # Camada de trânsito (opcional): variável TRAFFIC_TILE_URL e segredo TRAFFIC_APP_TOKEN do repositório.
           ORG_GRADLE_PROJECT_trafficTileUrl: ${{ vars.TRAFFIC_TILE_URL }}
           ORG_GRADLE_PROJECT_trafficToken: ${{ secrets.TRAFFIC_APP_TOKEN }}
+          # Rolê por perto (opcional): variável NEARBY_URL do repositório (endereço do servidor, sem barra no final).
+          ORG_GRADLE_PROJECT_nearbyUrl: ${{ vars.NEARBY_URL }}
         run: ./gradlew :app:assembleRelease -Prumo.versionCode=${{ steps.ver.outputs.code }} -Prumo.versionName=${{ steps.ver.outputs.name }} --console=plain
 
       - name: Notas da release
