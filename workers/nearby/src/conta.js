@@ -7,6 +7,8 @@
 //   POST /fechar?motivo=<m>[&enc=<id>] -> 200 {ok:true}; cancelado, expirou e recusa geram 5 min de espera.
 //     Com `enc`, só fecha se for a proposta aberta com esse id; senão é ignorado (200, ignorado:true),
 //     para um aviso atrasado/repetido nunca fechar a proposta nova nem prorrogar a espera.
+//   POST /bloquear?uid=<outro>[&sentido=bloqueou|bloqueadoPor], GET /bloqueios  (Tarefa 15)
+//   POST /cota-denuncia?alvo=<uid>[&desfazer=1], POST /denunciar?por=&motivo=[&lat=&lon=], GET /denuncias
 //
 // Segurança de estado: uma proposta "aberta" há mais de 2 h é tratada como fechada (um encontro
 // dura no máximo 30 min de proposta + 60 min em andamento), para um fechar perdido nunca
@@ -18,6 +20,16 @@ const COM_ESPERA = new Set(["cancelado", "expirou", "recusa"]);
 const SEM_ESPERA = new Set(["chegaram", "ninguem_chegou", "falha"]);
 
 const ID_RE = /^[0-9a-f]{16}$/;
+const UID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+// Bloqueios e denúncias (Tarefa 15). Tetos para o storage do Durable Object nunca crescer sem fim.
+export const MAX_BLOQUEADOS = 500; // quem esta pessoa bloqueou (recusa acima disso)
+const MAX_BLOQUEADO_POR = 2000; // quem bloqueou esta pessoa (mantém os mais recentes)
+const MAX_DENUNCIAS = 200; // denúncias recebidas (mantém as mais recentes)
+const DENUNCIA_DEDUP_MS = 24 * 3_600_000; // mesmo denunciante/denunciado em 24 h conta uma vez
+const COTA_DENUNCIAS = 5; // denúncias por denunciante por hora
+const COTA_JANELA_MS = 3_600_000;
+export const MOTIVOS_DENUNCIA = ["incomodo", "comportamento", "falso", "outro"];
 
 const json = (corpo, status = 200) =>
   new Response(JSON.stringify(corpo), { status, headers: { "content-type": "application/json" } });
@@ -35,6 +47,9 @@ export class Conta {
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (["/bloquear", "/bloqueios", "/cota-denuncia", "/denunciar", "/denuncias"].includes(url.pathname)) {
+      return this.seguranca(request, url);
+    }
     if (url.pathname !== "/abrir" && url.pathname !== "/fechar") return json({ ok: false, erro: "nao_encontrado" }, 404);
     if (request.method !== "POST") return json({ ok: false, erro: "metodo" }, 405);
     const agora = this.now();
@@ -58,6 +73,83 @@ export class Conta {
     if (enc !== null && (!e.aberta || e.encId !== enc)) return json({ ok: true, ignorado: true });
     const cooldownUntil = COM_ESPERA.has(motivo) ? agora + ESPERA_MS : e.cooldownUntil;
     await this.ctx.storage.put("estado", { aberta: false, abertaEm: 0, encId: null, cooldownUntil });
+    return json({ ok: true });
+  }
+
+  // --- bloqueios e denúncias (só a Celula alcança; os uids nunca saem do servidor) ---
+
+  async seguranca(request, url) {
+    const leitura = url.pathname === "/bloqueios" || url.pathname === "/denuncias";
+    if (request.method !== (leitura ? "GET" : "POST")) return json({ ok: false, erro: "metodo" }, 405);
+    const agora = this.now();
+
+    if (url.pathname === "/bloqueios") {
+      const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
+      return json({ ok: true, bloqueados: b.bloqueados, bloqueadoPor: b.bloqueadoPor });
+    }
+    if (url.pathname === "/denuncias") {
+      return json({ ok: true, denuncias: (await this.ctx.storage.get("denuncias")) ?? [] });
+    }
+
+    if (url.pathname === "/bloquear") {
+      // sentido "bloqueou": esta pessoa bloqueou `uid`; "bloqueadoPor": `uid` bloqueou esta pessoa.
+      const alvo = url.searchParams.get("uid") ?? "";
+      const sentido = url.searchParams.get("sentido") ?? "bloqueou";
+      if (!UID_RE.test(alvo) || (sentido !== "bloqueou" && sentido !== "bloqueadoPor")) {
+        return json({ ok: false, erro: "parametro_invalido" }, 400);
+      }
+      const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
+      const lista = sentido === "bloqueou" ? b.bloqueados : b.bloqueadoPor;
+      if (!lista.includes(alvo)) {
+        if (sentido === "bloqueou") {
+          if (lista.length >= MAX_BLOQUEADOS) return json({ ok: false, erro: "limite" }, 409);
+          lista.push(alvo);
+        } else {
+          lista.push(alvo);
+          if (lista.length > MAX_BLOQUEADO_POR) lista.splice(0, lista.length - MAX_BLOQUEADO_POR);
+        }
+        await this.ctx.storage.put("bloqueios", b);
+      }
+      return json({ ok: true });
+    }
+
+    if (url.pathname === "/cota-denuncia") {
+      // Na Conta do denunciante: repetição do mesmo alvo em 24 h não gasta cota; máx. 5 por hora.
+      // A cota é RESERVADA já na consulta (atômico, sem corrida entre denúncias simultâneas);
+      // com `desfazer=1` a reserva é devolvida se a gravação da denúncia falhou.
+      const alvo = url.searchParams.get("alvo") ?? "";
+      if (!UID_RE.test(alvo)) return json({ ok: false, erro: "parametro_invalido" }, 400);
+      const feitas = ((await this.ctx.storage.get("cotaDenuncias")) ?? []).filter((d) => agora - d.em < DENUNCIA_DEDUP_MS);
+      if (url.searchParams.get("desfazer") === "1") {
+        const resto = feitas.filter((d) => d.alvo !== alvo);
+        await this.ctx.storage.put("cotaDenuncias", resto);
+        return json({ ok: true });
+      }
+      if (feitas.some((d) => d.alvo === alvo)) return json({ ok: true, duplicada: true });
+      const naHora = feitas.filter((d) => agora - d.em < COTA_JANELA_MS);
+      if (naHora.length >= COTA_DENUNCIAS) {
+        const restanteMs = naHora[0].em + COTA_JANELA_MS - agora;
+        return json({ ok: false, erro: "espera", restanteMs }, 409);
+      }
+      feitas.push({ alvo, em: agora });
+      await this.ctx.storage.put("cotaDenuncias", feitas);
+      return json({ ok: true });
+    }
+
+    // /denunciar: na Conta do denunciado.
+    const por = url.searchParams.get("por") ?? "";
+    const motivo = url.searchParams.get("motivo") ?? "";
+    if (!UID_RE.test(por) || !MOTIVOS_DENUNCIA.includes(motivo)) return json({ ok: false, erro: "parametro_invalido" }, 400);
+    const coord = (nome, max) => {
+      const v = url.searchParams.get(nome);
+      const n = v === null || v === "" ? NaN : Number(v);
+      return Number.isFinite(n) && Math.abs(n) <= max ? n : null;
+    };
+    const lista = (await this.ctx.storage.get("denuncias")) ?? [];
+    if (lista.some((d) => d.por === por && agora - d.em < DENUNCIA_DEDUP_MS)) return json({ ok: true, duplicada: true });
+    lista.push({ por, em: agora, motivo, lat: coord("lat", 90), lon: coord("lon", 180) });
+    if (lista.length > MAX_DENUNCIAS) lista.splice(0, lista.length - MAX_DENUNCIAS);
+    await this.ctx.storage.put("denuncias", lista);
     return json({ ok: true });
   }
 }

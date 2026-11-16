@@ -27,6 +27,9 @@ import { Encounters } from "./encounter.js";
 import { parseClientMessage, ID_ENCONTRO_RE } from "./protocol.js";
 import { applyOffset, cellId, distanceM, fuzzOffset } from "./geo.js";
 import { combina } from "./match.js";
+import { MAX_BLOQUEADOS } from "./conta.js";
+
+const BLOQ_RENOVAR_MS = 60_000; // a lista de bloqueios de cada conexão é relida da Conta a cada 1 min (no alarme)
 
 const INTERVALO_MIN_ENVIO_MS = 2000; // no máximo uma lista a cada 2 s por conexão
 const ALARME_MS = 30_000; // varredura de quem ficou sem sinal
@@ -66,7 +69,16 @@ export class Celula {
     this.zumbis = new Set(); // encontros desfeitos por limparZumbis: a Conta fecha com "falha" (sem espera)
     this.sujo = false; // estrutura mudou fora de um fim (ex.: saiu um não-proponente): precisa gravar
     this.fechamentos = []; // avisos de fim à Conta que falharam: [{ uid, motivo, id, tentativas }]
+    // connId -> { uids: Set<uid> (quem esta pessoa bloqueou OU quem a bloqueou), em }: só memória, nunca enviado.
+    // Sem entrada (ainda não carregada ou a Conta falhou) = falha fechada: ninguém é mostrado.
+    this.bloq = new Map();
     ctx.blockConcurrencyWhile(async () => {
+      await Promise.all(
+        ctx.getWebSockets().map((ws) => {
+          const a = ws.deserializeAttachment();
+          return a ? this.carregarBloqueios(a.connId, a.uid) : null;
+        }),
+      );
       const salvo = await ctx.storage.get("enc");
       if (salvo) this.importarEnc(salvo);
       // Depois de reinício/deploy o estado voltou do storage, mas os sockets podem ter ido embora:
@@ -110,6 +122,7 @@ export class Celula {
       visto: this.now(),
       ultima: null, // última posição aceita (conexão sem Presence)
     });
+    await this.carregarBloqueios(servidor.deserializeAttachment().connId, uid);
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
@@ -128,6 +141,7 @@ export class Celula {
     const r = parseClientMessage(mensagem);
     if (!r.ok) return this.erro(ws, "mensagem_invalida");
     const msg = r.msg;
+    if (!this.bloq.has(a.connId)) await this.carregarBloqueios(a.connId, a.uid); // tenta de novo se a Conta falhou
 
     if (msg.t === "procurar") {
       this.presence.join(a.connId, a.uid, msg);
@@ -148,6 +162,10 @@ export class Celula {
       await this.cancelar(ws, a);
     } else if (msg.t === "sair") {
       await this.sairDoEncontro(ws, a);
+    } else if (msg.t === "bloquear") {
+      await this.bloquear(ws, a, msg);
+    } else if (msg.t === "denunciar") {
+      await this.denunciar(ws, a, msg);
     }
   }
 
@@ -295,6 +313,14 @@ export class Celula {
     a.lim = { ...lim, entrarAte: agora + ENTRAR_INTERVALO_MS };
     this.guardar(ws, a);
     if (this.pend.has(msg.id)) return this.erro(ws, "inexistente"); // ainda sem confirmação da Conta
+    // Bloqueio (nos dois sentidos) com quem propôs ou com alguém que já está no encontro:
+    // o mesmo erro de um encontro que não existe, sem revelar o motivo.
+    const dono = this.donos.get(msg.id);
+    if (dono !== undefined && this.oculto(a.connId, dono)) return this.erro(ws, "inexistente");
+    for (const outro of this.ctx.getWebSockets()) {
+      const o = outro.deserializeAttachment();
+      if (o?.encId === msg.id && this.oculto(a.connId, o.uid)) return this.erro(ws, "inexistente");
+    }
     // A mesma pessoa não ocupa duas vagas (nem entra na própria proposta por outra conexão).
     for (const outro of this.ctx.getWebSockets()) {
       const o = outro.deserializeAttachment();
@@ -376,6 +402,9 @@ export class Celula {
       const a = ws.deserializeAttachment();
       if (this.expirou(a)) this.fechar(ws, "token expirado");
       else if (a?.encId && this.now() - (a.visto ?? this.now()) > SEM_SINAL_MS) this.fechar(ws, "sem sinal");
+      else if (a && this.now() - (this.bloq.get(a.connId)?.em ?? 0) > BLOQ_RENOVAR_MS) {
+        await this.carregarBloqueios(a.connId, a.uid); // pega bloqueios feitos por outra Celula
+      }
     }
     this.limparZumbis();
     await this.finalizar(); // expirações de proposta/encontro e quem saiu
@@ -411,6 +440,7 @@ export class Celula {
     this.ultimoEnvio.delete(a.connId);
     this.pendentes.delete(a.connId);
     this.cache.delete(a.connId);
+    this.bloq.delete(a.connId);
     this.mudou();
   }
 
@@ -426,6 +456,7 @@ export class Celula {
       this.ultimoEnvio.delete(a.connId);
       this.pendentes.delete(a.connId);
       this.cache.delete(a.connId);
+      this.bloq.delete(a.connId);
     }
     try {
       ws.close(1000, motivo);
@@ -451,10 +482,14 @@ export class Celula {
   }
 
   // Algo mudou: todos que estão procurando (ou num encontro) precisam de dados novos (respeitando os 2 s).
-  mudou() {
+  // `imediato`: ignora o intervalo de 2 s (bloqueio tem de valer na hora).
+  mudou(imediato = false) {
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a?.presence || a?.encId) this.pendentes.add(a.connId);
+      if (a?.presence || a?.encId) {
+        this.pendentes.add(a.connId);
+        if (imediato) this.ultimoEnvio.delete(a.connId);
+      }
     }
     this.despachar();
   }
@@ -472,7 +507,7 @@ export class Celula {
         const a = ws.deserializeAttachment();
         if (a.presence) {
           this.presence
-            .neighborsFor(connId)
+            .neighborsFor(connId, (uid) => this.oculto(connId, uid))
             .then((lista) => {
               const w = this.socketDe(connId);
               if (w) this.enviar(w, lista);
@@ -505,6 +540,8 @@ export class Celula {
     for (const enc of this.enc.encontros.values()) {
       const livres = enc.vagas - enc.participantes.size;
       if (livres <= 0 || a.encId === enc.id || this.pend.has(enc.id)) continue;
+      const dono = this.donos.get(enc.id);
+      if (dono !== undefined && this.oculto(connId, dono)) continue; // bloqueio nos dois sentidos
       if (distanceM(eu.pos, enc.ponto) > raioM) continue;
       lista.push({
         id: enc.id,
@@ -604,12 +641,142 @@ export class Celula {
   // Gancho da Tarefa 19 (ruling R5): aqui entrarão os pares (sessão -> uid dos outros) por 24 h.
   aoFimDoEncontro(/* fim, uids */) {}
 
+  // --- bloqueios e denúncias ---
+
+  // Relê da Conta quem esta conexão bloqueou ou quem a bloqueou. Em falha mantém o que já havia
+  // (ou nada: falha fechada, ninguém aparece até conseguir).
+  async carregarBloqueios(connId, uid) {
+    try {
+      const { status, corpo } = await this.chamarConta(uid, "/bloqueios", "GET");
+      if (status !== 200 || corpo.ok !== true) throw new Error(`status ${status}`);
+      const novo = new Set([...(corpo.bloqueados ?? []), ...(corpo.bloqueadoPor ?? [])]);
+      // Não perde bloqueios aplicados na memória enquanto a consulta estava em andamento.
+      for (const u of this.bloq.get(connId)?.uids ?? []) novo.add(u);
+      this.bloq.set(connId, { uids: novo, em: this.now() });
+    } catch (e) {
+      console.error("falha ao consultar bloqueios", e?.message);
+    }
+  }
+
+  // true se `uid` não pode ser visto por esta conexão (bloqueio nos dois sentidos) ou se a lista
+  // ainda não foi carregada.
+  oculto(connId, uid) {
+    const b = this.bloq.get(connId);
+    return !b || b.uids.has(uid);
+  }
+
+  // sessão opaca (de presença ou de encontro) -> { uid, pos real } ou null. O uid nunca sai daqui.
+  resolverSessao(sessao) {
+    let achado = null;
+    for (const o of this.presence.pessoas.values()) {
+      if (o.sessao === sessao) achado = { uid: o.uid, pos: o.pos };
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      const o = ws.deserializeAttachment();
+      if (!o?.encSessao || o.encSessao !== sessao || !o.encId) continue;
+      const p = this.enc.encontros.get(o.encId)?.participantes.get(sessao)?.pos ?? null;
+      achado = { uid: o.uid, pos: achado?.pos ?? (p ? { lat: p.lat, lon: p.lon } : null) };
+    }
+    return achado;
+  }
+
+  async bloquear(ws, a, msg) {
+    const alvo = this.resolverSessao(msg.sessao);
+    if (!alvo) return this.erro(ws, "inexistente"); // desconhecida ou de outra Celula
+    if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
+    const [eu, ele] = [encodeURIComponent(a.uid), encodeURIComponent(alvo.uid)];
+    try {
+      const r = await this.chamarConta(a.uid, `/bloquear?uid=${ele}&sentido=bloqueou`);
+      if (r.status === 409 && r.corpo.erro === "limite") return this.erro(ws, "limite", { max: MAX_BLOQUEADOS });
+      if (r.status !== 200 || r.corpo.ok !== true) throw new Error(`status ${r.status}`);
+    } catch (e) {
+      console.error("falha ao gravar bloqueio", e?.message);
+      return this.erro(ws, "indisponivel");
+    }
+    // Vale já aqui, nas conexões desta Celula, nos dois sentidos.
+    this.aplicarBloqueio(a.uid, alvo.uid);
+    await this.expulsarDoMesmoEncontro(a.uid, alvo.uid);
+    this.mudou(true);
+    let simetrico = false;
+    try {
+      const r = await this.chamarConta(alvo.uid, `/bloquear?uid=${eu}&sentido=bloqueadoPor`);
+      simetrico = r.status === 200 && r.corpo.ok === true;
+    } catch (e) {
+      console.error("falha ao gravar bloqueio do outro lado", e?.message);
+    }
+    if (!simetrico) return this.erro(ws, "indisponivel"); // repetir é seguro (idempotente)
+    this.ok(ws, "bloqueio");
+  }
+
+  aplicarBloqueio(uidA, uidB) {
+    for (const ws of this.ctx.getWebSockets()) {
+      const o = ws.deserializeAttachment();
+      const b = o && this.bloq.get(o.connId);
+      if (!b) continue;
+      if (o.uid === uidA) b.uids.add(uidB);
+      else if (o.uid === uidB) b.uids.add(uidA);
+    }
+  }
+
+  // Quem estava no mesmo encontro que a pessoa bloqueada sai dele: o bloqueado, ou quem bloqueou
+  // se o bloqueado é o dono do encontro.
+  async expulsarDoMesmoEncontro(uidA, uidB) {
+    const sockets = this.ctx.getWebSockets().map((ws) => ({ ws, a: ws.deserializeAttachment() }));
+    for (const x of sockets.filter((s) => s.a?.uid === uidA && s.a.encId)) {
+      for (const y of sockets.filter((s) => s.a?.uid === uidB && s.a.encId === x.a.encId)) {
+        const sai = this.donos.get(x.a.encId) === uidB ? x : y;
+        await this.sairDoEncontro(sai.ws, sai.ws.deserializeAttachment());
+      }
+    }
+  }
+
+  async denunciar(ws, a, msg) {
+    const alvo = this.resolverSessao(msg.sessao);
+    if (!alvo) return this.erro(ws, "inexistente");
+    if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
+    const ele = encodeURIComponent(alvo.uid);
+    let reservou = false;
+    try {
+      // 1) reserva a cota do denunciante (5 por hora; repetir o mesmo alvo em 24 h não gasta cota)
+      const c = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}`);
+      if (c.status === 409 && c.corpo.erro === "espera") return this.erro(ws, "espera", { restanteMs: c.corpo.restanteMs });
+      if (c.status !== 200 || c.corpo.ok !== true) throw new Error(`status ${c.status}`);
+      if (c.corpo.duplicada) return this.ok(ws, "denuncia");
+      reservou = true;
+      // 2) grava na Conta do denunciado, com a posição já desviada (200 a 400 m)
+      let q = "";
+      if (alvo.pos) {
+        const dia = new Date(this.now()).toISOString().slice(0, 10);
+        const aprox = applyOffset(alvo.pos.lat, alvo.pos.lon, await fuzzOffset(alvo.uid, dia, this.env.NEARBY_SECRET));
+        q = `&lat=${aprox.lat}&lon=${aprox.lon}`;
+      }
+      const d = await this.chamarConta(
+        alvo.uid,
+        `/denunciar?por=${encodeURIComponent(a.uid)}&motivo=${encodeURIComponent(msg.motivo)}${q}`,
+      );
+      if (d.status !== 200 || d.corpo.ok !== true) throw new Error(`status ${d.status}`);
+    } catch (e) {
+      console.error("falha ao registrar denúncia", e?.message);
+      if (reservou) await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&desfazer=1`).catch(() => {}); // devolve a cota
+      return this.erro(ws, "indisponivel");
+    }
+    this.ok(ws, "denuncia");
+  }
+
+  ok(ws, ref) {
+    try {
+      ws.send(JSON.stringify({ t: "ok", ref }));
+    } catch {
+      // socket já caiu
+    }
+  }
+
   // --- Conta (por uid) ---
 
-  async chamarConta(uid, caminho) {
+  async chamarConta(uid, caminho, method = "POST") {
     const ns = this.env.CONTA;
     if (!ns) throw new Error("binding CONTA ausente");
-    const resp = await ns.get(ns.idFromName(uid)).fetch(`https://conta${caminho}`, { method: "POST" });
+    const resp = await ns.get(ns.idFromName(uid)).fetch(`https://conta${caminho}`, { method });
     return { status: resp.status, corpo: await resp.json() };
   }
 

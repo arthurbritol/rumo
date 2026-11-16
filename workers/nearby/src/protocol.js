@@ -42,6 +42,9 @@ const VALIDADORES = {
   cancelar: {},
   entrar: { id: idEncontro },
   sair: {},
+  // Segurança: o app só conhece o id opaco de sessão (o servidor resolve para o uid).
+  bloquear: { sessao: idEncontro },
+  denunciar: { sessao: idEncontro, motivo: daLista(["incomodo", "comportamento", "falso", "outro"]) },
 };
 
 const falha = (error) => ({ ok: false, error });

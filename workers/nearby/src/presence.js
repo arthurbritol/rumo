@@ -77,7 +77,8 @@ export class Presence {
   // Quem está no raio de quem pergunta, com posição aproximada. O pertencimento compara a
   // posição REAL de quem pergunta com a posição APROXIMADA do alvo: senão, mexer a própria
   // posição e o raio revelaria a posição real do alvo por busca binária.
-  async neighborsFor(connId) {
+  // `oculta(uid)` (opcional): true para quem não deve aparecer (bloqueios, nos dois sentidos).
+  async neighborsFor(connId, oculta = null) {
     const eu = this.pessoas.get(connId);
     if (!eu || !eu.pos) return [];
     const agora = this.now();
@@ -87,6 +88,7 @@ export class Presence {
     const candidatos = [];
     for (const [id, o] of this.pessoas) {
       if (id === connId || !o.pos || o.visto < limite) continue;
+      if (oculta && oculta(o.uid)) continue;
       // Descarte grosseiro de quem está claramente longe (não vaza nada: só poupa trabalho).
       if (distanceM(eu.pos, o.pos) > raioM + MARGEM_DESVIO_M) continue;
       candidatos.push(o);
