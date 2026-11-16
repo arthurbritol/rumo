@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9, 11 e 12 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefas 13 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9 e 11 a 13 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefas 14 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
@@ -19,6 +19,7 @@ Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7
 | 9 | Serviço em primeiro plano, ViewModel, tela "procurando rolê", motos anônimas no mapa | `188eb44`, `393aa29`, `b85d855` | 24+ novos, suíte do app e `assembleDebug` verdes |
 | 11 | Máquina de estados dos encontros (`encounter.js`, lógica pura; falha fechada sem posição aproximada) | `769ceb7`, `66fafd0` | 21 de encontro (100 unitários no total) |
 | 12 | Encontros no servidor (`Celula` dona do encontro, `Conta` com cooldown, rota `enc`, quadrado canônico, limpeza de zumbis, limite de taxa) | `925a3a6`, `4d7eb84`, `7b1011c` | 113 unitários + 39 de integração |
+| 13 | App: propor, entrar e acompanhar o encontro (protocolo, `EtaCalculator`, ViewModel, camada `nearby-proposals`, cartões) | `3300be3`, `61373e5`, `cd61503`, `4b2f733`, `c359035` | suíte do sync-core e do app verdes, `assembleDebug` ok |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -77,3 +78,10 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 - Gancho `aoFimDoEncontro(f, uids)` precisa mudar na T19 (par sessão para uid).
 - Erros novos: `ja_em_encontro`, `indisponivel`, `ponto_invalido`; `espera` traz `restanteMs`; `sair` responde `fim` com motivo `saiu`.
 - `this.zumbis`/`this.sujo` não persistem (janela rara); `fechamentos` sem teto global.
+
+## Pendências registradas na Tarefa 13 (decididas, não corrigidas)
+
+- Carência de reconexão do proponente: qualquer queda do proponente cancela o encontro de todos (servidor) e aplica espera de 5 min; tratar na T14/T23.
+- Moto do participante duplicada (vizinho desviado + participante), sem rumo; vazamento do desvio diário (mesmo item da T12).
+- `cancelar` após 15 s sem resposta da Conta pode punir sem culpa; desligar a busca durante o encontro não pede confirmação.
+- Nada visto em tela: cartões, posições (200, 220, 430 dp), pinos "N de M", gesto de segurar no mapa.

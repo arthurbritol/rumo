@@ -243,8 +243,8 @@ Cada linha tem um teste na tarefa dona do código.
 - Entrar: tocar na proposta mostra o cartão (ritmo, distância, parada, vagas livres) com "Entrar". Ao entrar, o app abre a conexão extra ao quadrado do encontro (ponto de atenção 4: sem duplicar proposta nem vizinho).
 - Tela de encontro: ponto marcado, participantes (motos que se movem) e, por pessoa, "X km · Y min"; envia `posicao` a cada 10 s com `distKm` e `etaMin` próprios.
 
-- [ ] **Passo 1: testes**: `EtaCalculator` usa a rota quando existe e a reta de 40 km/h quando o roteador falha (ex.: 20 km em reta → 30 min); reducer de `Encontro` atualiza participantes e fecha em `Fim`; `NearbyViewModel` com cliente falso: `proporPonto` envia `proposta`; `entrar(id)` abre conexão extra uma só vez; `Erro cheio` mostra "Esse encontro já está cheio"; sem mudança da lista de vizinhos ao entrar.
-- [ ] **Passos 2 a 4:** implementar, suíte verde, commit.
+- [x] **Passo 1: testes**: `EtaCalculator` usa a rota quando existe e a reta de 40 km/h quando o roteador falha (ex.: 20 km em reta → 30 min); reducer de `Encontro` atualiza participantes e fecha em `Fim`; `NearbyViewModel` com cliente falso: `proporPonto` envia `proposta`; `entrar(id)` abre conexão extra uma só vez; `Erro cheio` mostra "Esse encontro já está cheio"; sem mudança da lista de vizinhos ao entrar.
+- [x] **Passos 2 a 4:** implementar, suíte verde, commit.
 
 ### Tarefa 14: Publicar a Etapa 2
 
