@@ -36,6 +36,10 @@ const PISO_POSICAO_MS = 10_000; // piso entre posições aceitas (conexão sem P
 const VEL_MAX_KMH = 250;
 const SALTO_MAX_M = 50_000;
 const SALTO_JANELA_MS = 60_000;
+const PROPOSTA_INTERVALO_MS = 5000; // no máximo 1 proposta a cada 5 s por conexão
+const ENTRAR_INTERVALO_MS = 2000; // no máximo 1 entrar a cada 2 s por conexão
+const RECUSA_CURTA_MS = 5000; // depois de ja_tem_proposta/indisponivel, nem pergunta à Conta por 5 s
+const MAX_TENTATIVAS_FECHAR = 20;
 const CELL_RE = /^-?\d+:-?\d+$/;
 
 // Id aleatório de 16 hex que identifica a conexão dentro de um encontro.
@@ -58,9 +62,18 @@ export class Celula {
     this.enc = new Encounters({ now: () => this.now() });
     this.donos = new Map(); // id do encontro -> uid de quem propôs (só aqui dentro, nunca enviado)
     this.cache = new Map(); // connId -> { propostas, encontro }: último JSON enviado
+    this.pend = new Set(); // encontros criados mas ainda sem a resposta da Conta (invisíveis a todos)
+    this.fechamentos = []; // avisos de fim à Conta que falharam: [{ uid, motivo, id, tentativas }]
     ctx.blockConcurrencyWhile(async () => {
       const salvo = await ctx.storage.get("enc");
       if (salvo) this.importarEnc(salvo);
+      // Depois de reinício/deploy o estado voltou do storage, mas os sockets podem ter ido embora:
+      // quem não tem socket vivo sai agora; o alarme logo em seguida entrega os fins e fecha as Contas.
+      const mudou = this.limparZumbis();
+      const pendente = this.enc.encontros.size > 0 || this.enc.pendentes.length > 0 || this.fechamentos.length > 0;
+      if (pendente && (mudou || (await ctx.storage.getAlarm()) === null)) {
+        await ctx.storage.setAlarm(this.now() + (mudou ? 1000 : ALARME_MS));
+      }
     });
     // Depois de acordar da hibernação: reconstrói a presença dos anexos.
     for (const ws of ctx.getWebSockets()) {
@@ -89,8 +102,9 @@ export class Celula {
       presence: null,
       cell: cell !== null && CELL_RE.test(cell) ? cell : null,
       enc, // encontro a que esta conexão extra se destina (ou null)
-      encSessao: novaSessao(),
+      encSessao: null, // id opaco novo a cada propor/entrar; vale só enquanto encId existe
       encId: null, // encontro em que a conexão está agora
+      lim: null, // limites de taxa e última recusa da Conta (propostaAte, entrarAte, recusaAte, recusaCodigo)
       visto: this.now(),
       ultima: null, // última posição aceita (conexão sem Presence)
     });
@@ -112,10 +126,6 @@ export class Celula {
     const r = parseClientMessage(mensagem);
     if (!r.ok) return this.erro(ws, "mensagem_invalida");
     const msg = r.msg;
-
-    // Sinal de vida de quem está num encontro (para sumir depois de 2 min sem mensagem).
-    a.visto = this.now();
-    if (a.encId) this.guardar(ws, a);
 
     if (msg.t === "procurar") {
       this.presence.join(a.connId, a.uid, msg);
@@ -159,6 +169,7 @@ export class Celula {
     } else {
       return this.erro(ws, "nao_procurando");
     }
+    if (a.encId) a.visto = this.now(); // só posição aceita conta como sinal de vida no encontro
     this.guardar(ws, a);
     if (a.encId) {
       await this.posicaoNoEncontro(a, msg.lat, msg.lon, msg.etaMin);
@@ -192,74 +203,115 @@ export class Celula {
     const dia = new Date(this.now()).toISOString().slice(0, 10);
     const off = await fuzzOffset(a.uid, dia, this.env.NEARBY_SECRET);
     const aprox = applyOffset(lat, lon, off);
+    const antes = enc.participantes.get(a.encSessao)?.chegou;
     try {
       this.enc.position(a.encSessao, a.encId, { lat, lon, distKm, etaMin: etaMin ?? null, aprox });
     } catch {
       return; // o encontro acabou ou a pessoa saiu durante a espera
     }
-    await this.salvarEnc();
+    // Posições ficam só em memória (não regravam o blob a cada 10 s); só a chegada é mudança de
+    // estrutura. Se o DO reiniciar, o próximo `posicao` de cada pessoa repõe a posição.
+    if (enc.participantes.get(a.encSessao)?.chegou !== antes) await this.salvarEnc();
   }
 
   async proposta(ws, a, msg) {
     // Só o quadrado do ponto marcado é dono do encontro.
-    if (!a.cell || cellId(msg.lat, msg.lon) !== a.cell) return this.erro(ws, "mensagem_invalida");
+    if (!a.cell || cellId(msg.lat, msg.lon) !== a.cell) return this.erro(ws, "ponto_invalido");
     const eu = this.presence.pessoas.get(a.connId);
     if (!eu) return this.erro(ws, "nao_procurando"); // a proposta leva as preferências de quem procura
-    if (a.encId) return this.erro(ws, "ja_tem_proposta");
+    if (a.encId) return this.erro(ws, this.donos.get(a.encId) === a.uid ? "ja_tem_proposta" : "ja_em_encontro");
 
-    const ab = await this.contaAbrir(a.uid);
-    if (!ab.ok) return this.erro(ws, ab.codigo, ab.extra);
-
-    // Durante o await outros eventos podem ter rodado: confere de novo antes de criar.
-    const a2 = ws.deserializeAttachment();
-    const eu2 = this.presence.pessoas.get(a.connId);
-    let id = null;
-    if (a2 && !a2.encId && eu2) {
-      try {
-        ({ id } = this.enc.propose(
-          a2.encSessao,
-          { lat: msg.lat, lon: msg.lon },
-          msg.vagas,
-          { ritmo: eu2.rolê.ritmo, distancia: eu2.rolê.distancia, parada: eu2.rolê.parada },
-        ));
-      } catch {
-        id = null;
-      }
+    // Sem chamar a Conta: recusa recente guardada na conexão e no máximo 1 proposta a cada 5 s.
+    const agora = this.now();
+    const lim = a.lim ?? {};
+    if (agora < (lim.recusaAte ?? 0)) {
+      return this.erro(ws, lim.recusaCodigo, lim.recusaCodigo === "espera" ? { restanteMs: lim.recusaAte - agora } : {});
     }
-    if (id === null) {
-      await this.contaFechar(a.uid, "falha");
+    if (agora < (lim.propostaAte ?? 0)) return this.erro(ws, "espera", { restanteMs: lim.propostaAte - agora });
+
+    // O encontro nasce já (síncrono, com a sessão nova) mas fica invisível até a Conta responder.
+    const sessao = novaSessao();
+    let id;
+    try {
+      ({ id } = this.enc.propose(sessao, { lat: msg.lat, lon: msg.lon }, msg.vagas, {
+        ritmo: eu.rolê.ritmo,
+        distancia: eu.rolê.distancia,
+        parada: eu.rolê.parada,
+      }));
+    } catch {
       return this.erro(ws, "ja_tem_proposta");
     }
+    this.pend.add(id);
     this.donos.set(id, a.uid);
-    a2.encId = id;
-    a2.visto = this.now();
-    this.guardar(ws, a2);
+    a.encSessao = sessao;
+    a.encId = id;
+    a.lim = { ...lim, propostaAte: agora + PROPOSTA_INTERVALO_MS };
+    this.guardar(ws, a);
+
+    const ab = await this.contaAbrir(a.uid, id);
+    this.pend.delete(id);
+    if (!ab.ok) {
+      try {
+        this.enc.cancel(sessao, id);
+      } catch {
+        // já tinha acabado
+      }
+      this.donos.delete(id);
+      const t = this.now();
+      const recusaAte = ab.codigo === "espera" ? t + (ab.extra?.restanteMs ?? 0) : t + RECUSA_CURTA_MS;
+      const at = ws.deserializeAttachment();
+      if (at?.encId === id) {
+        at.encId = null;
+        at.encSessao = null;
+        at.lim = { ...(at.lim ?? {}), recusaAte, recusaCodigo: ab.codigo };
+        this.guardar(ws, at);
+      }
+      return this.erro(ws, ab.codigo, ab.extra);
+    }
+    if (!this.enc.encontros.has(id)) {
+      // A conexão caiu durante a consulta: a Conta acabou de abrir uma proposta que não existe.
+      await this.tentarFechar(a.uid, "falha", id);
+      return;
+    }
+    const at = ws.deserializeAttachment();
+    at.visto = this.now();
+    this.guardar(ws, at);
     this.cache.delete(a.connId);
-    if (eu2.pos) await this.posicaoNoEncontro(a2, eu2.pos.lat, eu2.pos.lon, null);
+    if (eu.pos) await this.posicaoNoEncontro(at, eu.pos.lat, eu.pos.lon, null);
     await this.salvarEnc();
-    this.enviarEncontro(ws, a2);
+    this.enviarEncontro(ws, at);
     this.mudou();
   }
 
   async entrar(ws, a, msg) {
     if (a.enc && a.enc !== msg.id) return this.erro(ws, "inexistente");
     if (a.encId) return a.encId === msg.id ? undefined : this.erro(ws, "ja_em_encontro");
+    // No máximo 1 entrar a cada 2 s por conexão.
+    const agora = this.now();
+    const lim = a.lim ?? {};
+    if (agora < (lim.entrarAte ?? 0)) return this.erro(ws, "espera", { restanteMs: lim.entrarAte - agora });
+    a.lim = { ...lim, entrarAte: agora + ENTRAR_INTERVALO_MS };
+    this.guardar(ws, a);
+    if (this.pend.has(msg.id)) return this.erro(ws, "inexistente"); // ainda sem confirmação da Conta
     // A mesma pessoa não ocupa duas vagas (nem entra na própria proposta por outra conexão).
     for (const outro of this.ctx.getWebSockets()) {
       const o = outro.deserializeAttachment();
       if (o?.encId === msg.id && o.uid === a.uid) return this.erro(ws, "ja_em_encontro");
     }
+    const sessao = novaSessao();
     try {
-      this.enc.join(a.encSessao, msg.id); // síncrono: só uma pessoa pega a última vaga
+      this.enc.join(sessao, msg.id); // síncrono: só uma pessoa pega a última vaga
     } catch (e) {
       return this.erro(ws, e.message === "cheio" ? "cheio" : "inexistente");
     }
-    a.encId = msg.id;
-    a.visto = this.now();
-    this.guardar(ws, a);
+    const at = ws.deserializeAttachment();
+    at.encSessao = sessao;
+    at.encId = msg.id;
+    at.visto = this.now();
+    this.guardar(ws, at);
     this.cache.delete(a.connId);
     await this.salvarEnc();
-    this.enviarEncontro(ws, a);
+    this.enviarEncontro(ws, at);
     this.mudou();
   }
 
@@ -283,13 +335,17 @@ export class Celula {
     } catch {
       return this.erro(ws, "inexistente");
     }
-    await this.finalizar(); // se quem saiu propôs, o encontro acabou e todos recebem o fim
-    const atual = ws.deserializeAttachment();
-    if (atual?.encId === id) {
-      atual.encId = null;
-      this.guardar(ws, atual);
-    }
+    // Só quem saiu recebe "saiu"; se ele propôs, os demais recebem o fim "cancelado" no finalizar.
+    a.encId = null;
+    a.encSessao = null;
+    this.guardar(ws, a);
     this.cache.delete(a.connId);
+    try {
+      ws.send(JSON.stringify({ t: "fim", id, motivo: "saiu" }));
+    } catch {
+      // socket já caiu
+    }
+    await this.finalizar();
     await this.salvarEnc();
     this.mudou();
   }
@@ -319,9 +375,11 @@ export class Celula {
       if (this.expirou(a)) this.fechar(ws, "token expirado");
       else if (a?.encId && this.now() - (a.visto ?? this.now()) > SEM_SINAL_MS) this.fechar(ws, "sem sinal");
     }
+    this.limparZumbis();
     await this.finalizar(); // expirações de proposta/encontro e quem saiu
+    await this.tentarFechamentos();
     this.mudou();
-    if (this.ctx.getWebSockets().length > 0) {
+    if (this.ctx.getWebSockets().length > 0 || this.enc.encontros.size > 0 || this.fechamentos.length > 0) {
       await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
   }
@@ -438,7 +496,7 @@ export class Celula {
     const lista = [];
     for (const enc of this.enc.encontros.values()) {
       const livres = enc.vagas - enc.participantes.size;
-      if (livres <= 0 || a.encId === enc.id) continue;
+      if (livres <= 0 || a.encId === enc.id || this.pend.has(enc.id)) continue;
       if (distanceM(eu.pos, enc.ponto) > raioM) continue;
       lista.push({
         id: enc.id,
@@ -514,10 +572,16 @@ export class Celula {
       this.aoFimDoEncontro(f, uids);
       const dono = this.donos.get(f.id);
       this.donos.delete(f.id);
-      if (dono) contas.push(this.contaFechar(dono, f.motivo));
+      if (dono) {
+        contas.push(
+          this.tentarFechar(dono, f.motivo, f.id).then((ok) => {
+            if (!ok) this.fechamentos.push({ uid: dono, motivo: f.motivo, id: f.id, tentativas: 1 });
+          }),
+        );
+      }
     }
-    await this.salvarEnc();
     await Promise.all(contas);
+    await this.salvarEnc();
     this.mudou();
   }
 
@@ -533,25 +597,62 @@ export class Celula {
     return { status: resp.status, corpo: await resp.json() };
   }
 
-  // Falha fechada: sem resposta clara da Conta, a proposta não é aceita.
-  async contaAbrir(uid) {
+  // Falha fechada: sem resposta clara da Conta, a proposta não é aceita. Se a chamada falhar
+  // depois de a Conta talvez ter gravado, pede o fechamento "falha" (sem espera), melhor esforço.
+  async contaAbrir(uid, id) {
     try {
-      const { corpo } = await this.chamarConta(uid, "/abrir");
+      const { corpo } = await this.chamarConta(uid, `/abrir?enc=${id}`);
       if (corpo.ok === true) return { ok: true };
       if (corpo.erro === "ja_tem_proposta") return { ok: false, codigo: "ja_tem_proposta" };
       if (corpo.erro === "espera") return { ok: false, codigo: "espera", extra: { restanteMs: corpo.restanteMs } };
     } catch (e) {
       console.error("falha ao consultar a conta", e?.message);
     }
+    await this.tentarFechar(uid, "falha", id);
     return { ok: false, codigo: "indisponivel" };
   }
 
-  async contaFechar(uid, motivo) {
+  // Uma tentativa de fechar na Conta; true só com resposta 200.
+  async tentarFechar(uid, motivo, id) {
     try {
-      await this.chamarConta(uid, `/fechar?motivo=${encodeURIComponent(motivo)}`);
+      const { status } = await this.chamarConta(uid, `/fechar?motivo=${encodeURIComponent(motivo)}&enc=${id}`);
+      return status === 200;
     } catch (e) {
       console.error("falha ao fechar a conta", e?.message);
+      return false;
     }
+  }
+
+  // No alarme: repete os fechamentos que falharam; desiste depois de 20 tentativas.
+  async tentarFechamentos() {
+    if (this.fechamentos.length === 0) return;
+    const lista = this.fechamentos;
+    this.fechamentos = [];
+    for (const f of lista) {
+      if (await this.tentarFechar(f.uid, f.motivo, f.id)) continue;
+      if (f.tentativas + 1 < MAX_TENTATIVAS_FECHAR) this.fechamentos.push({ ...f, tentativas: f.tentativas + 1 });
+    }
+    await this.salvarEnc();
+  }
+
+  // Tira dos encontros toda sessão sem socket vivo. Devolve true se havia alguma.
+  limparZumbis() {
+    const vivas = new Set();
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment();
+      if (a?.encId && a.encSessao) vivas.add(a.encSessao);
+    }
+    let achou = false;
+    for (const enc of [...this.enc.encontros.values()]) {
+      if (this.pend.has(enc.id)) continue;
+      for (const sessao of [...enc.participantes.keys()]) {
+        if (!vivas.has(sessao)) {
+          this.enc.dropSession(sessao);
+          achou = true;
+        }
+      }
+    }
+    return achou;
   }
 
   // --- persistência do estado dos encontros ---
@@ -561,6 +662,7 @@ export class Celula {
       encontros: [...this.enc.encontros.values()].map((e) => ({ ...e, participantes: [...e.participantes] })),
       pendentes: this.enc.pendentes,
       donos: [...this.donos],
+      fechamentos: this.fechamentos,
     };
   }
 
@@ -570,6 +672,7 @@ export class Celula {
     }
     this.enc.pendentes = s.pendentes ?? [];
     this.donos = new Map(s.donos ?? []);
+    this.fechamentos = s.fechamentos ?? [];
   }
 
   async salvarEnc() {

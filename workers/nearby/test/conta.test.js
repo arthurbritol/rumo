@@ -77,3 +77,29 @@ test("pedidos inválidos: motivo desconhecido ou ausente, método e caminho erra
   assert.equal((await chamar("/outra")).status, 404);
   assert.deepEqual((await chamar("/abrir")).corpo, { ok: true }); // nada acima mexeu no estado
 });
+
+test("com id do encontro: fechar de outro id é ignorado e não fecha a proposta nova", async () => {
+  const { chamar } = nova();
+  const velho = "aaaaaaaaaaaaaaaa";
+  const novo = "bbbbbbbbbbbbbbbb";
+  await chamar(`/abrir?enc=${velho}`);
+  await chamar(`/fechar?motivo=cancelado&enc=${velho}`);
+  // fim da espera simulado: reabre com o id novo (espera ainda vale)
+  assert.equal((await chamar(`/abrir?enc=${novo}`)).corpo.erro, "espera");
+});
+
+test("fechar com id diferente do aberto (ou repetido) não fecha nem gera espera", async () => {
+  const { chamar, relogio } = nova();
+  const velho = "aaaaaaaaaaaaaaaa";
+  const novo = "bbbbbbbbbbbbbbbb";
+  await chamar(`/abrir?enc=${velho}`);
+  await chamar(`/fechar?motivo=chegaram&enc=${velho}`);
+  await chamar(`/abrir?enc=${novo}`);
+  const r = await chamar(`/fechar?motivo=cancelado&enc=${velho}`); // aviso atrasado da proposta velha
+  assert.equal(r.corpo.ignorado, true);
+  assert.equal((await chamar(`/abrir?enc=cccccccccccccccc`)).corpo.erro, "ja_tem_proposta"); // novo segue aberto
+  await chamar(`/fechar?motivo=falha&enc=${novo}`);
+  relogio.t += 1;
+  assert.deepEqual((await chamar("/abrir")).corpo, { ok: true }); // sem espera
+  assert.equal((await chamar("/fechar?motivo=cancelado&enc=xyz")).status, 400);
+});

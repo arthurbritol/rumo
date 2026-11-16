@@ -1,7 +1,7 @@
 // Integração dos encontros na Celula (Durable Object de verdade) e da Conta via binding CONTA.
 // Rodar com: npm run test:int
 import { describe, it, expect } from "vitest";
-import { env, runInDurableObject, evictDurableObject } from "cloudflare:test";
+import { env, runInDurableObject, runDurableObjectAlarm, evictDurableObject } from "cloudflare:test";
 import { Celula } from "../../src/celula.js";
 
 const ROLE = { t: "procurar", ritmo: "moderado", distancia: "50a150", parada: "cafe", raioKm: 5 };
@@ -119,10 +119,21 @@ describe("encontros na Celula", () => {
     expect(await esperar(() => tipo(b, "fim").some((m) => m.id === id && m.motivo === "cancelado"))).toBe(true);
     expect(await esperar(() => tipo(a, "fim").length === 1)).toBe(true);
 
-    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 3 });
-    expect(await esperar(() => erro(a, "espera"))).toBe(true);
-    const e = a.recebidas.find((m) => m.codigo === "espera");
+    // Nova conexão da mesma pessoa: a Conta responde espera; a repetição nem chega à Conta.
+    const a2 = await conectar(stub, uidA);
+    a2.enviar(ROLE);
+    let chamadas = 0;
+    await runInDurableObject(stub, (inst) => {
+      const orig = inst.chamarConta.bind(inst);
+      inst.chamarConta = (...args) => { chamadas++; return orig(...args); };
+    });
+    a2.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 3 });
+    expect(await esperar(() => erro(a2, "espera"))).toBe(true);
+    const e = a2.recebidas.find((m) => m.codigo === "espera");
     expect(e.restanteMs).toBeGreaterThan(290_000);
+    for (let i = 0; i < 5; i++) a2.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 3 });
+    expect(await esperar(() => a2.recebidas.filter((m) => m.codigo === "espera").length === 6)).toBe(true);
+    expect(chamadas).toBe(1);
     expect(JSON.stringify(b.recebidas)).not.toContain(uidA);
   });
 
@@ -144,9 +155,9 @@ describe("encontros na Celula", () => {
     const a = await conectar(stub, unico("uid-a"));
     a.enviar(ROLE);
     a.enviar({ t: "proposta", lat: BASE.lat + 2, lon: BASE.lon, vagas: 3 });
-    expect(await esperar(() => erro(a, "mensagem_invalida"))).toBe(true);
+    expect(await esperar(() => erro(a, "ponto_invalido"))).toBe(true);
     a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 9 });
-    expect(await esperar(() => a.recebidas.filter((m) => m.codigo === "mensagem_invalida").length === 2)).toBe(true);
+    expect(await esperar(() => erro(a, "mensagem_invalida"))).toBe(true);
 
     const solto = await conectar(stub, unico("uid-b"));
     solto.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 3 });
@@ -165,11 +176,12 @@ describe("encontros na Celula", () => {
     c.enviar({ t: "sair" });
     expect(await esperar(() => c.recebidas.filter((m) => m.codigo === "inexistente").length === 3)).toBe(true);
     // Quem não propôs não cancela.
-    b.enviar({ t: "entrar", id });
-    expect(await esperar(() => ultimo(b, "encontro"))).toBeTruthy();
-    b.enviar({ t: "cancelar" });
-    expect(await esperar(() => b.recebidas.filter((m) => m.codigo === "inexistente").length === 2)).toBe(true);
-    expect(tipo(b, "fim").length).toBe(0);
+    const d = await conectar(stub, unico("uid-d"), { "x-rumo-enc": id });
+    d.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(d, "encontro"))).toBeTruthy();
+    d.enviar({ t: "cancelar" });
+    expect(await esperar(() => erro(d, "inexistente"))).toBe(true);
+    expect(tipo(d, "fim").length).toBe(0);
   });
 
   it("a mesma pessoa não ocupa duas vagas", async () => {
@@ -218,9 +230,13 @@ describe("encontros na Celula", () => {
     b.enviar({ t: "entrar", id });
     c.enviar({ t: "entrar", id });
     expect(await esperar(() => ultimo(a, "encontro")?.participantes.length === 3)).toBe(true);
+    const sessaoAntiga = ultimo(b, "encontro").eu;
     b.enviar({ t: "sair" });
+    expect(await esperar(() => tipo(b, "fim").some((m) => m.id === id && m.motivo === "saiu"))).toBe(true);
     expect(await esperar(() => ultimo(a, "encontro")?.participantes.length === 2, 5000)).toBe(true);
     expect(tipo(a, "fim").length).toBe(0);
+    expect(tipo(c, "fim").length).toBe(0);
+    expect(sessaoAntiga).toMatch(/^[0-9a-f]{16}$/);
     a.enviar({ t: "sair" });
     expect(await esperar(() => tipo(c, "fim").some((m) => m.motivo === "cancelado"))).toBe(true);
   });
@@ -309,5 +325,134 @@ describe("encontros na Celula", () => {
     // chegaram não gera espera
     a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 2 });
     expect(await esperar(() => ultimo(a, "encontro"))).toBeTruthy();
+  });
+
+  it("sessão do encontro é nova a cada entrada (não vale a da entrada anterior)", async () => {
+    const stub = novaCelula();
+    const { id } = await proporComA(stub, unico("uid-a"), { vagas: 3 });
+    const b = await conectar(stub, unico("uid-b"), { "x-rumo-enc": id });
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(b, "encontro"))).toBeTruthy();
+    const primeira = ultimo(b, "encontro").eu;
+    b.enviar({ t: "sair" });
+    expect(await esperar(() => tipo(b, "fim").length === 1)).toBe(true);
+    await dormir(2100); // limite de 1 entrar a cada 2 s
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => tipo(b, "encontro").some((m) => m.eu !== primeira))).toBe(true);
+  }, 15000);
+
+  it("entrar em excesso (menos de 2 s) recebe espera", async () => {
+    const stub = novaCelula();
+    const c = await conectar(stub, unico("uid-c"));
+    c.enviar({ t: "entrar", id: "ffffffffffffffff" });
+    c.enviar({ t: "entrar", id: "eeeeeeeeeeeeeeee" });
+    expect(await esperar(() => erro(c, "espera"))).toBe(true);
+    expect(c.recebidas.filter((m) => m.codigo === "inexistente").length).toBe(1);
+  });
+
+  it("encontros zumbis: depois de reinício sem sockets, o alarme os remove e libera a Conta com espera", async () => {
+    const stub = novaCelula();
+    const uid = unico("uid-fantasma");
+    const conta = env.CONTA.get(env.CONTA.idFromName(uid));
+    // Estado gravado como se um socket já tivesse existido, mas nenhum está vivo agora.
+    const id = await runInDurableObject(stub, async (inst) => {
+      const { id: real } = inst.enc.propose("sessaofantasma01", BASE, 2, { ritmo: "moderado", distancia: "50a150", parada: "cafe" });
+      inst.donos.set(real, uid);
+      await inst.salvarEnc();
+      return real;
+    });
+    expect((await (await conta.fetch(`https://conta/abrir?enc=${id}`, { method: "POST" })).json()).ok).toBe(true);
+    await evictDurableObject(stub);
+    // Acorda: o construtor remove a sessão sem socket e arma o alarme.
+    const n = await runInDurableObject(stub, (inst) => ({ encontros: inst.enc.encontros.size, pend: inst.enc.pendentes.length }));
+    expect(n).toEqual({ encontros: 0, pend: 1 });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    const r = await conta.fetch("https://conta/abrir", { method: "POST" });
+    expect((await r.json()).erro).toBe("espera");
+    const resto = await runInDurableObject(stub, (inst) => inst.enc.pendentes.length + inst.donos.size);
+    expect(resto).toBe(0);
+  });
+
+  it("o alarme remove zumbis sem socket e mantém o encontro da conexão viva", async () => {
+    const stub = novaCelula();
+    const { a } = await proporComA(stub, unico("uid-a"));
+    await runInDurableObject(stub, async (inst) => {
+      inst.enc.propose("sessaofantasma02", { lat: BASE.lat + 0.001, lon: BASE.lon }, 2, { ritmo: "moderado", distancia: "50a150", parada: "cafe" });
+      await inst.alarm();
+      expect(inst.enc.encontros.size).toBe(1); // só o da conexão viva
+    });
+    expect(a.fechou).toBe(false);
+  });
+
+  it("fechar da Conta que falha é repetido no alarme", async () => {
+    const stub = novaCelula();
+    const uid = unico("uid-a");
+    const { a } = await proporComA(stub, uid);
+    await runInDurableObject(stub, (inst) => {
+      inst.chamarConta = async () => { throw new Error("conta fora do ar"); };
+    });
+    a.enviar({ t: "cancelar" });
+    expect(await esperar(() => tipo(a, "fim").length === 1)).toBe(true);
+    const falhas = await runInDurableObject(stub, (inst) => inst.fechamentos.length);
+    expect(falhas).toBe(1);
+    await runInDurableObject(stub, async (inst) => {
+      delete inst.chamarConta; // volta ao método real
+      await inst.alarm();
+      expect(inst.fechamentos.length).toBe(0);
+    });
+    const conta = env.CONTA.get(env.CONTA.idFromName(uid));
+    const r = await conta.fetch("https://conta/abrir", { method: "POST" });
+    expect((await r.json()).erro).toBe("espera"); // cancelado gerou espera mesmo com o atraso
+  });
+
+  it("Conta que falha ao abrir: indisponivel, sem encontro criado e sem espera", async () => {
+    const stub = novaCelula();
+    const uid = unico("uid-a");
+    const a = await conectar(stub, uid);
+    a.enviar(ROLE);
+    await runInDurableObject(stub, (inst) => {
+      inst.chamarConta = async () => { throw new Error("fora do ar"); };
+    });
+    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 2 });
+    expect(await esperar(() => erro(a, "indisponivel"))).toBe(true);
+    const n = await runInDurableObject(stub, (inst) => inst.enc.encontros.size);
+    expect(n).toBe(0);
+    const r = await env.CONTA.get(env.CONTA.idFromName(uid)).fetch("https://conta/abrir", { method: "POST" });
+    expect((await r.json()).ok).toBe(true);
+  });
+
+  it("posições não regravam o estado dos encontros no storage", async () => {
+    const stub = novaCelula();
+    const { a, id } = await proporComA(stub, unico("uid-a"), { vagas: 3, pos: { lat: BASE.lat + 5000 * M, lon: BASE.lon } });
+    const b = await conectar(stub, unico("uid-b"), { "x-rumo-enc": id });
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(b, "encontro"))).toBeTruthy();
+    await runInDurableObject(stub, (inst) => {
+      inst.escritas = 0;
+      const orig = inst.salvarEnc.bind(inst);
+      inst.salvarEnc = () => { inst.escritas++; return orig(); };
+    });
+    b.enviar(posMsg(BASE.lat + 4000 * M, BASE.lon));
+    expect(await esperar(() => participante(a, ultimo(b, "encontro").eu)?.lat != null)).toBe(true);
+    expect(await esperar(() => participante(a, ultimo(a, "encontro").participantes.find((p) => p.sessao !== ultimo(a, "encontro").eu)?.sessao)?.lat != null)).toBe(true);
+    expect(await runInDurableObject(stub, (inst) => inst.escritas)).toBe(0);
+  });
+
+  it("mensagem que dá inexistente não conta como sinal de vida", async () => {
+    const stub = novaCelula();
+    const { id } = await proporComA(stub, unico("uid-a"), { vagas: 3 });
+    const b = await conectar(stub, unico("uid-b"), { "x-rumo-enc": id });
+    const antes = await runInDurableObject(stub, (inst) => {
+      const ws = inst.ctx.getWebSockets().find((w) => w.deserializeAttachment().enc === id);
+      return ws.deserializeAttachment().visto;
+    });
+    await runInDurableObject(stub, (inst) => { const t = Date.now() + 100_000; inst.now = () => t; });
+    b.enviar({ t: "cancelar" });
+    expect(await esperar(() => erro(b, "inexistente"))).toBe(true);
+    const visto = await runInDurableObject(stub, (inst) => {
+      const ws = inst.ctx.getWebSockets().find((w) => w.deserializeAttachment().enc === id);
+      return ws.deserializeAttachment().visto;
+    });
+    expect(visto).toBe(antes);
   });
 });
