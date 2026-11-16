@@ -63,13 +63,15 @@ export class Celula {
     this.donos = new Map(); // id do encontro -> uid de quem propôs (só aqui dentro, nunca enviado)
     this.cache = new Map(); // connId -> { propostas, encontro }: último JSON enviado
     this.pend = new Set(); // encontros criados mas ainda sem a resposta da Conta (invisíveis a todos)
+    this.zumbis = new Set(); // encontros desfeitos por limparZumbis: a Conta fecha com "falha" (sem espera)
+    this.sujo = false; // estrutura mudou fora de um fim (ex.: saiu um não-proponente): precisa gravar
     this.fechamentos = []; // avisos de fim à Conta que falharam: [{ uid, motivo, id, tentativas }]
     ctx.blockConcurrencyWhile(async () => {
       const salvo = await ctx.storage.get("enc");
       if (salvo) this.importarEnc(salvo);
       // Depois de reinício/deploy o estado voltou do storage, mas os sockets podem ter ido embora:
       // quem não tem socket vivo sai agora; o alarme logo em seguida entrega os fins e fecha as Contas.
-      const mudou = this.limparZumbis();
+      const mudou = this.limparZumbis(true);
       const pendente = this.enc.encontros.size > 0 || this.enc.pendentes.length > 0 || this.fechamentos.length > 0;
       if (pendente && (mudou || (await ctx.storage.getAlarm()) === null)) {
         await ctx.storage.setAlarm(this.now() + (mudou ? 1000 : ALARME_MS));
@@ -270,7 +272,7 @@ export class Celula {
     }
     if (!this.enc.encontros.has(id)) {
       // A conexão caiu durante a consulta: a Conta acabou de abrir uma proposta que não existe.
-      await this.tentarFechar(a.uid, "falha", id);
+      await this.fecharOuEnfileirar(a.uid, "falha", id);
       return;
     }
     const at = ws.deserializeAttachment();
@@ -402,7 +404,10 @@ export class Celula {
     const a = ws.deserializeAttachment();
     if (!a) return;
     this.presence.leave(a.connId);
-    if (a.encSessao) this.enc.dropSession(a.encSessao);
+    if (a.encSessao) {
+      this.enc.dropSession(a.encSessao);
+      this.sujo = true;
+    }
     this.ultimoEnvio.delete(a.connId);
     this.pendentes.delete(a.connId);
     this.cache.delete(a.connId);
@@ -414,7 +419,10 @@ export class Celula {
     const a = ws.deserializeAttachment();
     if (a) {
       this.presence.leave(a.connId);
-      if (a.encSessao) this.enc.dropSession(a.encSessao);
+      if (a.encSessao) {
+        this.enc.dropSession(a.encSessao);
+        this.sujo = true;
+      }
       this.ultimoEnvio.delete(a.connId);
       this.pendentes.delete(a.connId);
       this.cache.delete(a.connId);
@@ -525,7 +533,7 @@ export class Celula {
   }
 
   enviarEncontro(ws, a) {
-    if (!a.encId) return;
+    if (!a.encId || this.pend.has(a.encId)) return; // pendente: ainda sem resposta da Conta
     let msg;
     try {
       msg = this.visaoDoEncontro(a);
@@ -552,7 +560,14 @@ export class Celula {
   // quem propôs e grava o estado.
   async finalizar(extra = []) {
     const fins = [...extra, ...this.enc.tick()];
-    if (fins.length === 0) return;
+    if (fins.length === 0) {
+      if (this.sujo) {
+        this.sujo = false;
+        await this.salvarEnc();
+      }
+      return;
+    }
+    this.sujo = false;
     const contas = [];
     for (const f of fins) {
       const uids = [];
@@ -572,10 +587,11 @@ export class Celula {
       this.aoFimDoEncontro(f, uids);
       const dono = this.donos.get(f.id);
       this.donos.delete(f.id);
+      const motivoConta = this.zumbis.delete(f.id) ? "falha" : f.motivo; // reinício não pune ninguém
       if (dono) {
         contas.push(
-          this.tentarFechar(dono, f.motivo, f.id).then((ok) => {
-            if (!ok) this.fechamentos.push({ uid: dono, motivo: f.motivo, id: f.id, tentativas: 1 });
+          this.tentarFechar(dono, motivoConta, f.id).then((ok) => {
+            if (!ok) this.fechamentos.push({ uid: dono, motivo: motivoConta, id: f.id, tentativas: 1 });
           }),
         );
       }
@@ -608,8 +624,15 @@ export class Celula {
     } catch (e) {
       console.error("falha ao consultar a conta", e?.message);
     }
-    await this.tentarFechar(uid, "falha", id);
+    await this.fecharOuEnfileirar(uid, "falha", id);
     return { ok: false, codigo: "indisponivel" };
+  }
+
+  // Tenta fechar; se falhar, entra na fila que o alarme repete.
+  async fecharOuEnfileirar(uid, motivo, id) {
+    if (await this.tentarFechar(uid, motivo, id)) return;
+    this.fechamentos.push({ uid, motivo, id, tentativas: 1 });
+    await this.salvarEnc();
   }
 
   // Uma tentativa de fechar na Conta; true só com resposta 200.
@@ -636,7 +659,8 @@ export class Celula {
   }
 
   // Tira dos encontros toda sessão sem socket vivo. Devolve true se havia alguma.
-  limparZumbis() {
+  // `preservar` (reconstrução depois de reinício): não reinicia o prazo de expiração da proposta.
+  limparZumbis(preservar = false) {
     const vivas = new Set();
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
@@ -645,11 +669,18 @@ export class Celula {
     let achou = false;
     for (const enc of [...this.enc.encontros.values()]) {
       if (this.pend.has(enc.id)) continue;
+      const criadoEm = enc.criadoEm;
       for (const sessao of [...enc.participantes.keys()]) {
         if (!vivas.has(sessao)) {
           this.enc.dropSession(sessao);
           achou = true;
+          this.sujo = true;
         }
+      }
+      if (this.enc.encontros.has(enc.id)) {
+        if (preservar) enc.criadoEm = criadoEm;
+      } else if (achou) {
+        this.zumbis.add(enc.id);
       }
     }
     return achou;

@@ -350,7 +350,7 @@ describe("encontros na Celula", () => {
     expect(c.recebidas.filter((m) => m.codigo === "inexistente").length).toBe(1);
   });
 
-  it("encontros zumbis: depois de reinício sem sockets, o alarme os remove e libera a Conta com espera", async () => {
+  it("encontros zumbis: depois de reinício sem sockets, o alarme os remove e libera a Conta sem espera", async () => {
     const stub = novaCelula();
     const uid = unico("uid-fantasma");
     const conta = env.CONTA.get(env.CONTA.idFromName(uid));
@@ -367,8 +367,9 @@ describe("encontros na Celula", () => {
     const n = await runInDurableObject(stub, (inst) => ({ encontros: inst.enc.encontros.size, pend: inst.enc.pendentes.length }));
     expect(n).toEqual({ encontros: 0, pend: 1 });
     expect(await runDurableObjectAlarm(stub)).toBe(true);
+    // Reinício não pune: a Conta fecha com "falha" (sem espera) e já aceita nova proposta.
     const r = await conta.fetch("https://conta/abrir", { method: "POST" });
-    expect((await r.json()).erro).toBe("espera");
+    expect((await r.json()).ok).toBe(true);
     const resto = await runInDurableObject(stub, (inst) => inst.enc.pendentes.length + inst.donos.size);
     expect(resto).toBe(0);
   });
@@ -454,5 +455,61 @@ describe("encontros na Celula", () => {
       return ws.deserializeAttachment().visto;
     });
     expect(visto).toBe(antes);
+  });
+
+  it("proposta negada pela Conta nunca vaza encontro fantasma ao proponente", async () => {
+    const stub = novaCelula();
+    const a = await conectar(stub, unico("uid-a"));
+    a.enviar(ROLE);
+    a.enviar(posMsg(BASE.lat, BASE.lon));
+    const b = await conectar(stub, unico("uid-b"));
+    b.enviar(ROLE);
+    b.enviar(posMsg(BASE.lat + 1000 * M, BASE.lon));
+    await dormir(200);
+    await runInDurableObject(stub, (inst) => {
+      inst.chamarConta = async () => {
+        await dormir(2500); // dá tempo de uma difusão acontecer durante a consulta
+        return { status: 409, corpo: { ok: false, erro: "espera", restanteMs: 60_000 } };
+      };
+    });
+    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 2 });
+    await dormir(100);
+    await runInDurableObject(stub, (inst) => inst.mudou());
+    expect(await esperar(() => erro(a, "espera"), 6000)).toBe(true);
+    expect(tipo(a, "encontro").length).toBe(0);
+    expect(ultimo(b, "propostas")?.lista ?? []).toEqual([]);
+  }, 15000);
+
+  it("fechamento falha de tentativa única que não deu certo entra na fila do alarme", async () => {
+    const stub = novaCelula();
+    const uid = unico("uid-a");
+    const a = await conectar(stub, uid);
+    a.enviar(ROLE);
+    await runInDurableObject(stub, (inst) => {
+      inst.chamarConta = async (u, caminho) => {
+        if (caminho.startsWith("/abrir")) return { status: 500, corpo: {} };
+        throw new Error("fora do ar");
+      };
+    });
+    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 2 });
+    expect(await esperar(() => erro(a, "indisponivel"))).toBe(true);
+    const fila = await runInDurableObject(stub, (inst) => inst.fechamentos.map((f) => f.motivo));
+    expect(fila).toEqual(["falha"]);
+  });
+
+  it("saída de não-proponente grava o estado mesmo sem fim", async () => {
+    const stub = novaCelula();
+    const { id } = await proporComA(stub, unico("uid-a"), { vagas: 3 });
+    const b = await conectar(stub, unico("uid-b"), { "x-rumo-enc": id });
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(b, "encontro"))).toBeTruthy();
+    b.ws.close(1000, "tchau");
+    expect(await esperar(() => b.fechou)).toBe(true);
+    const salvo = await runInDurableObject(stub, async (inst, state) => {
+      await dormir(100);
+      const blob = await state.storage.get("enc");
+      return blob.encontros.find((e) => e.id === id).participantes.length;
+    });
+    expect(salvo).toBe(1);
   });
 });
