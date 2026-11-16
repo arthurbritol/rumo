@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9 e 11 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefas 12 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9, 11 e 12 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefas 13 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
@@ -18,6 +18,7 @@ Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7
 | 8 | Cliente WebSocket do app (OkHttp 5.4.0), `PositionThrottle`, `Backoff` | `b9e2080`, `5ecaa39` | 27 |
 | 9 | Serviço em primeiro plano, ViewModel, tela "procurando rolê", motos anônimas no mapa | `188eb44`, `393aa29`, `b85d855` | 24+ novos, suíte do app e `assembleDebug` verdes |
 | 11 | Máquina de estados dos encontros (`encounter.js`, lógica pura; falha fechada sem posição aproximada) | `769ceb7`, `66fafd0` | 21 de encontro (100 unitários no total) |
+| 12 | Encontros no servidor (`Celula` dona do encontro, `Conta` com cooldown, rota `enc`, quadrado canônico, limpeza de zumbis, limite de taxa) | `925a3a6`, `4d7eb84`, `7b1011c` | 113 unitários + 39 de integração |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -66,3 +67,13 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 1. Estar na branch `feat/role-por-perto` (`git switch feat/role-por-perto`); a árvore deve estar limpa. Se houver alteração solta do dono (por exemplo em `MainActivity.kt`), ela não é desta tarefa: não commitar junto.
 2. Ler este arquivo e o plano; dispatchar a Tarefa 10 (ou pular para a 11, que não depende de publicar) seguindo o fluxo de subagentes: implementador, revisão de spec e qualidade, correções, revisão restrita.
 3. Regra do repositório: commits que mexem em `.github/workflows/*` nunca junto de mudança no app (a release falha com erro 403).
+
+## Pendências registradas na Tarefa 12 (decididas, não corrigidas)
+
+- Desvio de posição estável por dia: quem passa a menos de 1 km do ponto revela o desvio do dia (a posição aproximada fica calculável). Tratar no modelo de ameaças ou na T23.
+- Blob `enc` único por quadrado sem teto de tamanho (risco baixo).
+- `distKm` é calculado no servidor (linha reta, a partir da posição aproximada acima de 1 km), não pelo cliente: desvio aceito da spec 8.3.
+- `ninguem_chegou` não gera espera de 5 min.
+- Gancho `aoFimDoEncontro(f, uids)` precisa mudar na T19 (par sessão para uid).
+- Erros novos: `ja_em_encontro`, `indisponivel`, `ponto_invalido`; `espera` traz `restanteMs`; `sair` responde `fim` com motivo `saiu`.
+- `this.zumbis`/`this.sujo` não persistem (janela rara); `fechamentos` sem teto global.

@@ -229,8 +229,8 @@ Cada linha tem um teste na tarefa dona do código.
 - `Conta`: `POST /abrir` (falha `"ja_tem_proposta"` se aberta ou `"espera"` com o tempo restante se `now < cooldownUntil`), `POST /fechar?motivo=...` (marca `cooldownUntil = now + 5 min` quando o motivo é `cancelado`, `expirou` ou `recusa`; `chegaram` não gera espera).
 - A lista `propostas` enviada a cada conexão do quadrado inclui só propostas abertas dentro do raio dela; as que combinam trazem `combina: true`.
 
-- [ ] **Passo 1: testes**: `Conta` — `abrir` duas vezes seguidas falha; depois de `fechar` com `cancelado`, `abrir` falha com `espera` por 5 min e passa em 301 s; `chegaram` não gera espera. `celula.encounter` (integração): A propõe (2 vagas), B (de outro quadrado, simulado) entra e ambos recebem `encontro`; C tenta entrar e recebe `erro cheio`; posição de A a 5 km chega a B **aproximada** e a 800 m do ponto chega **real**; A cancela e B recebe `fim cancelado`; nenhuma mensagem contém `uid`.
-- [ ] **Passos 2 a 4:** falhar, implementar, passar. Commit.
+- [x] **Passo 1: testes**: `Conta` — `abrir` duas vezes seguidas falha; depois de `fechar` com `cancelado`, `abrir` falha com `espera` por 5 min e passa em 301 s; `chegaram` não gera espera. `celula.encounter` (integração): A propõe (2 vagas), B (de outro quadrado, simulado) entra e ambos recebem `encontro`; C tenta entrar e recebe `erro cheio`; posição de A a 5 km chega a B **aproximada** e a 800 m do ponto chega **real**; A cancela e B recebe `fim cancelado`; nenhuma mensagem contém `uid`.
+- [x] **Passos 2 a 4:** falhar, implementar, passar. Commit.
 
 ### Tarefa 13: Propor, entrar e acompanhar o encontro no app
 
