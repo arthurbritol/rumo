@@ -132,7 +132,8 @@ export class Conta {
         await this.ctx.storage.put("cotaDenuncias", feitas);
         return json({ ok: true });
       }
-      if (feitas.some((d) => d.alvo === alvo)) return json({ ok: true, duplicada: true });
+      const ja = feitas.find((d) => d.alvo === alvo);
+      if (ja) return json({ ok: true, duplicada: true, pendente: !!ja.pendente });
       const naHora = feitas.filter((d) => agora - d.em < COTA_JANELA_MS);
       if (naHora.length >= COTA_DENUNCIAS) {
         const restanteMs = naHora[0].em + COTA_JANELA_MS - agora;

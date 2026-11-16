@@ -453,3 +453,94 @@ describe("pares de encontros terminados (24 h)", { timeout: 25000 }, () => {
     });
   });
 });
+
+describe("pares: oráculo, saídas e armazenamento", { timeout: 25000 }, () => {
+  const conta = (uid) => env.CONTA.get(env.CONTA.idFromName(uid));
+
+  // A propõe; B e D entram. Devolve conexões e as sessões de encontro de cada um.
+  async function trio(stub, uA, uB, uD) {
+    const a = await pessoa(stub, uA);
+    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 4 });
+    expect(await esperar(() => ultimo(a, "encontro"))).toBeTruthy();
+    const id = ultimo(a, "encontro").id;
+    const b = await conectar(stub, uB, { "x-rumo-enc": id });
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(b, "encontro"))).toBeTruthy();
+    await livre(stub);
+    const d = await conectar(stub, uD, { "x-rumo-enc": id });
+    d.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(d, "encontro") && ultimo(a, "encontro")?.participantes.length === 3)).toBe(true);
+    return { a, b, d, sA: ultimo(a, "encontro").eu, sB: ultimo(b, "encontro").eu, sD: ultimo(d, "encontro").eu };
+  }
+
+  it("quem me bloqueou e foi meu par recebe o mesmo ok, sem gravar nada (nunca inexistente)", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b"), uD = unico("uid-d");
+    const { a, b, sA, sB } = await trio(stub, uA, uB, uD);
+    a.enviar({ t: "bloquear", sessao: sB });
+    expect(await esperar(() => ok(a, "bloqueio"))).toBe(true);
+    await livre(stub);
+    b.enviar({ t: "bloquear", sessao: sA });
+    expect(await esperar(() => ok(b, "bloqueio"))).toBe(true);
+    await livre(stub);
+    b.enviar({ t: "denunciar", sessao: sA, motivo: "outro" });
+    expect(await esperar(() => ok(b, "denuncia"))).toBe(true);
+    expect(erro(b, "inexistente")).toBe(false);
+    expect((await (await conta(uA).fetch("https://conta/denuncias")).json()).denuncias).toEqual([]);
+    expect((await (await conta(uB).fetch("https://conta/bloqueios")).json()).bloqueados).toEqual([]);
+    // Sessão que nunca foi par: inexistente.
+    await livre(stub);
+    b.enviar({ t: "bloquear", sessao: "0000000000000001" });
+    expect(await esperar(() => erro(b, "inexistente"))).toBe(true);
+  });
+
+  it("quem saiu continua par: B sai e ainda denuncia D; D sai e os outros ainda o denunciam", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b"), uD = unico("uid-d");
+    const { a, b, d, sA, sB, sD } = await trio(stub, uA, uB, uD);
+    b.enviar({ t: "sair" });
+    expect(await esperar(() => tipo(b, "fim").some((m) => m.motivo === "saiu"))).toBe(true);
+    await livre(stub);
+    b.enviar({ t: "denunciar", sessao: sD, motivo: "incomodo" });
+    expect(await esperar(() => ok(b, "denuncia"))).toBe(true);
+    d.enviar({ t: "sair" });
+    expect(await esperar(() => tipo(d, "fim").some((m) => m.motivo === "saiu"))).toBe(true);
+    await livre(stub);
+    a.enviar({ t: "denunciar", sessao: sD, motivo: "falso" });
+    expect(await esperar(() => ok(a, "denuncia"))).toBe(true);
+    const den = (await (await conta(uD).fetch("https://conta/denuncias")).json()).denuncias;
+    expect(den.map((x) => x.por).sort()).toEqual([uA, uB].sort());
+    expect(sA).toMatch(/^[0-9a-f]{16}$/);
+    expect(sB).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("armazenamento: chave por pessoa, teto de 500 pessoas e 30 pares descartando os mais antigos, falha de put não aborta o alarme", async () => {
+    const stub = novaCelula();
+    await conectar(stub, unico("uid-x")); // garante uma conexão para o alarme
+    await runInDurableObject(stub, async (inst) => {
+      for (let i = 0; i < 40; i++) inst.registrarPar("u0", `s${i}`, `p${i}`);
+      expect(inst.pares.u0.length).toBe(30);
+      expect(inst.pares.u0[0].sessao).toBe("s10");
+      for (let i = 1; i <= 520; i++) {
+        inst.now = () => Date.now() + i * 1000; // cada pessoa mais nova que a anterior
+        inst.registrarPar(`u${i}`, "sx", "py");
+      }
+      inst.now = () => Date.now();
+      expect(Object.keys(inst.pares).length).toBe(500);
+      expect(inst.pares.u0).toBeUndefined(); // a mais antiga foi descartada
+      expect(inst.pares.u520).toBeDefined(); // a mais nova entrou
+      // Falha de gravação: não lança, mantém sujo.
+      const orig = inst.gravarPar.bind(inst);
+      inst.gravarPar = () => Promise.reject(new Error("falhou"));
+      await inst.salvarPares();
+      expect(inst.paresSujos.size).toBeGreaterThan(0);
+      inst.gravarPar = orig;
+    });
+    await runDurableObjectAlarm(stub); // com falha antes, o alarme segue e grava
+    await runInDurableObject(stub, async (inst) => {
+      expect(inst.paresSujos.size).toBe(0);
+      expect((await inst.ctx.storage.get("par:u520"))[0]).toMatchObject({ sessao: "sx", uid: "py" });
+      expect(await inst.ctx.storage.get("par:u0")).toBeUndefined();
+    });
+  });
+});

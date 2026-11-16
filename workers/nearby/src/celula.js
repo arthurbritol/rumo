@@ -34,8 +34,8 @@ const PRAZO_CONTA_MS = 3000; // prazo de cada chamada à Conta nas leituras de b
 const SEGURANCA_INTERVALO_MS = 2000; // no máximo 1 bloquear/denunciar a cada 2 s por conexão
 const DENUNCIA_DEDUP_MS = 24 * 3_600_000;
 const PARES_MS = 24 * 3_600_000; // quem esteve no mesmo encontro pode bloquear/denunciar por 24 h
-const MAX_PARES_PESSOAS = 5000;
-const MAX_PARES_POR_PESSOA = 100;
+const MAX_PARES_PESSOAS = 500; // 500 pessoas x 30 pares x ~100 B < 1,5 MB; ao encher, descarta os mais antigos
+const MAX_PARES_POR_PESSOA = 30;
 
 const INTERVALO_MIN_ENVIO_MS = 2000; // no máximo uma lista a cada 2 s por conexão
 const ALARME_MS = 30_000; // varredura de quem ficou sem sinal
@@ -83,7 +83,8 @@ export class Celula {
     this.denLocal = new Map(); // "uid>alvo" -> ms da denúncia já registrada (dedupe de 24 h sem chamar a Conta)
     this.reparos = []; // lado "bloqueadoPor" que falhou ao gravar: [{ de, para, tentativas }]
     this.pares = {}; // uid -> [{ sessao, uid, ate }]: outros participantes de encontros que terminaram (24 h)
-    this.paresSujo = false;
+    this.paresSujos = new Set(); // uids com par ainda não gravado (chave `par:<uid>`)
+    this.falsos = new Map(); // "ref:uid>alvo" -> ms: respostas "ok" sem gravar (alvo que me bloqueou e foi meu par)
     ctx.blockConcurrencyWhile(async () => {
       await Promise.all(
         ctx.getWebSockets().map((ws) => {
@@ -91,7 +92,11 @@ export class Celula {
           return a ? this.carregarBloqueios(a.connId, a.uid, PRAZO_CONTA_MS) : null;
         }),
       );
-      this.pares = (await ctx.storage.get("pares")) ?? {};
+      try {
+        for (const [k, v] of await ctx.storage.list({ prefix: "par:" })) this.pares[k.slice(4)] = v;
+      } catch (e) {
+        console.error("falha ao ler os pares", e?.message);
+      }
       this.reparos = (await ctx.storage.get("reparos")) ?? [];
       const salvo = await ctx.storage.get("enc");
       if (salvo) this.importarEnc(salvo);
@@ -352,6 +357,8 @@ export class Celula {
     at.visto = this.now();
     this.guardar(ws, at);
     this.cache.delete(a.connId);
+    this.parear(a.uid, sessao, msg.id);
+    await this.salvarPares();
     await this.salvarEnc();
     this.enviarEncontro(ws, at);
     this.mudou();
@@ -423,13 +430,17 @@ export class Celula {
     await Promise.allSettled(velhas.map((a) => this.carregarBloqueios(a.connId, a.uid, PRAZO_CONTA_MS)));
     this.reindexarBloqueios();
     this.podarPares();
-    await this.salvarPares();
-    await this.tentarReparos();
+    await this.salvarPares(); // nunca lança: falha mantém o par sujo para o próximo alarme
+    try {
+      await this.tentarReparos();
+    } catch (e) {
+      console.error("falha nos reparos de bloqueio", e?.message);
+    }
     this.limparZumbis();
     await this.finalizar(); // expirações de proposta/encontro e quem saiu
     await this.tentarFechamentos();
     this.mudou();
-    if (this.ctx.getWebSockets().length > 0 || this.enc.encontros.size > 0 || this.fechamentos.length > 0) {
+    if (this.ctx.getWebSockets().length > 0 || this.enc.encontros.size > 0 || this.fechamentos.length > 0 || this.paresSujos.size > 0 || this.reparos.length > 0) {
       await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
   }
@@ -519,6 +530,14 @@ export class Celula {
 
   despachar() {
     const agora = this.now();
+    // encontro -> uids de quem está nele, montado uma vez por rodada de envio
+    const uidsPorEnc = new Map();
+    if (this.pendentes.size > 0) {
+      for (const ws of this.ctx.getWebSockets()) {
+        const o = ws.deserializeAttachment();
+        if (o?.encId) uidsPorEnc.set(o.encId, [...(uidsPorEnc.get(o.encId) ?? []), o.uid]);
+      }
+    }
     let espera = null;
     for (const connId of [...this.pendentes]) {
       const falta = (this.ultimoEnvio.get(connId) ?? -Infinity) + INTERVALO_MIN_ENVIO_MS - agora;
@@ -536,7 +555,7 @@ export class Celula {
               if (w) this.enviar(w, lista);
             })
             .catch((e) => console.error("falha ao montar a lista de vizinhos", e));
-          this.enviarSeMudou(ws, connId, "propostas", { t: "propostas", lista: this.propostasPara(connId, a) });
+          this.enviarSeMudou(ws, connId, "propostas", { t: "propostas", lista: this.propostasPara(connId, a, uidsPorEnc) });
         }
         this.enviarEncontro(ws, a);
       } else if (espera === null || falta < espera) {
@@ -555,16 +574,11 @@ export class Celula {
 
   // Propostas abertas desta Celula dentro do raio da conexão (posição real dela x ponto, que é
   // público). Nunca leva o id de quem propôs.
-  propostasPara(connId, a) {
+  propostasPara(connId, a, uidsPorEnc) {
     const eu = this.presence.pessoas.get(connId);
     if (!eu?.pos) return [];
     const raioM = eu.rolê.raioKm * 1000;
     const lista = [];
-    const uidsPorEnc = new Map();
-    for (const ws of this.ctx.getWebSockets()) {
-      const o = ws.deserializeAttachment();
-      if (o?.encId) uidsPorEnc.set(o.encId, [...(uidsPorEnc.get(o.encId) ?? []), o.uid]);
-    }
     for (const enc of this.enc.encontros.values()) {
       const livres = enc.vagas - enc.participantes.size;
       if (livres <= 0 || a.encId === enc.id || this.pend.has(enc.id)) continue;
@@ -636,11 +650,9 @@ export class Celula {
     this.sujo = false;
     const contas = [];
     for (const f of fins) {
-      const uids = [];
       for (const ws of this.ctx.getWebSockets()) {
         const a = ws.deserializeAttachment();
         if (a?.encId !== f.id) continue;
-        uids.push({ uid: a.uid, sessao: a.encSessao });
         try {
           ws.send(JSON.stringify({ t: "fim", id: f.id, motivo: f.motivo }));
         } catch {
@@ -650,7 +662,6 @@ export class Celula {
         this.guardar(ws, a);
         this.cache.delete(a.connId);
       }
-      this.aoFimDoEncontro(f, uids);
       const dono = this.donos.get(f.id);
       this.donos.delete(f.id);
       const motivoConta = this.zumbis.delete(f.id) ? "falha" : f.motivo; // reinício não pune ninguém
@@ -775,12 +786,13 @@ export class Celula {
       const p = this.enc.encontros.get(o.encId)?.participantes.get(sessao)?.pos ?? null;
       achado = { uid: o.uid, pos: achado?.pos ?? (p ? { lat: p.lat, lon: p.lon } : null) };
     }
-    if (!achado) {
-      const par = (this.pares[meuUid] ?? []).find((x) => x.sessao === sessao && x.ate > this.now());
+    const par = (this.pares[meuUid] ?? []).find((x) => x.sessao === sessao && x.ate > this.now());
+    if (achado) achado.par = !!par;
+    else {
       if (par) {
         let pos = null;
         for (const o of this.presence.pessoas.values()) if (o.uid === par.uid && o.pos) pos = o.pos;
-        achado = { uid: par.uid, pos };
+        achado = { uid: par.uid, pos, par: true };
       }
     }
     return achado;
@@ -790,6 +802,19 @@ export class Celula {
   async inexistenteIgual(ws, a) {
     await this.chamarConta(a.uid, "/bloqueios", "GET", PRAZO_CONTA_MS).catch(() => {});
     this.erro(ws, "inexistente");
+  }
+
+  // Alvo (par de 24 h) que me bloqueou: "ok" idêntico ao de um alvo válido, sem gravar nada, com o
+  // mesmo padrão de chamadas à Conta (leituras) e o mesmo atalho local nas repetições.
+  async falsoOk(ws, a, ref, uidAlvo, chamadas) {
+    const chave = `${ref}:${a.uid}>${uidAlvo}`;
+    if (this.now() - (this.falsos.get(chave) ?? -Infinity) >= DENUNCIA_DEDUP_MS) {
+      await Promise.allSettled(
+        Array.from({ length: chamadas }, () => this.chamarConta(a.uid, "/bloqueios", "GET", PRAZO_CONTA_MS)),
+      );
+      this.falsos.set(chave, this.now());
+    }
+    this.ok(ws, ref);
   }
 
   // Limite de ritmo por conexão para bloquear/denunciar (1 a cada 2 s). true se pode seguir.
@@ -815,7 +840,10 @@ export class Celula {
   async bloquear(ws, a, msg) {
     if (!this.ritmoOk(ws, a)) return;
     const alvo = this.resolverSessao(msg.sessao, a.uid);
-    if (!alvo || this.alvoInvisivel(a, alvo.uid)) return this.inexistenteIgual(ws, a);
+    if (!alvo) return this.inexistenteIgual(ws, a);
+    if (this.alvoInvisivel(a, alvo.uid)) {
+      return alvo.par ? this.falsoOk(ws, a, "bloqueio", alvo.uid, 2) : this.inexistenteIgual(ws, a);
+    }
     if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
     const minha = this.bloq.get(a.connId);
     if (minha?.bloqueou.has(alvo.uid)) return this.ok(ws, "bloqueio"); // já bloqueado: nada a gravar nem a difundir
@@ -867,8 +895,12 @@ export class Celula {
   async denunciar(ws, a, msg) {
     if (!this.ritmoOk(ws, a)) return;
     const alvo = this.resolverSessao(msg.sessao, a.uid);
-    // Quem bloqueou pode denunciar quem bloqueou; quem foi bloqueado não "enxerga" o bloqueador.
-    if (!alvo || this.alvoInvisivel(a, alvo.uid)) return this.inexistenteIgual(ws, a);
+    // Quem bloqueou pode denunciar quem bloqueou; quem foi bloqueado não "enxerga" o bloqueador:
+    // se nunca foram pares, é "inexistente"; se foram, recebe o mesmo "ok" de um alvo válido (sem gravar).
+    if (!alvo) return this.inexistenteIgual(ws, a);
+    if (this.alvoInvisivel(a, alvo.uid)) {
+      return alvo.par ? this.falsoOk(ws, a, "denuncia", alvo.uid, 3) : this.inexistenteIgual(ws, a);
+    }
     if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
     const chave = `${a.uid}>${alvo.uid}`;
     if (this.now() - (this.denLocal.get(chave) ?? -Infinity) < DENUNCIA_DEDUP_MS) return this.ok(ws, "denuncia"); // já coberta
@@ -880,7 +912,7 @@ export class Celula {
       if (c.status === 409 && c.corpo.erro === "espera") return this.erro(ws, "espera", { restanteMs: c.corpo.restanteMs });
       if (c.status !== 200 || c.corpo.ok !== true) throw new Error(`status ${c.status}`);
       if (c.corpo.duplicada) {
-        this.denLocal.set(chave, this.now());
+        if (!c.corpo.pendente) this.denLocal.set(chave, this.now()); // reserva ainda pendente não vale
         return this.ok(ws, "denuncia");
       }
       reservou = true;
@@ -899,8 +931,8 @@ export class Celula {
       );
       if (d.status !== 200 || d.corpo.ok !== true) throw new Error(`status ${d.status}`);
       // 3) só agora a reserva vira definitiva (24 h); sem confirmação ela expira sozinha em 30 s
-      await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&confirmar=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
-      this.denLocal.set(chave, this.now());
+      const conf = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&confirmar=1`, "POST", PRAZO_CONTA_MS).catch(() => null);
+      if (conf?.status === 200) this.denLocal.set(chave, this.now());
     } catch (e) {
       console.error("falha ao registrar denúncia", e?.message);
       if (reservou) await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&desfazer=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
@@ -917,36 +949,74 @@ export class Celula {
     }
   }
 
-  // Pares por 24 h (ruling R5): quem esteve no mesmo encontro pode bloquear/denunciar na tela de fim.
-  // pares[uid] = [{ sessao, uid, ate }] dos OUTROS participantes; nunca enviado a ninguém.
-  aoFimDoEncontro(_fim, membros) {
-    const ate = this.now() + PARES_MS;
-    for (const m of membros) {
-      if (!this.pares[m.uid] && Object.keys(this.pares).length >= MAX_PARES_PESSOAS) continue;
-      const lista = (this.pares[m.uid] ?? []).filter((x) => x.ate > this.now());
-      for (const o of membros) {
-        if (o.uid !== m.uid) lista.push({ sessao: o.sessao, uid: o.uid, ate });
-      }
-      this.pares[m.uid] = lista.slice(-MAX_PARES_POR_PESSOA);
+  // Pares por 24 h (ruling R5): quem esteve ao mesmo tempo num encontro pode bloquear/denunciar
+  // depois (inclusive quem saiu, caiu ou foi removido). O par nasce quando alguém ENTRA: ele e cada
+  // pessoa presente naquele momento ganham par um com o outro. pares[uid] = [{ sessao, uid, ate }]
+  // dos outros; nunca enviado a ninguém. Fica em storage, uma chave `par:<uid>` por pessoa.
+  parear(uidNovo, sessaoNova, idEncontro) {
+    for (const ws of this.ctx.getWebSockets()) {
+      const o = ws.deserializeAttachment();
+      if (!o || o.encId !== idEncontro || !o.encSessao || o.uid === uidNovo) continue;
+      this.registrarPar(uidNovo, o.encSessao, o.uid);
+      this.registrarPar(o.uid, sessaoNova, uidNovo);
     }
-    this.paresSujo = true;
+  }
+
+  registrarPar(uid, sessao, uidPar) {
+    const agora = this.now();
+    const lista = (this.pares[uid] ?? []).filter((x) => x.ate > agora && x.sessao !== sessao);
+    if (!this.pares[uid] && Object.keys(this.pares).length >= MAX_PARES_PESSOAS) this.descartarParMaisAntigo();
+    lista.push({ sessao, uid: uidPar, ate: agora + PARES_MS });
+    this.pares[uid] = lista.slice(-MAX_PARES_POR_PESSOA);
+    this.paresSujos.add(uid);
+  }
+
+  // Cheio: descarta a pessoa cujo par mais recente é o mais antigo (nunca recusa um novo).
+  descartarParMaisAntigo() {
+    let pior = null;
+    let menor = Infinity;
+    for (const [uid, lista] of Object.entries(this.pares)) {
+      const recente = Math.max(...lista.map((x) => x.ate));
+      if (recente < menor) {
+        menor = recente;
+        pior = uid;
+      }
+    }
+    if (pior !== null) {
+      delete this.pares[pior];
+      this.paresSujos.add(pior);
+    }
   }
 
   podarPares() {
     const agora = this.now();
     for (const [uid, lista] of Object.entries(this.pares)) {
       const viva = lista.filter((x) => x.ate > agora);
-      if (viva.length !== lista.length) this.paresSujo = true;
+      if (viva.length === lista.length) continue;
+      this.paresSujos.add(uid);
       if (viva.length === 0) delete this.pares[uid];
       else this.pares[uid] = viva;
     }
     for (const [k, t] of this.denLocal) if (agora - t >= DENUNCIA_DEDUP_MS) this.denLocal.delete(k);
+    for (const [k, t] of this.falsos) if (agora - t >= DENUNCIA_DEDUP_MS) this.falsos.delete(k);
   }
 
+  async gravarPar(uid) {
+    const lista = this.pares[uid];
+    if (lista) await this.ctx.storage.put(`par:${uid}`, lista);
+    else await this.ctx.storage.delete(`par:${uid}`);
+  }
+
+  // Nunca lança: falha de uma chave mantém a pessoa "suja" e o alarme tenta de novo.
   async salvarPares() {
-    if (!this.paresSujo) return;
-    this.paresSujo = false;
-    await this.ctx.storage.put("pares", this.pares);
+    for (const uid of [...this.paresSujos]) {
+      try {
+        await this.gravarPar(uid);
+        this.paresSujos.delete(uid);
+      } catch (e) {
+        console.error("falha ao gravar os pares", e?.message);
+      }
+    }
   }
 
   // --- Conta (por uid) ---
