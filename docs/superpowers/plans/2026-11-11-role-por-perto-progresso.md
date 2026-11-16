@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9 e 11 a 13 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefas 14 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13 e 15 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 16 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
@@ -20,6 +20,7 @@ Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7
 | 11 | Máquina de estados dos encontros (`encounter.js`, lógica pura; falha fechada sem posição aproximada) | `769ceb7`, `66fafd0` | 21 de encontro (100 unitários no total) |
 | 12 | Encontros no servidor (`Celula` dona do encontro, `Conta` com cooldown, rota `enc`, quadrado canônico, limpeza de zumbis, limite de taxa) | `925a3a6`, `4d7eb84`, `7b1011c` | 113 unitários + 39 de integração |
 | 13 | App: propor, entrar e acompanhar o encontro (protocolo, `EtaCalculator`, ViewModel, camada `nearby-proposals`, cartões) | `3300be3`, `61373e5`, `cd61503`, `4b2f733`, `c359035` | suíte do sync-core e do app verdes, `assembleDebug` ok |
+| 15 | Bloqueios e denúncias na `Conta`/`Celula` (simétrico, sem revelar quem bloqueou, pares de 24 h para denunciar no fim do encontro) | `4b7a553`, `1838657`, `b5f2984`, `748987c` | 126 unitários + 61 de integração |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -85,3 +86,10 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 - Moto do participante duplicada (vizinho desviado + participante), sem rumo; vazamento do desvio diário (mesmo item da T12).
 - `cancelar` após 15 s sem resposta da Conta pode punir sem culpa; desligar a busca durante o encontro não pede confirmação.
 - Nada visto em tela: cartões, posições (200, 220, 430 dp), pinos "N de M", gesto de segurar no mapa.
+
+## Pendências registradas na Tarefa 15
+
+- T22: suspensão por 3 denunciantes cai com contas descartáveis; exigir idade mínima da conta ou só contar quem esteve no mesmo encontro com o denunciado.
+- Denúncia de quem foi bloqueado contra quem bloqueou é descartada em silêncio (decisão da spec).
+- Bloqueio em outra Celula (divisa) vale em até 5 min ou na próxima conexão; o app (T17) deve mandar `bloquear` pelo socket da Celula onde a sessão vive.
+- Mensagens `bloquear {sessao}` e `denunciar {sessao, motivo}`; erros `inexistente`, `sessao_propria`, `espera`, `limite`.

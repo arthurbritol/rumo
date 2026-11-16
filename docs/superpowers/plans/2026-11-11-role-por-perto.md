@@ -264,8 +264,8 @@ Cada linha tem um teste na tarefa dona do código.
 - `denunciar`: grava na Conta do denunciado `{por: uid, em: now, motivo, lat, lon aproximados}`; motivos aceitos: `incomodo`, `comportamento`, `falso`, `outro`.
 - O app **só envia a sessão**; a `Celula` resolve `sessao → uid`.
 
-- [ ] **Passo 1: testes**: A bloqueia B → B some de `neighborsFor` de A **e** A some de B; propostas de A não aparecem para B; B não consegue `entrar` em encontro de A e recebe `erro inexistente`; o bloqueio vale depois de A e B ligarem de novo (nova sessão); outra pessoa C continua vendo os dois; `denunciar` com motivo inválido é recusado; a denúncia grava uid do denunciante e do denunciado e **nunca** devolve uid a ninguém; bloquear a si mesmo é recusado.
-- [ ] **Passos 2 a 4:** implementar e passar. Commit.
+- [x] **Passo 1: testes**: A bloqueia B → B some de `neighborsFor` de A **e** A some de B; propostas de A não aparecem para B; B não consegue `entrar` em encontro de A e recebe `erro inexistente`; o bloqueio vale depois de A e B ligarem de novo (nova sessão); outra pessoa C continua vendo os dois; `denunciar` com motivo inválido é recusado; a denúncia grava uid do denunciante e do denunciado e **nunca** devolve uid a ninguém; bloquear a si mesmo é recusado.
+- [x] **Passos 2 a 4:** implementar e passar. Commit.
 
 ### Tarefa 16: Rotas do dono (listar denúncias, tirar suspensão)
 
