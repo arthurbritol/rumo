@@ -62,6 +62,6 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 
 ## Como retomar
 
-1. Estar na branch `feat/role-por-perto` (`git switch feat/role-por-perto`); a árvore deve estar limpa, exceto a alteração de `MainActivity.kt` que **não é desta tarefa** (outra pessoa/sessão removeu dois comentários; não commitar junto).
+1. Estar na branch `feat/role-por-perto` (`git switch feat/role-por-perto`); a árvore deve estar limpa. Se houver alteração solta do dono (por exemplo em `MainActivity.kt`), ela não é desta tarefa: não commitar junto.
 2. Ler este arquivo e o plano; dispatchar a Tarefa 10 (ou pular para a 11, que não depende de publicar) seguindo o fluxo de subagentes: implementador, revisão de spec e qualidade, correções, revisão restrita.
 3. Regra do repositório: commits que mexem em `.github/workflows/*` nunca junto de mudança no app (a release falha com erro 403).
