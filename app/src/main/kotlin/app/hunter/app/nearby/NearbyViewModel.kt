@@ -116,6 +116,9 @@ class NearbyViewModel(
     private var reentradaJob: Job? = null
     private var reentradas = 0
 
+    /** `entrar` enviado e ainda sem um `encontro` que o confirme: a conexão extra não leva posição nem trata nao_procurando como fatal. */
+    private var entradaPendente = false
+
     // Rota até o ponto: uma em voo, reaproveitada por 2 min ou 500 m, com recuo depois de falha.
     private var etaJob: Job? = null
     private var rotaEta: Eta? = null
@@ -289,7 +292,7 @@ class NearbyViewModel(
         val eta = if (valida) rota!! else etaCalculator.linhaReta(de, para)
         if (usandoExtra) {
             // Quem entrou: o tempo vai só pela conexão do encontro; aos quadrados da busca, a posição simples.
-            link.sendEncounter(posicao(p, eta.distKm, eta.etaMin))
+            if (!entradaPendente) link.sendEncounter(posicao(p, eta.distKm, eta.etaMin)) // sem sessão no servidor, só daria erro
             link.send(posicao(p))
         } else {
             // Quem propôs: o tempo vai só ao quadrado do ponto; aos outros, a posição simples.
@@ -354,7 +357,10 @@ class NearbyViewModel(
 
     /** A conexão extra do encontro abriu (ou reabriu): entra nele. */
     private fun onOpenedEncounter(id: String) {
-        if (id == encId && usandoExtra) link.sendEncounter(ClientMessage.Entrar(id))
+        if (id == encId && usandoExtra) {
+            entradaPendente = true
+            link.sendEncounter(ClientMessage.Entrar(id))
+        }
     }
 
     private fun onEvent(e: NearbyEvent) {
@@ -378,6 +384,7 @@ class NearbyViewModel(
                 state = NearbyState.reduce(state, m, e.celula)
                 setEnc(EncontroUiState.Ativo(m, souProponente))
                 reentradas = 0
+                entradaPendente = false
                 // Entra no quadro já com distância e tempo, mas pelo mesmo limitador das posições (piso do servidor).
                 if (primeiro) lastPoint?.let { if (throttle.shouldSend(clock(), it.latitude, it.longitude, true)) enviarPosicao(it) }
             }
@@ -410,7 +417,8 @@ class NearbyViewModel(
                 // Reconexão da conexão extra: o `entrar` reenviado pode esbarrar na sessão antiga que o servidor ainda não soltou.
                 when (m.codigo) {
                     "ja_em_encontro" -> reentrar()
-                    "inexistente", "cheio", "nao_procurando" -> sairSemServidor()
+                    "inexistente", "cheio" -> sairSemServidor()
+                    "nao_procurando" -> if (!entradaPendente) sairSemServidor() // com a reentrada pendente é só a posição que chegou antes
                     else -> if (texto != null) _aviso.value = texto
                 }
             } else if (m.codigo in ERROS_DE_ENTRADA || m.codigo == "nao_procurando") {
@@ -436,6 +444,7 @@ class NearbyViewModel(
             return
         }
         reentradas++
+        entradaPendente = true
         reentradaJob?.cancel()
         reentradaJob = scope.launch {
             delay(REENTRADA_MS)
@@ -501,6 +510,7 @@ class NearbyViewModel(
         souProponente = false
         usandoExtra = true
         setEnc(EncontroUiState.Aguardando)
+        entradaPendente = true
         link.connectEncounter(cell, id)
         aguardarResposta()
         refresh() // a proposta some da lista de quem está por perto
@@ -543,6 +553,7 @@ class NearbyViewModel(
         reentradaJob?.cancel()
         reentradaJob = null
         reentradas = 0
+        entradaPendente = false
         etaJob?.cancel()
         etaJob = null
         rotaEta = null

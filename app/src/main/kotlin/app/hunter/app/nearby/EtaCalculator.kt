@@ -4,6 +4,9 @@ import app.hunter.model.Geo
 import app.hunter.nav.LatLon
 import app.hunter.nav.Route
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.runInterruptible
@@ -18,6 +21,7 @@ data class Eta(val distKm: Double, val etaMin: Double)
  * [router] é o roteador do app (Valhalla); se falhar ou não achar rota, vale a linha reta a [VELOCIDADE_RETA_KMH].
  */
 class EtaCalculator(
+    private val io: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val timeoutMs: Long = 5_000L,
     private val router: suspend (from: LatLon, to: LatLon) -> Route?,
 ) {
@@ -30,9 +34,13 @@ class EtaCalculator(
      */
     suspend fun etaRota(from: LatLon, to: LatLon): Eta? {
         val rota = try {
-            withTimeoutOrNull(timeoutMs) {
-                runInterruptible(Dispatchers.IO) { runBlocking { router(from, to) } }
-            }
+            // A chamada roda na própria coroutine de E/S: ao estourar o tempo o chamador segue na hora (o slot "em voo"
+            // do ViewModel libera) e o resultado tardio, se vier, é descartado. Cliente bloqueante que ignora a
+            // interrupção só termina quando a rede responder, mas já sem prender ninguém.
+            val chamada = io.async { runInterruptible { runBlocking { router(from, to) } } }
+            val r = withTimeoutOrNull(timeoutMs) { chamada.await() }
+            if (r == null) chamada.cancel()
+            r
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

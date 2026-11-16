@@ -403,4 +403,35 @@ class NearbyEncounterViewModelTest {
         assertEquals(1, chamadas.get())
         assertEquals(3, r.link.sent.map { it.first }.filterIsInstance<ClientMessage.Posicao>().size - 1)
     }
+
+    @Test
+    fun `na janela de reentrada a posicao nao vai pela conexao extra e nao_procurando nao encerra`() = runTest {
+        val r = rig()
+        r.noEncontroComoConvidado()
+        advanceTimeBy(11_000)
+        // A conexão extra reabre: o `entrar` é reenviado e fica pendente até um novo `encontro`.
+        r.link.openedEncFlow.tryEmit(idEnc)
+        r.link.sentEnc.clear()
+        r.positions.tryEmit(centro)
+        assertTrue(r.link.sentEnc.none { it is ClientMessage.Posicao }, "posição não sai na janela")
+        assertTrue(r.link.sent.map { it.first }.any { it is ClientMessage.Posicao }) // a busca segue
+        r.emit(ServerMessage.Erro("nao_procurando"), extra = true)
+        assertIs<EncontroUiState.Ativo>(r.vm.encontro.value)
+        assertEquals(0, r.link.encDisconnects)
+        // Confirmada a reentrada, a posição volta a sair pela conexão extra.
+        r.emit(encontroMsg(), extra = true)
+        advanceTimeBy(11_000)
+        r.positions.tryEmit(centro)
+        assertTrue(r.link.sentEnc.any { it is ClientMessage.Posicao })
+    }
+
+    @Test
+    fun `cartao da proposta fica durante a entrada e o encontro ativo ignora outra proposta`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.entrar(idEnc)
+        assertEquals(EncontroUiState.Aguardando, r.vm.encontro.value)
+        // Durante Aguardando a proposta segue na lista (o cartão mostra "Entrando…").
+        assertEquals(1, (r.vm.estado.value as NearbyUiState.Procurando).propostas.size)
+    }
 }

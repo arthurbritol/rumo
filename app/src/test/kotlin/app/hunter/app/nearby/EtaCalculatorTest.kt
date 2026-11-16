@@ -58,4 +58,19 @@ class EtaCalculatorTest {
         assertTrue(ms < 2_000, "demorou $ms ms")
         assertTrue(interrompido)
     }
+
+    @Test
+    fun `roteador que ignora a interrupcao tambem nao prende o chamador alem do tempo limite`() = runBlocking {
+        val calc = EtaCalculator(timeoutMs = 200) { _, _ ->
+            val fim = System.nanoTime() + 3_000_000_000L
+            while (System.nanoTime() < fim) {
+                try { Thread.sleep(50) } catch (e: InterruptedException) { /* ignora, como uma chamada de rede bloqueante */ }
+            }
+            null
+        }
+        val t0 = System.nanoTime()
+        assertEquals(null, calc.etaRota(de, para))
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        assertTrue(ms < 1_500, "prendeu o chamador por $ms ms")
+    }
 }

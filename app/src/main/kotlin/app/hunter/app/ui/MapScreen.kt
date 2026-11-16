@@ -174,9 +174,10 @@ fun MapScreen(
     }
     // O encontro começou (ou a proposta foi enviada): fecha o que estava aberto para propor ou entrar.
     LaunchedEffect(encontro) {
-        if (encontro !is EncontroUiState.Nenhum) {
+        // Aguardando: os cartões de propor/entrar ficam ("Propondo…" / "Entrando…"); só o encontro ativo os fecha.
+        if (encontro is EncontroUiState.Ativo) {
             selectedProposal = null
-            if (encontro is EncontroUiState.Ativo) proposalPoint = null
+            proposalPoint = null
         }
     }
 
@@ -285,7 +286,14 @@ fun MapScreen(
             },
             onFuelStationClick = { vm.selectFuelStation(it) },
             onNearbyClick = { selectedRider = it; selectedProposal = null },
-            onProposalClick = { selectedProposal = it; selectedRider = null; proposalPoint = null },
+            onProposalClick = {
+                // Em encontro (ou esperando resposta) as propostas dos outros não abrem cartão.
+                if (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado) {
+                    selectedProposal = it
+                    selectedRider = null
+                    proposalPoint = null
+                }
+            },
             onBoundingBoxChanged = { vm.updateMapBoundingBox(it) },
             onUserGesture = {
                 if (preview == null) {
@@ -413,7 +421,7 @@ fun MapScreen(
                 } else if (encounterCardShown) {
                     NearbyEncounterCard(e, onSair = nearbyVm::sair, onMinimizar = { encounterExpanded = false }, modifier = acima)
                 }
-            } else if (e is EncontroUiState.Encerrado && !navigating) {
+            } else if (e is EncontroUiState.Encerrado && encounterCardShown && !navigating) {
                 NearbyEndCard(e.motivo, onClose = nearbyVm::limparFim, modifier = acima)
             }
         }
