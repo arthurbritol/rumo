@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13 e 15 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 16 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar). As tarefas 15 e 16 (etapa 3, servidor) estão só na branch local `feat/role-por-perto-etapa3`, não publicadas. Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13, 15 e 16 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 17 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
@@ -21,6 +21,7 @@ Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7
 | 12 | Encontros no servidor (`Celula` dona do encontro, `Conta` com cooldown, rota `enc`, quadrado canônico, limpeza de zumbis, limite de taxa) | `925a3a6`, `4d7eb84`, `7b1011c` | 113 unitários + 39 de integração |
 | 13 | App: propor, entrar e acompanhar o encontro (protocolo, `EtaCalculator`, ViewModel, camada `nearby-proposals`, cartões) | `3300be3`, `61373e5`, `cd61503`, `4b2f733`, `c359035` | suíte do sync-core e do app verdes, `assembleDebug` ok |
 | 15 | Bloqueios e denúncias na `Conta`/`Celula` (simétrico, sem revelar quem bloqueou, pares de 24 h para denunciar no fim do encontro) | `4b7a553`, `1838657`, `b5f2984`, `748987c` | 126 unitários + 61 de integração |
+| 16 | Rotas do dono (`/admin/denuncias`, `/admin/suspensao`) e suspensão manual (`suspenso` ao procurar/propor/entrar) | `6366ab9`, `491a1f4` | 134 unitários + 64 de integração |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -93,3 +94,9 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 - Denúncia de quem foi bloqueado contra quem bloqueou é descartada em silêncio (decisão da spec).
 - Bloqueio em outra Celula (divisa) vale em até 5 min ou na próxima conexão; o app (T17) deve mandar `bloquear` pelo socket da Celula onde a sessão vive.
 - Mensagens `bloquear {sessao}` e `denunciar {sessao, motivo}`; erros `inexistente`, `sessao_propria`, `espera`, `limite`.
+
+## Pendências registradas na Tarefa 16
+
+- Falha aberta da suspensão (se a Conta não responde, a pessoa pode procurar) e cache de 5 min: `por`/`tirar` só valem em conexão aberta após até 5 min.
+- Uid na query string das rotas do dono (aparece em logs da Cloudflare).
+- Para publicar a etapa 3 faltam: T17 (bloquear/denunciar no app) e T18 (publicar). Servidor das T15/T16 ainda não está no ar.

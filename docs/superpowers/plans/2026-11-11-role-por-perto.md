@@ -248,7 +248,7 @@ Cada linha tem um teste na tarefa dona do código.
 
 ### Tarefa 14: Publicar a Etapa 2
 
-- [ ] CHANGELOG, roteiro manual (dois aparelhos: A propõe, B entra, caminham até o ponto, chegam, encontro termina), release publicada e conferida, APK na Área de Trabalho. Commit do app sem workflow. Teste de ponta a ponta antes de seguir.
+- [x] (publicado na v0.7.23; falta o teste com dois aparelhos, do dono) CHANGELOG, roteiro manual (dois aparelhos: A propõe, B entra, caminham até o ponto, chegam, encontro termina), release publicada e conferida, APK na Área de Trabalho. Commit do app sem workflow. Teste de ponta a ponta antes de seguir.
 
 ---
 
@@ -275,7 +275,7 @@ Cada linha tem um teste na tarefa dona do código.
 **Interfaces:**
 - `GET /admin/denuncias?uid=<opcional>` e `POST /admin/suspensao?uid=<uid>&acao=tirar|por`, todas exigindo `Authorization: Bearer <ADMIN_TOKEN>` (comparação em tempo constante); sem o cabeçalho ou com valor errado → 401. Devolvem JSON; nada disso vai ao app.
 
-- [ ] **Passo 1: testes**: 401 sem token e com token errado; lista com 2 denúncias; `por` e `tirar` mudam o estado; a resposta de uma pessoa suspensa ao tentar `procurar` é `erro suspenso`. **Passos 2 a 4:** implementar e passar. Commit.
+- [x] **Passo 1: testes**: 401 sem token e com token errado; lista com 2 denúncias; `por` e `tirar` mudam o estado; a resposta de uma pessoa suspensa ao tentar `procurar` é `erro suspenso`. **Passos 2 a 4:** implementar e passar. Commit.
 
 ### Tarefa 17: Bloquear e denunciar no app
 
