@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Branch: `feat/role-por-perto` (só local; nada enviado ao GitHub, nenhuma release feita). Estado em 2026-11-12: **Tarefas 1 a 9 concluídas e aprovadas; Tarefas 10 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9 concluídas e aprovadas; Tarefas 10 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 

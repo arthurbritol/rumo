@@ -191,9 +191,9 @@ Cada linha tem um teste na tarefa dona do código.
 
 ### Tarefa 10: Publicar a Etapa 1
 
-- [ ] Pedir ao dono: segredos `NEARBY_SECRET` e `ADMIN_TOKEN`, rodar o workflow "Servidor de rolê por perto", criar a variável `NEARBY_URL` no GitHub com o endereço `https://rumo-nearby.<subdominio>.workers.dev`.
-- [ ] Commit só do workflow `release.yml` acrescentando as variáveis `ORG_GRADLE_PROJECT_nearbyUrl: ${{ vars.NEARBY_URL }}` (**sem mudar o app neste commit**).
-- [ ] Commit seguinte (qualquer mudança no app, por exemplo CHANGELOG da etapa e `docs/TESTES-MANUAIS-ROLE-POR-PERTO.md`) dispara a release; conferir a release, baixar o APK para a Área de Trabalho e conferir que o endereço do servidor está dentro do APK.
+- [x] Pedir ao dono: segredos `NEARBY_SECRET` e `ADMIN_TOKEN`, rodar o workflow "Servidor de rolê por perto", criar a variável `NEARBY_URL` no GitHub com o endereço `https://rumo-nearby.<subdominio>.workers.dev`.
+- [x] Commit só do workflow `release.yml` acrescentando as variáveis `ORG_GRADLE_PROJECT_nearbyUrl: ${{ vars.NEARBY_URL }}` (**sem mudar o app neste commit**).
+- [x] Commit seguinte (qualquer mudança no app, por exemplo CHANGELOG da etapa e `docs/TESTES-MANUAIS-ROLE-POR-PERTO.md`) dispara a release; conferir a release, baixar o APK para a Área de Trabalho e conferir que o endereço do servidor está dentro do APK.
 - [ ] Teste de ponta a ponta com dois aparelhos conforme o roteiro; só então seguir para a Etapa 2.
 
 ---
