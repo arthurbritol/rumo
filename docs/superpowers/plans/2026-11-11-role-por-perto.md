@@ -214,8 +214,8 @@ Cada linha tem um teste na tarefa dona do código.
 - `position(sessionId, id, pos: {lat,lon,distKm,etaMin}): void` — marca chegada a menos de 100 m.
 - `viewFor(sessionId, id): {ponto, vagasLivres, participantes: Array<{sessao, lat, lon, real: boolean, distKm, etaMin, chegou: boolean}>}` — a posição de cada participante vem **aproximada** (já com desvio, fornecida por quem chama) até ele chegar a menos de 1 km do ponto, quando passa a ser a **real** (`real: true`).
 
-- [ ] **Passo 1: testes**: vagas 1 e 9 recusadas, 2 e 8 aceitas; segunda proposta da mesma sessão recusada; entrada direta; **última vaga disputada por duas sessões em sequência: uma entra, a outra recebe `"cheio"`** (ponto de atenção 2); cheio some das propostas abertas (`openProposals()` devolve sem ela); `cancel` por quem não propôs recusado; proposta sem ninguém por 30 min → `expirou`; em andamento 60 min sem chegada → `ninguem_chegou`; sessão que some (`dropSession`) sai sem travar os outros e o encontro continua se restar alguém (ponto de atenção 3); chegada a 99 m marca `chegou`, 101 m não; `viewFor` mostra `real: false` a 1,2 km e `real: true` a 900 m; fim `chegaram` quando todos que ficaram chegaram.
-- [ ] **Passos 2 a 4:** falhar, implementar, passar. Commit.
+- [x] **Passo 1: testes**: vagas 1 e 9 recusadas, 2 e 8 aceitas; segunda proposta da mesma sessão recusada; entrada direta; **última vaga disputada por duas sessões em sequência: uma entra, a outra recebe `"cheio"`** (ponto de atenção 2); cheio some das propostas abertas (`openProposals()` devolve sem ela); `cancel` por quem não propôs recusado; proposta sem ninguém por 30 min → `expirou`; em andamento 60 min sem chegada → `ninguem_chegou`; sessão que some (`dropSession`) sai sem travar os outros e o encontro continua se restar alguém (ponto de atenção 3); chegada a 99 m marca `chegou`, 101 m não; `viewFor` mostra `real: false` a 1,2 km e `real: true` a 900 m; fim `chegaram` quando todos que ficaram chegaram.
+- [x] **Passos 2 a 4:** falhar, implementar, passar. Commit.
 
 ### Tarefa 12: Encontros e Conta mínima no servidor
 

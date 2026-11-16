@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9 concluídas e aprovadas; Tarefas 10 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7.22 com NEARBY_URL embutida no APK. Estado em 2026-11-12: **Tarefas 1 a 9 e 11 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefas 12 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
@@ -17,6 +17,7 @@ Publicado em 2026-11-16: main enviada, servidor no ar (/health ok), release v0.7
 | 7 | Modelos e estado do rolê por perto no `sync-core` (pacote `app.hunter.nearby`) | `9da29ac` | 11 |
 | 8 | Cliente WebSocket do app (OkHttp 5.4.0), `PositionThrottle`, `Backoff` | `b9e2080`, `5ecaa39` | 27 |
 | 9 | Serviço em primeiro plano, ViewModel, tela "procurando rolê", motos anônimas no mapa | `188eb44`, `393aa29`, `b85d855` | 24+ novos, suíte do app e `assembleDebug` verdes |
+| 11 | Máquina de estados dos encontros (`encounter.js`, lógica pura; falha fechada sem posição aproximada) | `769ceb7`, `66fafd0` | 21 de encontro (100 unitários no total) |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
