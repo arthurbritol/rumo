@@ -164,3 +164,49 @@ test("SEGURANÇA: cabeçalho x-rumo-uid forjado sem token válido: 401 e nada ch
   assert.equal((await chamar(pedido("/ws?cell=-21:-41&t=lixo", { "x-rumo-uid": "uid-da-vitima" }), env)).status, 401);
   assert.equal(reg.pedidos.length, 0);
 });
+
+test("quadrado fora da forma canônica é recusado: um único DO por quadrado", async () => {
+  const { env, reg } = novoAmbiente();
+  const t = await token();
+  for (const cell of ["-021:-41", "-0:-41", "+21:-41", "-21:-041", "-21:-41 ", "00:-41"]) {
+    const r = await chamar(pedido(`/ws?cell=${encodeURIComponent(cell)}&t=${t}`), env);
+    assert.equal(r.status, 404, `cell ${JSON.stringify(cell)}`);
+  }
+  assert.equal(reg.pedidos.length, 0);
+  assert.equal((await chamar(pedido(`/ws?cell=0:-41&t=${t}`), env)).status, 200);
+  assert.deepEqual(reg.nomes, ["0:-41"]);
+});
+
+test("enc válido vira cabeçalho confiável e sai da URL; cell canônico vai em x-rumo-cell", async () => {
+  const { env, reg } = novoAmbiente();
+  const t = await token();
+  const r = await chamar(pedido(`/ws?cell=-21:-41&enc=0123456789abcdef&t=${t}`), env);
+  assert.equal(r.status, 200);
+  const h = reg.pedidos[0].headers;
+  assert.equal(h.get("x-rumo-enc"), "0123456789abcdef");
+  assert.equal(h.get("x-rumo-cell"), "-21:-41");
+  assert.equal(new URL(reg.pedidos[0].url).searchParams.has("enc"), false);
+});
+
+test("enc com formato inválido: 400 e nada chega à Celula", async () => {
+  const { env, reg } = novoAmbiente();
+  const t = await token();
+  for (const enc of ["", "xyz", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdef00", "../../x"]) {
+    const r = await chamar(pedido(`/ws?cell=-21:-41&enc=${encodeURIComponent(enc)}&t=${t}`), env);
+    assert.equal(r.status, 400, `enc ${JSON.stringify(enc)}`);
+  }
+  assert.equal(reg.pedidos.length, 0);
+});
+
+test("SEGURANÇA: x-rumo-enc, x-rumo-cell e outros x-rumo-* do cliente são apagados", async () => {
+  const { env, reg } = novoAmbiente();
+  const t = await token();
+  await chamar(
+    pedido(`/ws?cell=-21:-41&t=${t}`, { "x-rumo-enc": "0123456789abcdef", "X-Rumo-Cell": "0:0", "x-rumo-qualquer": "1" }),
+    env,
+  );
+  const h = reg.pedidos[0].headers;
+  assert.equal(h.get("x-rumo-enc"), null);
+  assert.equal(h.get("x-rumo-cell"), "-21:-41");
+  assert.equal(h.get("x-rumo-qualquer"), null);
+});

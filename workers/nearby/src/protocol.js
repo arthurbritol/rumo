@@ -14,6 +14,10 @@ const numeroOuNulo = (min, max) => {
   const n = numero(min, max);
   return (v) => v === null || n(v);
 };
+const inteiro = (min, max) => (v) => Number.isInteger(v) && v >= min && v <= max;
+// Id de encontro: 16 hex gerados pelo servidor (Encounters).
+export const ID_ENCONTRO_RE = /^[0-9a-f]{16}$/;
+const idEncontro = (v) => typeof v === "string" && ID_ENCONTRO_RE.test(v);
 const daLista = (lista) => (v) => typeof v === "string" && lista.includes(v);
 
 // Tabela de validadores: tipo -> { campo: regra }. Só os campos listados são devolvidos.
@@ -33,6 +37,11 @@ const VALIDADORES = {
     distKm: numeroOuNulo(0, Infinity),
     etaMin: numeroOuNulo(0, Infinity),
   },
+  // Encontros: o ponto marcado, vagas de 2 a 8 (com quem propõe) e o id de quem entra.
+  proposta: { lat: numero(-90, 90), lon: numero(-180, 180), vagas: inteiro(2, 8) },
+  cancelar: {},
+  entrar: { id: idEncontro },
+  sair: {},
 };
 
 const falha = (error) => ({ ok: false, error });

@@ -128,3 +128,23 @@ test("limite mede bytes UTF-8, não caracteres", () => {
   assert.ok(Buffer.byteLength(raw) > 2048);
   assert.equal(parseClientMessage(raw).ok, false);
 });
+
+test("proposta: ponto finito e vagas inteiras de 2 a 8", () => {
+  const p = { t: "proposta", lat: -20.3, lon: -40.3, vagas: 4 };
+  assert.deepEqual(ok(p), p);
+  assert.equal(ok({ ...p, vagas: 2 }).vagas, 2);
+  assert.equal(ok({ ...p, vagas: 8 }).vagas, 8);
+  for (const vagas of [1, 9, 0, -3, 2.5, "4", null, undefined, NaN]) bad({ ...p, vagas });
+  for (const lat of [91, "x", null, undefined]) bad({ ...p, lat });
+  bad({ ...p, lon: 181 });
+  bad({ t: "proposta", lat: -20.3, lon: -40.3 });
+});
+
+test("cancelar e sair são mensagens vazias; entrar exige id no formato do servidor", () => {
+  assert.deepEqual(ok({ t: "cancelar", x: 1 }), { t: "cancelar" });
+  assert.deepEqual(ok({ t: "sair" }), { t: "sair" });
+  assert.deepEqual(ok({ t: "entrar", id: "0123456789abcdef" }), { t: "entrar", id: "0123456789abcdef" });
+  for (const id of ["", "ABCDEF0123456789", "0123456789abcde", "0123456789abcdef0", 5, null, undefined, "../x"]) {
+    bad({ t: "entrar", id });
+  }
+});
