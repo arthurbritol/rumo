@@ -29,7 +29,13 @@ import { applyOffset, cellId, distanceM, fuzzOffset } from "./geo.js";
 import { combina } from "./match.js";
 import { MAX_BLOQUEADOS } from "./conta.js";
 
-const BLOQ_RENOVAR_MS = 60_000; // a lista de bloqueios de cada conexão é relida da Conta a cada 1 min (no alarme)
+const BLOQ_RENOVAR_MS = 300_000; // a lista de bloqueios de cada conexão é relida da Conta a cada 5 min (no alarme)
+const PRAZO_CONTA_MS = 3000; // prazo de cada chamada à Conta nas leituras de bloqueio e na segurança
+const SEGURANCA_INTERVALO_MS = 2000; // no máximo 1 bloquear/denunciar a cada 2 s por conexão
+const DENUNCIA_DEDUP_MS = 24 * 3_600_000;
+const PARES_MS = 24 * 3_600_000; // quem esteve no mesmo encontro pode bloquear/denunciar por 24 h
+const MAX_PARES_PESSOAS = 5000;
+const MAX_PARES_POR_PESSOA = 100;
 
 const INTERVALO_MIN_ENVIO_MS = 2000; // no máximo uma lista a cada 2 s por conexão
 const ALARME_MS = 30_000; // varredura de quem ficou sem sinal
@@ -69,16 +75,24 @@ export class Celula {
     this.zumbis = new Set(); // encontros desfeitos por limparZumbis: a Conta fecha com "falha" (sem espera)
     this.sujo = false; // estrutura mudou fora de um fim (ex.: saiu um não-proponente): precisa gravar
     this.fechamentos = []; // avisos de fim à Conta que falharam: [{ uid, motivo, id, tentativas }]
-    // connId -> { uids: Set<uid> (quem esta pessoa bloqueou OU quem a bloqueou), em }: só memória, nunca enviado.
-    // Sem entrada (ainda não carregada ou a Conta falhou) = falha fechada: ninguém é mostrado.
+    // connId -> { uid, bloqueou, bloqueadoPor, em, carregado }: só memória, nunca enviado.
+    // Sem lista carregada (ainda ou a Conta falhou) = falha fechada: ninguém é mostrado.
     this.bloq = new Map();
+    this.idxBloqueou = new Map(); // uid -> Set<uid> que ele bloqueou (união das conexões desta Celula)
+    this.ritmoSeg = new Map(); // connId -> ms até poder bloquear/denunciar de novo
+    this.denLocal = new Map(); // "uid>alvo" -> ms da denúncia já registrada (dedupe de 24 h sem chamar a Conta)
+    this.reparos = []; // lado "bloqueadoPor" que falhou ao gravar: [{ de, para, tentativas }]
+    this.pares = {}; // uid -> [{ sessao, uid, ate }]: outros participantes de encontros que terminaram (24 h)
+    this.paresSujo = false;
     ctx.blockConcurrencyWhile(async () => {
       await Promise.all(
         ctx.getWebSockets().map((ws) => {
           const a = ws.deserializeAttachment();
-          return a ? this.carregarBloqueios(a.connId, a.uid) : null;
+          return a ? this.carregarBloqueios(a.connId, a.uid, PRAZO_CONTA_MS) : null;
         }),
       );
+      this.pares = (await ctx.storage.get("pares")) ?? {};
+      this.reparos = (await ctx.storage.get("reparos")) ?? [];
       const salvo = await ctx.storage.get("enc");
       if (salvo) this.importarEnc(salvo);
       // Depois de reinício/deploy o estado voltou do storage, mas os sockets podem ter ido embora:
@@ -141,7 +155,7 @@ export class Celula {
     const r = parseClientMessage(mensagem);
     if (!r.ok) return this.erro(ws, "mensagem_invalida");
     const msg = r.msg;
-    if (!this.bloq.has(a.connId)) await this.carregarBloqueios(a.connId, a.uid); // tenta de novo se a Conta falhou
+    if (!this.bloq.get(a.connId)?.carregado) await this.carregarBloqueios(a.connId, a.uid); // tenta de novo se a Conta falhou
 
     if (msg.t === "procurar") {
       this.presence.join(a.connId, a.uid, msg);
@@ -355,7 +369,7 @@ export class Celula {
     this.mudou();
   }
 
-  async sairDoEncontro(ws, a) {
+  async sairDoEncontro(ws, a, motivoFim = "saiu") {
     if (!a.encId) return this.erro(ws, "inexistente");
     const id = a.encId;
     try {
@@ -369,7 +383,7 @@ export class Celula {
     this.guardar(ws, a);
     this.cache.delete(a.connId);
     try {
-      ws.send(JSON.stringify({ t: "fim", id, motivo: "saiu" }));
+      ws.send(JSON.stringify({ t: "fim", id, motivo: motivoFim }));
     } catch {
       // socket já caiu
     }
@@ -398,14 +412,19 @@ export class Celula {
     for (const connId of this.presence.expire()) {
       this.fechar(this.socketDe(connId), "sem sinal");
     }
+    const velhas = [];
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
       if (this.expirou(a)) this.fechar(ws, "token expirado");
       else if (a?.encId && this.now() - (a.visto ?? this.now()) > SEM_SINAL_MS) this.fechar(ws, "sem sinal");
-      else if (a && this.now() - (this.bloq.get(a.connId)?.em ?? 0) > BLOQ_RENOVAR_MS) {
-        await this.carregarBloqueios(a.connId, a.uid); // pega bloqueios feitos por outra Celula
-      }
+      else if (a && this.now() - (this.bloq.get(a.connId)?.em ?? 0) > BLOQ_RENOVAR_MS) velhas.push(a);
     }
+    // Pega bloqueios feitos por outra Celula: só conexões sem leitura recente, em paralelo e com prazo.
+    await Promise.allSettled(velhas.map((a) => this.carregarBloqueios(a.connId, a.uid, PRAZO_CONTA_MS)));
+    this.reindexarBloqueios();
+    this.podarPares();
+    await this.salvarPares();
+    await this.tentarReparos();
     this.limparZumbis();
     await this.finalizar(); // expirações de proposta/encontro e quem saiu
     await this.tentarFechamentos();
@@ -441,6 +460,8 @@ export class Celula {
     this.pendentes.delete(a.connId);
     this.cache.delete(a.connId);
     this.bloq.delete(a.connId);
+    this.ritmoSeg.delete(a.connId);
+    this.reindexarBloqueios();
     this.mudou();
   }
 
@@ -457,6 +478,8 @@ export class Celula {
       this.pendentes.delete(a.connId);
       this.cache.delete(a.connId);
       this.bloq.delete(a.connId);
+    this.ritmoSeg.delete(a.connId);
+    this.reindexarBloqueios();
     }
     try {
       ws.close(1000, motivo);
@@ -537,11 +560,17 @@ export class Celula {
     if (!eu?.pos) return [];
     const raioM = eu.rolê.raioKm * 1000;
     const lista = [];
+    const uidsPorEnc = new Map();
+    for (const ws of this.ctx.getWebSockets()) {
+      const o = ws.deserializeAttachment();
+      if (o?.encId) uidsPorEnc.set(o.encId, [...(uidsPorEnc.get(o.encId) ?? []), o.uid]);
+    }
     for (const enc of this.enc.encontros.values()) {
       const livres = enc.vagas - enc.participantes.size;
       if (livres <= 0 || a.encId === enc.id || this.pend.has(enc.id)) continue;
       const dono = this.donos.get(enc.id);
       if (dono !== undefined && this.oculto(connId, dono)) continue; // bloqueio nos dois sentidos
+      if ((uidsPorEnc.get(enc.id) ?? []).some((u) => this.oculto(connId, u))) continue; // e com qualquer participante
       if (distanceM(eu.pos, enc.ponto) > raioM) continue;
       lista.push({
         id: enc.id,
@@ -611,7 +640,7 @@ export class Celula {
       for (const ws of this.ctx.getWebSockets()) {
         const a = ws.deserializeAttachment();
         if (a?.encId !== f.id) continue;
-        uids.push(a.uid);
+        uids.push({ uid: a.uid, sessao: a.encSessao });
         try {
           ws.send(JSON.stringify({ t: "fim", id: f.id, motivo: f.motivo }));
         } catch {
@@ -635,38 +664,107 @@ export class Celula {
     }
     await Promise.all(contas);
     await this.salvarEnc();
+    await this.salvarPares();
     this.mudou();
   }
 
-  // Gancho da Tarefa 19 (ruling R5): aqui entrarão os pares (sessão -> uid dos outros) por 24 h.
-  aoFimDoEncontro(/* fim, uids */) {}
-
   // --- bloqueios e denúncias ---
 
-  // Relê da Conta quem esta conexão bloqueou ou quem a bloqueou. Em falha mantém o que já havia
-  // (ou nada: falha fechada, ninguém aparece até conseguir).
-  async carregarBloqueios(connId, uid) {
+  // Estado por conexão (só memória, nunca enviado): { uid, bloqueou: Set, bloqueadoPor: Set, em, carregado }.
+  // Guardamos os dois conjuntos separados: quem foi bloqueado não pode descobrir quem o bloqueou.
+
+  novaEntradaBloqueio(connId, uid) {
+    let b = this.bloq.get(connId);
+    if (!b) {
+      b = { uid, bloqueou: new Set(), bloqueadoPor: new Set(), em: 0, carregado: false };
+      this.bloq.set(connId, b);
+    }
+    return b;
+  }
+
+  // Índice uid -> quem esse uid bloqueou (união das conexões desta Celula): a simetria vale mesmo
+  // quando a Conta do outro lado ainda não foi atualizada.
+  reindexarBloqueios() {
+    const idx = new Map();
+    for (const b of this.bloq.values()) {
+      if (!b.carregado) continue;
+      const s = idx.get(b.uid) ?? new Set();
+      for (const u of b.bloqueou) s.add(u);
+      idx.set(b.uid, s);
+    }
+    this.idxBloqueou = idx;
+  }
+
+  // Relê da Conta. A entrada nasce ANTES da consulta e o que foi aplicado na memória durante ela
+  // é preservado. Em falha mantém o que já havia (sem nada: falha fechada, ninguém aparece).
+  async carregarBloqueios(connId, uid, prazoMs = PRAZO_CONTA_MS) {
+    const entrada = this.novaEntradaBloqueio(connId, uid);
     try {
-      const { status, corpo } = await this.chamarConta(uid, "/bloqueios", "GET");
+      const { status, corpo } = await this.chamarConta(uid, "/bloqueios", "GET", prazoMs);
       if (status !== 200 || corpo.ok !== true) throw new Error(`status ${status}`);
-      const novo = new Set([...(corpo.bloqueados ?? []), ...(corpo.bloqueadoPor ?? [])]);
-      // Não perde bloqueios aplicados na memória enquanto a consulta estava em andamento.
-      for (const u of this.bloq.get(connId)?.uids ?? []) novo.add(u);
-      this.bloq.set(connId, { uids: novo, em: this.now() });
+      if (this.bloq.get(connId) !== entrada) return; // a conexão fechou durante a consulta
+      for (const u of corpo.bloqueados ?? []) entrada.bloqueou.add(u);
+      for (const u of corpo.bloqueadoPor ?? []) entrada.bloqueadoPor.add(u);
+      entrada.carregado = true;
+      entrada.em = this.now();
+      this.reindexarBloqueios();
+      this.repararLadoFaltante(entrada);
     } catch (e) {
       console.error("falha ao consultar bloqueios", e?.message);
     }
   }
 
-  // true se `uid` não pode ser visto por esta conexão (bloqueio nos dois sentidos) ou se a lista
-  // ainda não foi carregada.
-  oculto(connId, uid) {
-    const b = this.bloq.get(connId);
-    return !b || b.uids.has(uid);
+  // Se A bloqueou B e B está aqui sem o registro de A em bloqueadoPor, regrava o lado de B.
+  repararLadoFaltante(entrada) {
+    for (const o of this.bloq.values()) {
+      if (o === entrada || !o.carregado || !entrada.bloqueou.has(o.uid) || o.bloqueadoPor.has(entrada.uid)) continue;
+      o.bloqueadoPor.add(entrada.uid);
+      this.enfileirarReparo(entrada.uid, o.uid);
+    }
   }
 
-  // sessão opaca (de presença ou de encontro) -> { uid, pos real } ou null. O uid nunca sai daqui.
-  resolverSessao(sessao) {
+  enfileirarReparo(de, para) {
+    if (!this.reparos.some((r) => r.de === de && r.para === para)) this.reparos.push({ de, para, tentativas: 0 });
+    this.salvarReparos().catch(() => {});
+  }
+
+  async salvarReparos() {
+    await this.ctx.storage.put("reparos", this.reparos);
+  }
+
+  // No alarme: regrava o lado do bloqueado que falhou antes.
+  async tentarReparos() {
+    if (this.reparos.length === 0) return;
+    const lista = this.reparos;
+    this.reparos = [];
+    for (const r of lista) {
+      let feito = false;
+      try {
+        const x = await this.chamarConta(
+          r.para,
+          `/bloquear?uid=${encodeURIComponent(r.de)}&sentido=bloqueadoPor`,
+          "POST",
+          PRAZO_CONTA_MS,
+        );
+        feito = x.status === 200 || (x.status === 409 && x.corpo.erro === "limite");
+      } catch {
+        // tenta de novo no próximo alarme
+      }
+      if (!feito && r.tentativas + 1 < 20) this.reparos.push({ ...r, tentativas: r.tentativas + 1 });
+    }
+    await this.salvarReparos();
+  }
+
+  // true se `uid` não pode ser visto por esta conexão: bloqueio nos dois sentidos (inclusive o
+  // que a outra pessoa fez por outra conexão desta Celula) ou lista ainda não carregada.
+  oculto(connId, uid) {
+    const b = this.bloq.get(connId);
+    return !b || !b.carregado || b.bloqueou.has(uid) || b.bloqueadoPor.has(uid) || !!this.idxBloqueou.get(uid)?.has(b.uid);
+  }
+
+  // sessão opaca -> { uid, pos real } ou null. Vale para quem está agora na Celula (presença ou
+  // encontro) e, por 24 h, para quem esteve no mesmo encontro que `meuUid`. O uid nunca sai daqui.
+  resolverSessao(sessao, meuUid) {
     let achado = null;
     for (const o of this.presence.pessoas.values()) {
       if (o.sessao === sessao) achado = { uid: o.uid, pos: o.pos };
@@ -677,16 +775,53 @@ export class Celula {
       const p = this.enc.encontros.get(o.encId)?.participantes.get(sessao)?.pos ?? null;
       achado = { uid: o.uid, pos: achado?.pos ?? (p ? { lat: p.lat, lon: p.lon } : null) };
     }
+    if (!achado) {
+      const par = (this.pares[meuUid] ?? []).find((x) => x.sessao === sessao && x.ate > this.now());
+      if (par) {
+        let pos = null;
+        for (const o of this.presence.pessoas.values()) if (o.uid === par.uid && o.pos) pos = o.pos;
+        achado = { uid: par.uid, pos };
+      }
+    }
     return achado;
   }
 
+  // Sessão desconhecida e "quem me bloqueou" respondem igual (mesmo erro, mesma chamada à Conta).
+  async inexistenteIgual(ws, a) {
+    await this.chamarConta(a.uid, "/bloqueios", "GET", PRAZO_CONTA_MS).catch(() => {});
+    this.erro(ws, "inexistente");
+  }
+
+  // Limite de ritmo por conexão para bloquear/denunciar (1 a cada 2 s). true se pode seguir.
+  ritmoOk(ws, a) {
+    const agora = this.now();
+    const ate = this.ritmoSeg.get(a.connId) ?? 0;
+    if (agora < ate) {
+      this.erro(ws, "espera", { restanteMs: ate - agora });
+      return false;
+    }
+    this.ritmoSeg.set(a.connId, agora + SEGURANCA_INTERVALO_MS);
+    return true;
+  }
+
+  // Quem me bloqueou (e eu não bloqueei de volta) não pode ser alvo: indistinguível de desconhecido.
+  alvoInvisivel(a, uidAlvo) {
+    const b = this.bloq.get(a.connId);
+    if (!b) return false;
+    if (b.bloqueou.has(uidAlvo)) return false;
+    return b.bloqueadoPor.has(uidAlvo) || !!this.idxBloqueou.get(uidAlvo)?.has(a.uid);
+  }
+
   async bloquear(ws, a, msg) {
-    const alvo = this.resolverSessao(msg.sessao);
-    if (!alvo) return this.erro(ws, "inexistente"); // desconhecida ou de outra Celula
+    if (!this.ritmoOk(ws, a)) return;
+    const alvo = this.resolverSessao(msg.sessao, a.uid);
+    if (!alvo || this.alvoInvisivel(a, alvo.uid)) return this.inexistenteIgual(ws, a);
     if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
+    const minha = this.bloq.get(a.connId);
+    if (minha?.bloqueou.has(alvo.uid)) return this.ok(ws, "bloqueio"); // já bloqueado: nada a gravar nem a difundir
     const [eu, ele] = [encodeURIComponent(a.uid), encodeURIComponent(alvo.uid)];
     try {
-      const r = await this.chamarConta(a.uid, `/bloquear?uid=${ele}&sentido=bloqueou`);
+      const r = await this.chamarConta(a.uid, `/bloquear?uid=${ele}&sentido=bloqueou`, "POST", PRAZO_CONTA_MS);
       if (r.status === 409 && r.corpo.erro === "limite") return this.erro(ws, "limite", { max: MAX_BLOQUEADOS });
       if (r.status !== 200 || r.corpo.ok !== true) throw new Error(`status ${r.status}`);
     } catch (e) {
@@ -699,49 +834,55 @@ export class Celula {
     this.mudou(true);
     let simetrico = false;
     try {
-      const r = await this.chamarConta(alvo.uid, `/bloquear?uid=${eu}&sentido=bloqueadoPor`);
+      const r = await this.chamarConta(alvo.uid, `/bloquear?uid=${eu}&sentido=bloqueadoPor`, "POST", PRAZO_CONTA_MS);
       simetrico = r.status === 200 && r.corpo.ok === true;
     } catch (e) {
       console.error("falha ao gravar bloqueio do outro lado", e?.message);
     }
-    if (!simetrico) return this.erro(ws, "indisponivel"); // repetir é seguro (idempotente)
+    if (!simetrico) this.enfileirarReparo(a.uid, alvo.uid); // o alarme regrava; o bloqueio já vale
     this.ok(ws, "bloqueio");
   }
 
   aplicarBloqueio(uidA, uidB) {
-    for (const ws of this.ctx.getWebSockets()) {
-      const o = ws.deserializeAttachment();
-      const b = o && this.bloq.get(o.connId);
-      if (!b) continue;
-      if (o.uid === uidA) b.uids.add(uidB);
-      else if (o.uid === uidB) b.uids.add(uidA);
+    for (const b of this.bloq.values()) {
+      if (b.uid === uidA) b.bloqueou.add(uidB);
+      else if (b.uid === uidB) b.bloqueadoPor.add(uidA);
     }
+    this.reindexarBloqueios();
   }
 
   // Quem estava no mesmo encontro que a pessoa bloqueada sai dele: o bloqueado, ou quem bloqueou
-  // se o bloqueado é o dono do encontro.
+  // se o bloqueado é o dono do encontro. Quem é removido recebe o fim neutro "cancelado".
   async expulsarDoMesmoEncontro(uidA, uidB) {
     const sockets = this.ctx.getWebSockets().map((ws) => ({ ws, a: ws.deserializeAttachment() }));
     for (const x of sockets.filter((s) => s.a?.uid === uidA && s.a.encId)) {
       for (const y of sockets.filter((s) => s.a?.uid === uidB && s.a.encId === x.a.encId)) {
-        const sai = this.donos.get(x.a.encId) === uidB ? x : y;
-        await this.sairDoEncontro(sai.ws, sai.ws.deserializeAttachment());
+        const donoEhB = this.donos.get(x.a.encId) === uidB;
+        const sai = donoEhB ? x : y;
+        await this.sairDoEncontro(sai.ws, sai.ws.deserializeAttachment(), donoEhB ? "saiu" : "cancelado");
       }
     }
   }
 
   async denunciar(ws, a, msg) {
-    const alvo = this.resolverSessao(msg.sessao);
-    if (!alvo) return this.erro(ws, "inexistente");
+    if (!this.ritmoOk(ws, a)) return;
+    const alvo = this.resolverSessao(msg.sessao, a.uid);
+    // Quem bloqueou pode denunciar quem bloqueou; quem foi bloqueado não "enxerga" o bloqueador.
+    if (!alvo || this.alvoInvisivel(a, alvo.uid)) return this.inexistenteIgual(ws, a);
     if (alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
+    const chave = `${a.uid}>${alvo.uid}`;
+    if (this.now() - (this.denLocal.get(chave) ?? -Infinity) < DENUNCIA_DEDUP_MS) return this.ok(ws, "denuncia"); // já coberta
     const ele = encodeURIComponent(alvo.uid);
     let reservou = false;
     try {
-      // 1) reserva a cota do denunciante (5 por hora; repetir o mesmo alvo em 24 h não gasta cota)
-      const c = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}`);
+      // 1) reserva (provisória) a cota do denunciante: 5 por hora; repetir o mesmo alvo em 24 h não gasta cota
+      const c = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}`, "POST", PRAZO_CONTA_MS);
       if (c.status === 409 && c.corpo.erro === "espera") return this.erro(ws, "espera", { restanteMs: c.corpo.restanteMs });
       if (c.status !== 200 || c.corpo.ok !== true) throw new Error(`status ${c.status}`);
-      if (c.corpo.duplicada) return this.ok(ws, "denuncia");
+      if (c.corpo.duplicada) {
+        this.denLocal.set(chave, this.now());
+        return this.ok(ws, "denuncia");
+      }
       reservou = true;
       // 2) grava na Conta do denunciado, com a posição já desviada (200 a 400 m)
       let q = "";
@@ -753,11 +894,16 @@ export class Celula {
       const d = await this.chamarConta(
         alvo.uid,
         `/denunciar?por=${encodeURIComponent(a.uid)}&motivo=${encodeURIComponent(msg.motivo)}${q}`,
+        "POST",
+        PRAZO_CONTA_MS,
       );
       if (d.status !== 200 || d.corpo.ok !== true) throw new Error(`status ${d.status}`);
+      // 3) só agora a reserva vira definitiva (24 h); sem confirmação ela expira sozinha em 30 s
+      await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&confirmar=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
+      this.denLocal.set(chave, this.now());
     } catch (e) {
       console.error("falha ao registrar denúncia", e?.message);
-      if (reservou) await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&desfazer=1`).catch(() => {}); // devolve a cota
+      if (reservou) await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&desfazer=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
       return this.erro(ws, "indisponivel");
     }
     this.ok(ws, "denuncia");
@@ -771,13 +917,59 @@ export class Celula {
     }
   }
 
+  // Pares por 24 h (ruling R5): quem esteve no mesmo encontro pode bloquear/denunciar na tela de fim.
+  // pares[uid] = [{ sessao, uid, ate }] dos OUTROS participantes; nunca enviado a ninguém.
+  aoFimDoEncontro(_fim, membros) {
+    const ate = this.now() + PARES_MS;
+    for (const m of membros) {
+      if (!this.pares[m.uid] && Object.keys(this.pares).length >= MAX_PARES_PESSOAS) continue;
+      const lista = (this.pares[m.uid] ?? []).filter((x) => x.ate > this.now());
+      for (const o of membros) {
+        if (o.uid !== m.uid) lista.push({ sessao: o.sessao, uid: o.uid, ate });
+      }
+      this.pares[m.uid] = lista.slice(-MAX_PARES_POR_PESSOA);
+    }
+    this.paresSujo = true;
+  }
+
+  podarPares() {
+    const agora = this.now();
+    for (const [uid, lista] of Object.entries(this.pares)) {
+      const viva = lista.filter((x) => x.ate > agora);
+      if (viva.length !== lista.length) this.paresSujo = true;
+      if (viva.length === 0) delete this.pares[uid];
+      else this.pares[uid] = viva;
+    }
+    for (const [k, t] of this.denLocal) if (agora - t >= DENUNCIA_DEDUP_MS) this.denLocal.delete(k);
+  }
+
+  async salvarPares() {
+    if (!this.paresSujo) return;
+    this.paresSujo = false;
+    await this.ctx.storage.put("pares", this.pares);
+  }
+
   // --- Conta (por uid) ---
 
-  async chamarConta(uid, caminho, method = "POST") {
+  // `prazoMs` (opcional): desiste da chamada depois desse tempo (erro "prazo").
+  async chamarConta(uid, caminho, method = "POST", prazoMs = null) {
     const ns = this.env.CONTA;
     if (!ns) throw new Error("binding CONTA ausente");
-    const resp = await ns.get(ns.idFromName(uid)).fetch(`https://conta${caminho}`, { method });
-    return { status: resp.status, corpo: await resp.json() };
+    const chamada = (async () => {
+      const resp = await ns.get(ns.idFromName(uid)).fetch(`https://conta${caminho}`, { method });
+      return { status: resp.status, corpo: await resp.json() };
+    })();
+    if (prazoMs === null) return chamada;
+    let timer;
+    const limite = new Promise((_, rej) => {
+      timer = setTimeout(() => rej(new Error("prazo")), prazoMs);
+    });
+    chamada.catch(() => {});
+    try {
+      return await Promise.race([chamada, limite]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // Falha fechada: sem resposta clara da Conta, a proposta não é aceita. Se a chamada falhar

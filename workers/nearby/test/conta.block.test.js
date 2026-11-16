@@ -39,17 +39,19 @@ test("bloquear recusa uid inválido, sentido inválido e método errado", async 
   assert.equal((await chamar("/bloquear?uid=x", "GET")).status, 405);
 });
 
-test("teto de bloqueados: o 501º é recusado com limite; o bloqueadoPor guarda os mais recentes", async () => {
+test("teto de bloqueados: o 501º é recusado com limite; bloqueadoPor recusa acima de 5000 sem descartar", async () => {
   const { chamar } = nova();
   for (let i = 0; i < MAX_BLOQUEADOS; i++) assert.equal((await chamar(`/bloquear?uid=u${i}`)).status, 200);
   const r = await chamar("/bloquear?uid=extra");
   assert.equal(r.status, 409);
   assert.equal(r.corpo.erro, "limite");
   assert.equal((await chamar("/bloquear?uid=u0")).status, 200); // já bloqueado continua ok
-  for (let i = 0; i < 2005; i++) await chamar(`/bloquear?uid=p${i}&sentido=bloqueadoPor`);
+  for (let i = 0; i < 5000; i++) assert.equal((await chamar(`/bloquear?uid=p${i}&sentido=bloqueadoPor`)).status, 200);
+  const r2 = await chamar("/bloquear?uid=pextra&sentido=bloqueadoPor");
+  assert.equal(r2.status, 409); // recusa em vez de descartar entradas antigas
   const { bloqueadoPor } = (await chamar("/bloqueios", "GET")).corpo;
-  assert.equal(bloqueadoPor.length, 2000);
-  assert.equal(bloqueadoPor.at(-1), "p2004");
+  assert.equal(bloqueadoPor.length, 5000);
+  assert.equal(bloqueadoPor[0], "p0");
 });
 
 test("denunciar grava {por, em, motivo, lat, lon}; motivo inválido é recusado", async () => {
@@ -122,4 +124,17 @@ test("protocolo: bloquear e denunciar exigem sessão de 16 hex e motivo válido"
   }
   assert.equal(parseClientMessage(JSON.stringify({ t: "denunciar", sessao: s, motivo: "spam" })).ok, false);
   assert.equal(parseClientMessage(JSON.stringify({ t: "denunciar", sessao: s })).ok, false);
+});
+
+test("reserva de cota não confirmada expira em 30 s; confirmar a torna definitiva por 24 h", async () => {
+  const { chamar, relogio } = nova();
+  assert.deepEqual((await chamar("/cota-denuncia?alvo=q")).corpo, { ok: true });
+  assert.equal((await chamar("/cota-denuncia?alvo=q")).corpo.duplicada, true);
+  relogio.t += 31_000;
+  assert.equal((await chamar("/cota-denuncia?alvo=q")).corpo.duplicada, undefined); // expirou: reserva nova
+  await chamar("/cota-denuncia?alvo=q&confirmar=1");
+  relogio.t += 3_600_000;
+  assert.equal((await chamar("/cota-denuncia?alvo=q")).corpo.duplicada, true);
+  relogio.t += 24 * 3_600_000;
+  assert.equal((await chamar("/cota-denuncia?alvo=q")).corpo.duplicada, undefined);
 });

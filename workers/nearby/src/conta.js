@@ -24,7 +24,8 @@ const UID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 // Bloqueios e denúncias (Tarefa 15). Tetos para o storage do Durable Object nunca crescer sem fim.
 export const MAX_BLOQUEADOS = 500; // quem esta pessoa bloqueou (recusa acima disso)
-const MAX_BLOQUEADO_POR = 2000; // quem bloqueou esta pessoa (mantém os mais recentes)
+const MAX_BLOQUEADO_POR = 5000; // quem bloqueou esta pessoa (recusa acima disso; nunca descarta entradas antigas)
+const RESERVA_MS = 30_000; // reserva de cota ainda não confirmada vale 30 s
 const MAX_DENUNCIAS = 200; // denúncias recebidas (mantém as mais recentes)
 const DENUNCIA_DEDUP_MS = 24 * 3_600_000; // mesmo denunciante/denunciado em 24 h conta uma vez
 const COTA_DENUNCIAS = 5; // denúncias por denunciante por hora
@@ -105,8 +106,8 @@ export class Conta {
           if (lista.length >= MAX_BLOQUEADOS) return json({ ok: false, erro: "limite" }, 409);
           lista.push(alvo);
         } else {
+          if (lista.length >= MAX_BLOQUEADO_POR) return json({ ok: false, erro: "limite" }, 409);
           lista.push(alvo);
-          if (lista.length > MAX_BLOQUEADO_POR) lista.splice(0, lista.length - MAX_BLOQUEADO_POR);
         }
         await this.ctx.storage.put("bloqueios", b);
       }
@@ -115,14 +116,20 @@ export class Conta {
 
     if (url.pathname === "/cota-denuncia") {
       // Na Conta do denunciante: repetição do mesmo alvo em 24 h não gasta cota; máx. 5 por hora.
-      // A cota é RESERVADA já na consulta (atômico, sem corrida entre denúncias simultâneas);
-      // com `desfazer=1` a reserva é devolvida se a gravação da denúncia falhou.
+      // A consulta faz uma RESERVA provisória (atômica, sem corrida entre denúncias simultâneas) que
+      // vale 30 s; só `confirmar=1` (depois da denúncia gravada) a torna definitiva por 24 h, e
+      // `desfazer=1` a devolve. Uma reserva nunca confirmada some sozinha.
       const alvo = url.searchParams.get("alvo") ?? "";
       if (!UID_RE.test(alvo)) return json({ ok: false, erro: "parametro_invalido" }, 400);
-      const feitas = ((await this.ctx.storage.get("cotaDenuncias")) ?? []).filter((d) => agora - d.em < DENUNCIA_DEDUP_MS);
+      const viva = (d) => agora - d.em < (d.pendente ? RESERVA_MS : DENUNCIA_DEDUP_MS);
+      const feitas = ((await this.ctx.storage.get("cotaDenuncias")) ?? []).filter(viva);
       if (url.searchParams.get("desfazer") === "1") {
-        const resto = feitas.filter((d) => d.alvo !== alvo);
-        await this.ctx.storage.put("cotaDenuncias", resto);
+        await this.ctx.storage.put("cotaDenuncias", feitas.filter((d) => !(d.alvo === alvo && d.pendente)));
+        return json({ ok: true });
+      }
+      if (url.searchParams.get("confirmar") === "1") {
+        for (const d of feitas) if (d.alvo === alvo && d.pendente) { d.pendente = false; d.em = agora; }
+        await this.ctx.storage.put("cotaDenuncias", feitas);
         return json({ ok: true });
       }
       if (feitas.some((d) => d.alvo === alvo)) return json({ ok: true, duplicada: true });
@@ -131,7 +138,7 @@ export class Conta {
         const restanteMs = naHora[0].em + COTA_JANELA_MS - agora;
         return json({ ok: false, erro: "espera", restanteMs }, 409);
       }
-      feitas.push({ alvo, em: agora });
+      feitas.push({ alvo, em: agora, pendente: true });
       await this.ctx.storage.put("cotaDenuncias", feitas);
       return json({ ok: true });
     }

@@ -1,7 +1,7 @@
 // Integração de bloqueios e denúncias na Celula (Durable Object de verdade) com a Conta real.
 // Rodar com: npm run test:int
 import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:test";
+import { env, runInDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 
 const ROLE = { t: "procurar", ritmo: "moderado", distancia: "50a150", parada: "cafe", raioKm: 5 };
 const BASE = { lat: -20.3, lon: -40.3 };
@@ -47,6 +47,9 @@ async function pessoa(stub, uid, dLat = 0) {
   c.enviar(posMsg(BASE.lat + dLat, BASE.lon));
   return c;
 }
+// Zera o limite de ritmo (1 bloquear/denunciar a cada 2 s) para não esperar nos testes.
+const livre = (stub) => runInDurableObject(stub, (inst) => { inst.ritmoSeg.clear(); });
+
 // Descobre a sessão de cada vizinho de `c` (lista com uma pessoa só).
 const unicaSessao = (c) => lista(c)[0].sessao;
 
@@ -102,10 +105,7 @@ describe("bloqueio na Celula", { timeout: 20000 }, () => {
     const b = await pessoa(stub, uB, 0.001);
     const c = await pessoa(stub, uC, 0.002);
     expect(await esperar(() => lista(a)?.length === 2 && lista(b)?.length === 2)).toBe(true);
-    // Só A e B: usa cada sessão que A enxerga até o bloqueio pegar o B (B e C estão a ~110 m).
-    // Para saber qual é B, B propõe e A enxerga o id da proposta; mas antes bloqueia por tentativa:
-    // A bloqueia as duas sessões? Não: usa as sessões do encontro. Simples: B propõe, A e C veem; A
-    // bloqueia a sessão do proponente (participante.eu do encontro de B só B conhece). Então usa vizinhos.
+    // B propõe; A e C veem a proposta. Depois B bloqueia uma das sessões vizinhas e vê-se quem sumiu.
     b.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 3 });
     expect(await esperar(() => ultimo(b, "encontro"))).toBeTruthy();
     expect(await esperar(() => ultimo(a, "propostas")?.lista.length === 1 && ultimo(c, "propostas")?.lista.length === 1)).toBe(true);
@@ -178,10 +178,12 @@ describe("bloqueio na Celula", { timeout: 20000 }, () => {
     expect(await esperar(() => erro(a, "inexistente"))).toBe(true);
     a.enviar({ t: "bloquear", sessao: "uid-a" });
     expect(await esperar(() => erro(a, "mensagem_invalida"))).toBe(true);
+    await livre(stub);
     // B manda a própria sessão (a que A enxerga dele): recusado como sessao_propria.
     const bSess = unicaSessao(a);
     b.enviar({ t: "bloquear", sessao: bSess });
     expect(await esperar(() => erro(b, "sessao_propria"))).toBe(true);
+    await livre(stub);
     b.enviar({ t: "denunciar", sessao: bSess, motivo: "outro" });
     expect(await esperar(() => b.recebidas.filter((m) => m.codigo === "sessao_propria").length === 2)).toBe(true);
     expect(aSessVistaPorB).not.toBe(bSess);
@@ -215,7 +217,9 @@ describe("bloqueio na Celula", { timeout: 20000 }, () => {
     const sessB = ultimo(b, "encontro").eu;
     a.enviar({ t: "bloquear", sessao: sessB });
     expect(await esperar(() => ok(a, "bloqueio"))).toBe(true);
-    expect(await esperar(() => tipo(b, "fim").some((m) => m.motivo === "saiu"))).toBe(true);
+    // Quem é removido recebe o fim neutro "cancelado" (nunca "saiu"), sem revelar o bloqueio.
+    expect(await esperar(() => tipo(b, "fim").some((m) => m.motivo === "cancelado"))).toBe(true);
+    expect(tipo(b, "fim").some((m) => m.motivo === "saiu")).toBe(false);
     expect(await esperar(() => ultimo(a, "encontro")?.participantes.length === 1)).toBe(true);
   });
 
@@ -271,7 +275,10 @@ describe("denúncia na Celula", { timeout: 20000 }, () => {
     a.enviar({ t: "denunciar", sessao: s, motivo: "spam" });
     expect(await esperar(() => erro(a, "mensagem_invalida"))).toBe(true);
     expect(await denuncias(uB)).toEqual([]);
+    await livre(stub);
     a.enviar({ t: "denunciar", sessao: s, motivo: "falso" });
+    expect(await esperar(() => ok(a, "denuncia"))).toBe(true);
+    await livre(stub);
     a.enviar({ t: "denunciar", sessao: s, motivo: "outro" });
     expect(await esperar(() => a.recebidas.filter((m) => m.t === "ok").length === 2)).toBe(true);
     expect((await denuncias(uB)).length).toBe(1);
@@ -289,11 +296,160 @@ describe("denúncia na Celula", { timeout: 20000 }, () => {
     for (let i = 0; i < 6; i++) alvos.push(await pessoa(stub, unico(`uid-alvo${i}`), 0.0005 * (i + 1)));
     expect(await esperar(() => lista(a)?.length === 6)).toBe(true);
     const sessoes = lista(a).map((v) => v.sessao);
-    for (const s of sessoes) a.enviar({ t: "denunciar", sessao: s, motivo: "incomodo" });
+    for (const s of sessoes) {
+      await livre(stub);
+      a.enviar({ t: "denunciar", sessao: s, motivo: "incomodo" });
+      await dormir(150);
+    }
     const feito = await esperar(() => a.recebidas.filter((m) => m.t === "ok").length === 5 && erro(a, "espera"));
     if (!feito) console.log(JSON.stringify(a.recebidas.filter((m) => m.t !== "vizinhos" && m.t !== "propostas")));
     expect(feito).toBe(true);
     const e = a.recebidas.find((m) => m.codigo === "espera");
     expect(e.restanteMs).toBeGreaterThan(0);
+  });
+});
+
+describe("bloqueio: privacidade, encontros e propagação", { timeout: 25000 }, () => {
+  const conta = (uid) => env.CONTA.get(env.CONTA.idFromName(uid));
+  const bloqueios = async (uid) => (await conta(uid).fetch("https://conta/bloqueios")).json();
+
+  it("quem foi bloqueado não descobre quem bloqueou (inexistente, igual a desconhecida); quem bloqueou ainda denuncia", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b");
+    const a = await pessoa(stub, uA);
+    const b = await pessoa(stub, uB, 0.001);
+    expect(await esperar(() => lista(a)?.length === 1 && lista(b)?.length === 1)).toBe(true);
+    const sessB = unicaSessao(a);
+    const sessA = unicaSessao(b); // a sessão de A como B a enxergava
+    a.enviar({ t: "bloquear", sessao: sessB });
+    expect(await esperar(() => ok(a, "bloqueio"))).toBe(true);
+    await livre(stub);
+
+    // B tenta bloquear/denunciar A: mesmo erro de uma sessão desconhecida.
+    b.enviar({ t: "bloquear", sessao: sessA });
+    expect(await esperar(() => erro(b, "inexistente"))).toBe(true);
+    await livre(stub);
+    b.enviar({ t: "denunciar", sessao: sessA, motivo: "outro" });
+    expect(await esperar(() => b.recebidas.filter((m) => m.codigo === "inexistente").length === 2)).toBe(true);
+    expect(b.recebidas.filter((m) => m.t === "erro").map((m) => Object.keys(m).sort().join())).toEqual(["codigo,t", "codigo,t"]);
+    expect((await conta(uA).fetch("https://conta/denuncias").then((r) => r.json())).denuncias).toEqual([]);
+    // A, que bloqueou, ainda pode denunciar B.
+    a.enviar({ t: "denunciar", sessao: sessB, motivo: "comportamento" });
+    expect(await esperar(() => ok(a, "denuncia"))).toBe(true);
+  });
+
+  it("participante bloqueado impede entrar; a proposta some da lista de quem é bloqueado por um participante", async () => {
+    const stub = novaCelula();
+    const uC = unico("uid-c"), uA = unico("uid-a"), uB = unico("uid-b");
+    const c = await pessoa(stub, uC);
+    c.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 4 });
+    expect(await esperar(() => ultimo(c, "encontro"))).toBeTruthy();
+    const id = ultimo(c, "encontro").id;
+    const a = await conectar(stub, uA, { "x-rumo-enc": id });
+    a.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(a, "encontro"))).toBeTruthy();
+    const b = await pessoa(stub, uB, 0.001);
+    expect(await esperar(() => ultimo(b, "propostas")?.lista.length === 1)).toBe(true);
+    // A (participante) bloqueou B por outra Celula: só as Contas sabem; a releitura do alarme aplica.
+    await conta(uA).fetch(`https://conta/bloquear?uid=${uB}`, { method: "POST" });
+    await conta(uB).fetch(`https://conta/bloquear?uid=${uA}&sentido=bloqueadoPor`, { method: "POST" });
+    await runInDurableObject(stub, async (inst) => {
+      for (const b2 of inst.bloq.values()) b2.em = 0;
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await esperar(() => ultimo(b, "propostas")?.lista.length === 0)).toBe(true);
+    const bx = await conectar(stub, uB, { "x-rumo-enc": id });
+    bx.enviar({ t: "entrar", id });
+    expect(await esperar(() => erro(bx, "inexistente"))).toBe(true);
+  });
+
+  it("propagação entre Celulas: a outra Celula passa a valer na releitura do alarme (5 min)", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b");
+    const a = await pessoa(stub, uA);
+    const b = await pessoa(stub, uB, 0.001);
+    expect(await esperar(() => lista(a)?.length === 1 && lista(b)?.length === 1)).toBe(true);
+    // O bloqueio foi feito noutra Celula (só chegou às Contas).
+    await conta(uA).fetch(`https://conta/bloquear?uid=${uB}`, { method: "POST" });
+    await conta(uB).fetch(`https://conta/bloquear?uid=${uA}&sentido=bloqueadoPor`, { method: "POST" });
+    // Antes de vencer os 5 min, o alarme não relê.
+    await runDurableObjectAlarm(stub);
+    await dormir(300);
+    expect(lista(a).length).toBe(1);
+    await runInDurableObject(stub, async (inst) => {
+      for (const b2 of inst.bloq.values()) b2.em = 0;
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await esperar(() => lista(a).length === 0 && lista(b).length === 0)).toBe(true);
+  });
+
+  it("falha na segunda gravação: o bloqueio vale, A recebe ok e o alarme repara o lado do bloqueado", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b");
+    const a = await pessoa(stub, uA);
+    const b = await pessoa(stub, uB, 0.001);
+    expect(await esperar(() => lista(a)?.length === 1 && lista(b)?.length === 1)).toBe(true);
+    await runInDurableObject(stub, (inst) => {
+      const orig = inst.chamarConta.bind(inst);
+      inst.origChamar = orig;
+      inst.chamarConta = (uid, caminho, ...r) => {
+        if (caminho.includes("sentido=bloqueadoPor")) return Promise.reject(new Error("falhou"));
+        return orig(uid, caminho, ...r);
+      };
+    });
+    a.enviar({ t: "bloquear", sessao: unicaSessao(a) });
+    expect(await esperar(() => ok(a, "bloqueio"))).toBe(true);
+    expect(await esperar(() => lista(a).length === 0 && lista(b).length === 0)).toBe(true);
+    expect((await bloqueios(uB)).bloqueadoPor).toEqual([]);
+    await runInDurableObject(stub, (inst) => { inst.chamarConta = inst.origChamar; });
+    await runDurableObjectAlarm(stub);
+    expect((await bloqueios(uB)).bloqueadoPor).toEqual([uA]);
+    expect((await bloqueios(uA)).bloqueados).toEqual([uB]);
+  });
+});
+
+describe("pares de encontros terminados (24 h)", { timeout: 25000 }, () => {
+  const conta = (uid) => env.CONTA.get(env.CONTA.idFromName(uid));
+
+  it("após o fim, A ainda bloqueia/denuncia B; C (de fora) não resolve a sessão; expira em 24 h", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-a"), uB = unico("uid-b"), uC = unico("uid-c");
+    const a = await pessoa(stub, uA);
+    a.enviar({ t: "proposta", lat: BASE.lat, lon: BASE.lon, vagas: 3 });
+    expect(await esperar(() => ultimo(a, "encontro"))).toBeTruthy();
+    const id = ultimo(a, "encontro").id;
+    const b = await conectar(stub, uB, { "x-rumo-enc": id });
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => ultimo(b, "encontro") && ultimo(a, "encontro")?.participantes.length === 2)).toBe(true);
+    const sessB = ultimo(b, "encontro").eu;
+    const sessA = ultimo(a, "encontro").eu;
+    const c = await pessoa(stub, uC, 0.002);
+
+    a.enviar({ t: "cancelar" });
+    expect(await esperar(() => tipo(a, "fim").length === 1 && tipo(b, "fim").length === 1)).toBe(true);
+    // A sessão de encontro deixou de existir, mas os dois ainda se resolvem na tela de fim.
+    await livre(stub);
+    a.enviar({ t: "denunciar", sessao: sessB, motivo: "falso" });
+    expect(await esperar(() => ok(a, "denuncia"))).toBe(true);
+    expect((await (await conta(uB).fetch("https://conta/denuncias")).json()).denuncias[0]).toMatchObject({ por: uA, motivo: "falso" });
+    await livre(stub);
+    b.enviar({ t: "bloquear", sessao: sessA });
+    expect(await esperar(() => ok(b, "bloqueio"))).toBe(true);
+    // C, de fora, não resolve nenhuma das duas.
+    await livre(stub);
+    c.enviar({ t: "bloquear", sessao: sessB });
+    expect(await esperar(() => erro(c, "inexistente"))).toBe(true);
+    await livre(stub);
+    c.enviar({ t: "denunciar", sessao: sessA, motivo: "outro" });
+    expect(await esperar(() => c.recebidas.filter((m) => m.codigo === "inexistente").length === 2)).toBe(true);
+    expect(JSON.stringify([a.recebidas, b.recebidas, c.recebidas])).not.toContain("uid-");
+
+    // Depois de 24 h o alarme apaga os pares.
+    await runInDurableObject(stub, async (inst) => {
+      const t0 = Date.now();
+      inst.now = () => t0 + 25 * 3_600_000;
+      inst.podarPares();
+      expect(Object.keys(inst.pares).length).toBe(0);
+    });
   });
 });
