@@ -29,5 +29,8 @@ interface NearbyLink {
     /** Manda a mensagem só pela conexão extra do encontro. */
     fun sendEncounter(msg: ClientMessage)
 
+    /** Avisa que há encontro em andamento (ou aguardando resposta): o cliente adia a renovação do token. */
+    fun setEncounterActive(active: Boolean)
+
     fun disconnect()
 }

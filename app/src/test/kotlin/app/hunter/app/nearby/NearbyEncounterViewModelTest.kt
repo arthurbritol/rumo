@@ -33,7 +33,7 @@ class NearbyEncounterViewModelTest {
 
     private class Rig(val link: FakeLink, val positions: MutableSharedFlow<TrackPoint>, val vm: NearbyViewModel)
 
-    private fun TestScope.rig(): Rig {
+    private fun TestScope.rig(eta: EtaCalculator = EtaCalculator { _, _ -> null }): Rig {
         val link = FakeLink()
         val positions = MutableSharedFlow<TrackPoint>(extraBufferCapacity = 8)
         val vm = NearbyViewModel(
@@ -42,6 +42,7 @@ class NearbyEncounterViewModelTest {
             positions = { positions },
             clock = { testScheduler.currentTime },
             dispatcher = UnconfinedTestDispatcher(testScheduler),
+            etaCalculator = eta,
         )
         return Rig(link, positions, vm)
     }
@@ -56,8 +57,8 @@ class NearbyEncounterViewModelTest {
         id, Ponto(-20.6, -40.5), 1, "eu1", listOf(Participante("eu1", null, null, false, null, null, false)),
     )
 
-    private fun Rig.emit(msg: ServerMessage, celula: String = cellCentro) {
-        link.eventFlow.tryEmit(NearbyEvent(celula, msg))
+    private fun Rig.emit(msg: ServerMessage, celula: String = cellCentro, extra: Boolean = false) {
+        link.eventFlow.tryEmit(NearbyEvent(celula, msg, extra))
     }
 
     /** Procurando no centro do quadrado, com um vizinho e uma proposta na lista; limpa o que já foi enviado. */
@@ -128,10 +129,12 @@ class NearbyEncounterViewModelTest {
         assertTrue(r.link.sentEnc.isEmpty()) // ainda não abriu
         r.link.openedEncFlow.tryEmit(idEnc)
         assertEquals(listOf<ClientMessage>(ClientMessage.Entrar(idEnc)), r.link.sentEnc)
-        // A lista de vizinhos não mudou (a proposta em que entrou sai da lista de propostas, só isso).
+        // A lista de vizinhos não mudou; a proposta continua na lista (o cartão mostra "Entrando…") até o encontro abrir.
         val depois = r.vm.estado.value as NearbyUiState.Procurando
         assertEquals(antes.vizinhos, depois.vizinhos)
-        assertTrue(depois.propostas.isEmpty())
+        assertEquals(1, depois.propostas.size)
+        r.emit(encontroMsg(), extra = true)
+        assertTrue((r.vm.estado.value as NearbyUiState.Procurando).propostas.isEmpty())
     }
 
     @Test
@@ -139,7 +142,7 @@ class NearbyEncounterViewModelTest {
         val r = rig()
         r.procurando()
         r.vm.entrar(idEnc)
-        r.emit(encontroMsg())
+        r.emit(encontroMsg(), extra = true)
         val ativo = r.vm.encontro.value
         assertIs<EncontroUiState.Ativo>(ativo)
         assertEquals(false, ativo.souProponente)
@@ -152,7 +155,7 @@ class NearbyEncounterViewModelTest {
         val r = rig()
         r.procurando()
         r.vm.entrar(idEnc)
-        r.emit(ServerMessage.Erro("cheio"))
+        r.emit(ServerMessage.Erro("cheio"), extra = true)
         assertEquals("Esse encontro já está cheio", r.vm.aviso.value)
         assertEquals(EncontroUiState.Nenhum, r.vm.encontro.value)
         assertEquals(1, r.link.encDisconnects)
@@ -179,8 +182,8 @@ class NearbyEncounterViewModelTest {
         val r = rig()
         r.procurando()
         r.vm.entrar(idEnc)
-        r.emit(encontroMsg())
-        r.emit(ServerMessage.Fim(idEnc, MotivoFim.CHEGARAM))
+        r.emit(encontroMsg(), extra = true)
+        r.emit(ServerMessage.Fim(idEnc, MotivoFim.CHEGARAM), extra = true)
         assertEquals(EncontroUiState.Encerrado(MotivoFim.CHEGARAM), r.vm.encontro.value)
         assertEquals(1, r.link.encDisconnects)
         r.vm.limparFim()
@@ -220,6 +223,7 @@ class NearbyEncounterViewModelTest {
         val r = rig()
         r.procurando()
         r.vm.proporPonto(-20.6, -40.5, 4)
+        advanceTimeBy(11_000) // o envio de abertura passa pelo limitador (piso de 11 s)
         r.emit(encontroMsg())
         // A posição entra no quadro assim que o encontro abre.
         val primeira = r.link.sent.map { it.first }.filterIsInstance<ClientMessage.Posicao>().last()
@@ -228,13 +232,13 @@ class NearbyEncounterViewModelTest {
         r.link.sent.clear()
         advanceTimeBy(9_000)
         r.positions.tryEmit(centro)
-        assertTrue(r.link.sent.isEmpty()) // antes do piso de 10 s
+        assertTrue(r.link.sent.isEmpty()) // antes do piso de 11 s
         advanceTimeBy(2_000)
         r.positions.tryEmit(centro)
         val msg = r.link.sent.single().first
         assertIs<ClientMessage.Posicao>(msg)
         assertTrue(msg.etaMin != null && msg.distKm != null)
-        assertEquals(null, r.link.sent.single().second) // proponente: pelas conexões da busca
+        assertEquals(cellCentro, r.link.sent.single().second) // proponente: tempo só ao quadrado do ponto
     }
 
     @Test
@@ -242,9 +246,13 @@ class NearbyEncounterViewModelTest {
         val r = rig()
         r.procurando()
         r.vm.entrar(idEnc)
-        r.emit(encontroMsg())
+        advanceTimeBy(11_000)
+        r.emit(encontroMsg(), extra = true)
         val p = r.link.sentEnc.filterIsInstance<ClientMessage.Posicao>().last()
         assertTrue(p.etaMin != null && p.distKm != null)
+        // Aos quadrados da busca vai a posição simples.
+        val simples = r.link.sent.map { it.first }.filterIsInstance<ClientMessage.Posicao>().last()
+        assertEquals(null, simples.etaMin)
     }
 
     @Test
@@ -276,5 +284,123 @@ class NearbyEncounterViewModelTest {
         r.vm.desligar()
         assertEquals(EncontroUiState.Nenhum, r.vm.encontro.value)
         assertEquals(1, r.link.disconnects)
+    }
+
+    // ---- revisão: reconexão da conexão extra, renovação, ETA ----
+
+    private fun Rig.noEncontroComoConvidado() {
+        procurando()
+        vm.entrar(idEnc)
+        emit(encontroMsg(), extra = true)
+    }
+
+    @Test
+    fun `reenvio de entrar com ja_em_encontro tenta de novo ate 3 vezes e depois encerra`() = runTest {
+        val r = rig()
+        r.noEncontroComoConvidado()
+        r.link.sentEnc.clear()
+        repeat(3) { n ->
+            r.emit(ServerMessage.Erro("ja_em_encontro"), extra = true)
+            assertIs<EncontroUiState.Ativo>(r.vm.encontro.value)
+            advanceTimeBy(2_900)
+            assertEquals(n, r.link.sentEnc.size)
+            advanceTimeBy(200)
+            assertEquals(listOf<ClientMessage>(ClientMessage.Entrar(idEnc)), r.link.sentEnc.takeLast(1))
+            assertEquals(n + 1, r.link.sentEnc.size)
+        }
+        r.emit(ServerMessage.Erro("ja_em_encontro"), extra = true)
+        assertEquals(EncontroUiState.Encerrado(MotivoFim.SAIU), r.vm.encontro.value)
+        assertEquals(1, r.link.encDisconnects)
+    }
+
+    @Test
+    fun `reentrada que da certo zera as tentativas`() = runTest {
+        val r = rig()
+        r.noEncontroComoConvidado()
+        r.emit(ServerMessage.Erro("ja_em_encontro"), extra = true)
+        advanceTimeBy(3_100)
+        r.emit(encontroMsg(), extra = true)
+        r.link.sentEnc.clear()
+        repeat(3) {
+            r.emit(ServerMessage.Erro("ja_em_encontro"), extra = true)
+            advanceTimeBy(3_100)
+        }
+        assertIs<EncontroUiState.Ativo>(r.vm.encontro.value)
+        assertEquals(3, r.link.sentEnc.size)
+    }
+
+    @Test
+    fun `inexistente cheio ou nao_procurando da conexao extra no encontro ativo encerram com cartao de fim`() = runTest {
+        for (codigo in listOf("inexistente", "cheio", "nao_procurando")) {
+            val r = rig()
+            r.noEncontroComoConvidado()
+            r.link.sent.clear()
+            r.emit(ServerMessage.Erro(codigo), extra = true)
+            assertEquals(EncontroUiState.Encerrado(MotivoFim.SAIU), r.vm.encontro.value, codigo)
+            assertEquals(1, r.link.encDisconnects, codigo)
+            assertTrue(r.link.sent.none { it.first is ClientMessage.Procurar }, "nao reenvia procurar: $codigo")
+        }
+    }
+
+    @Test
+    fun `nao_procurando da conexao extra durante a entrada nao refaz o procurar`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.entrar(idEnc)
+        r.link.sent.clear()
+        r.emit(ServerMessage.Erro("nao_procurando"), extra = true)
+        assertTrue(r.link.sent.isEmpty())
+        assertEquals(EncontroUiState.Nenhum, r.vm.encontro.value)
+        assertEquals(1, r.link.encDisconnects)
+    }
+
+    @Test
+    fun `espera vinda de entrar mostra aguarde um instante`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.entrar(idEnc)
+        r.emit(ServerMessage.Erro("espera", 1_500), extra = true)
+        assertEquals("Aguarde um instante e tente de novo", r.vm.aviso.value)
+    }
+
+    @Test
+    fun `encontro em andamento ou aguardando segura a renovacao do token`() = runTest {
+        val r = rig()
+        r.procurando()
+        assertEquals(false, r.link.ativoMudancas.last())
+        r.vm.entrar(idEnc)
+        assertEquals(true, r.link.ativoMudancas.last()) // aguardando
+        r.emit(encontroMsg(), extra = true)
+        assertEquals(true, r.link.ativoMudancas.last()) // ativo
+        r.vm.sair()
+        assertEquals(false, r.link.ativoMudancas.last())
+    }
+
+    @Test
+    fun `roteador bloqueante nao segura o envio da posicao e so ha uma rota em voo com recuo`() = runTest {
+        val chamadas = java.util.concurrent.atomic.AtomicInteger()
+        val iniciou = java.util.concurrent.CountDownLatch(1)
+        val calc = EtaCalculator(timeoutMs = 5_000) { _, _ ->
+            chamadas.incrementAndGet()
+            iniciou.countDown()
+            Thread.sleep(60_000) // bloqueante
+            null
+        }
+        val r = rig(calc)
+        r.procurando()
+        r.vm.proporPonto(-20.6, -40.5, 4)
+        advanceTimeBy(11_000)
+        r.emit(encontroMsg())
+        // A posição saiu na hora, com a linha reta, sem esperar o roteador.
+        val primeira = r.link.sent.map { it.first }.filterIsInstance<ClientMessage.Posicao>().last()
+        assertEquals(17.0, primeira.etaMin!!, 1.0)
+        assertTrue(iniciou.await(3, java.util.concurrent.TimeUnit.SECONDS))
+        // Posições seguintes, com a rota ainda em voo ou em recuo, saem sem chamar o roteador de novo.
+        repeat(3) {
+            advanceTimeBy(11_000)
+            r.positions.tryEmit(centro)
+        }
+        assertEquals(1, chamadas.get())
+        assertEquals(3, r.link.sent.map { it.first }.filterIsInstance<ClientMessage.Posicao>().size - 1)
     }
 }

@@ -35,7 +35,8 @@ enum class NearbyStatus { DESCONECTADO, CONECTANDO, CONECTADO, INDISPONIVEL }
 const val NEARBY_INDISPONIVEL_TEXTO = "Rolê por perto indisponível agora"
 
 /** Mensagem do servidor junto com o id do quadrado de onde chegou (a conexão de encontro usa o quadrado dado a ela). */
-data class NearbyEvent(val celula: String, val msg: ServerMessage)
+/** [extra]: veio da conexão extra do encontro (que não procura: não traz vizinhos nem propostas). */
+data class NearbyEvent(val celula: String, val msg: ServerMessage, val extra: Boolean = false)
 
 /**
  * Cliente WebSocket do Rolê por perto: uma conexão por quadrado, mais (opcionalmente) uma de encontro.
@@ -49,7 +50,16 @@ class NearbyClient(
     private val backoff: Backoff = Backoff(),
     private val renewAfterMs: Long = 55 * 60_000L,
     private val http: OkHttpClient = defaultHttp,
+    /** De quanto em quanto tempo reavaliar a renovação adiada por [setEncounterActive]. */
+    private val holdPollMs: Long = 5_000L,
 ) : NearbyLink {
+    @Volatile private var encounterActive = false
+
+    /** Com encontro em andamento a renovação do token (que derruba e refaz as conexões) fica para depois. */
+    override fun setEncounterActive(active: Boolean) {
+        encounterActive = active
+    }
+
     private val baseUrl = url
     private val _events = MutableSharedFlow<NearbyEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val events: SharedFlow<NearbyEvent> = _events
@@ -220,7 +230,7 @@ class NearbyClient(
                     override fun onMessage(webSocket: WebSocket, text: String) {
                         gotMessage = true
                         val m = parseServerMessage(text) ?: return
-                        _events.tryEmit(NearbyEvent(cell, m))
+                        _events.tryEmit(NearbyEvent(cell, m, extra = encId != null))
                     }
 
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -245,7 +255,10 @@ class NearbyClient(
                 }
                 ws = socket
                 val outcome = try {
-                    withTimeoutOrNull(renewAfterMs) { done.await() }
+                    var o = withTimeoutOrNull(renewAfterMs) { done.await() }
+                    // Em encontro, não renova agora: a conexão que cai cancela a proposta do proponente.
+                    while (o == null && encounterActive) o = withTimeoutOrNull(holdPollMs) { done.await() }
+                    o
                 } catch (e: CancellationException) {
                     closeGracefully(socket)
                     throw e

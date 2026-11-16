@@ -4,6 +4,10 @@ import app.hunter.model.Geo
 import app.hunter.nav.LatLon
 import app.hunter.nav.Route
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 /** Distância (km) e tempo (min) até o ponto, arredondados (1 casa e minuto inteiro). */
@@ -13,11 +17,22 @@ data class Eta(val distKm: Double, val etaMin: Double)
  * Rota e tempo até o ponto do encontro, calculados aqui (o servidor não confia nem usa o tempo, só mostra aos outros).
  * [router] é o roteador do app (Valhalla); se falhar ou não achar rota, vale a linha reta a [VELOCIDADE_RETA_KMH].
  */
-class EtaCalculator(private val router: suspend (from: LatLon, to: LatLon) -> Route?) {
+class EtaCalculator(
+    private val timeoutMs: Long = 5_000L,
+    private val router: suspend (from: LatLon, to: LatLon) -> Route?,
+) {
+    /** Rota do roteador, ou a linha reta se ele falhar, não achar rota ou passar de [timeoutMs]. */
+    suspend fun eta(from: LatLon, to: LatLon): Eta = etaRota(from, to) ?: linhaReta(from, to)
 
-    suspend fun eta(from: LatLon, to: LatLon): Eta {
+    /**
+     * Só a rota: `null` se o roteador falhou, demorou mais que [timeoutMs] ou não achou. O roteador roda numa thread
+     * de E/S que é interrompida no tempo limite (uma chamada de rede bloqueante não segura o chamador).
+     */
+    suspend fun etaRota(from: LatLon, to: LatLon): Eta? {
         val rota = try {
-            router(from, to)
+            withTimeoutOrNull(timeoutMs) {
+                runInterruptible(Dispatchers.IO) { runBlocking { router(from, to) } }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -26,7 +41,7 @@ class EtaCalculator(private val router: suspend (from: LatLon, to: LatLon) -> Ro
         if (rota != null && rota.distanceM.isFinite() && rota.durationS.isFinite()) {
             return arredondar(rota.distanceM / 1000.0, rota.durationS / 60.0)
         }
-        return linhaReta(from, to)
+        return null
     }
 
     /** Sem rede: distância em linha reta e tempo a 40 km/h. */

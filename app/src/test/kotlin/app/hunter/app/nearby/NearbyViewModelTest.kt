@@ -45,6 +45,8 @@ internal class FakeLink : NearbyLink {
     override fun connectEncounter(cell: String, encId: String) { encConnects += cell to encId }
     override fun disconnectEncounter() { encDisconnects++ }
     override fun sendEncounter(msg: ClientMessage) { sentEnc += msg }
+    val ativoMudancas = mutableListOf<Boolean>()
+    override fun setEncounterActive(active: Boolean) { ativoMudancas += active }
     override fun disconnect() { disconnects++ }
 }
 

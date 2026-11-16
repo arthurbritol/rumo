@@ -70,6 +70,7 @@ class NearbyClientTest {
         tokens: List<String?> = listOf("tok"),
         renewAfterMs: Long = 55 * 60_000L,
         tokenCalls: MutableList<Boolean> = CopyOnWriteArrayList(),
+        holdPollMs: Long = 5_000L,
     ): NearbyClient {
         var i = 0
         return NearbyClient(
@@ -81,6 +82,7 @@ class NearbyClientTest {
             scope = scope,
             backoff = fastBackoff,
             renewAfterMs = renewAfterMs,
+            holdPollMs = holdPollMs,
         )
     }
 
@@ -190,6 +192,20 @@ class NearbyClientTest {
         assertEquals(true, calls[1])
         server.takeRequest(1, TimeUnit.SECONDS)
         assertEquals("b", server.takeRequest(1, TimeUnit.SECONDS)!!.requestUrl!!.queryParameter("t"))
+    }
+
+    @Test
+    fun comEncontroEmAndamentoAdiaARenovacaoDoToken() = runBlocking {
+        server.enqueue(upgrade())
+        server.enqueue(upgrade())
+        val c = client(tokens = listOf("a", "b"), renewAfterMs = 150, holdPollMs = 50)
+        c.setEncounterActive(true)
+        c.connect(setOf("-21:-41"))
+        until { sockets.isNotEmpty() }
+        delay(700) // bem mais que o prazo de renovação
+        assertEquals(1, sockets.size)
+        c.setEncounterActive(false)
+        until { sockets.size >= 2 } // acabou o encontro: renova
     }
 
     @Test

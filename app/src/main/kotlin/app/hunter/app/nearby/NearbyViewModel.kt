@@ -1,6 +1,7 @@
 package app.hunter.app.nearby
 
 import androidx.lifecycle.ViewModel
+import app.hunter.model.Geo
 import app.hunter.model.TrackPoint
 import app.hunter.nav.LatLon
 import app.hunter.nearby.ClientMessage
@@ -26,7 +27,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /** O que a tela do Rolê por perto mostra. */
 sealed interface NearbyUiState {
@@ -113,12 +113,21 @@ class NearbyViewModel(
     private var usandoExtra = false
     private var propondo = false
     private var aguardoJob: Job? = null
+    private var reentradaJob: Job? = null
+    private var reentradas = 0
+
+    // Rota até o ponto: uma em voo, reaproveitada por 2 min ou 500 m, com recuo depois de falha.
+    private var etaJob: Job? = null
+    private var rotaEta: Eta? = null
+    private var rotaPonto: TrackPoint? = null
+    private var rotaEm = 0L
+    private var etaRecuoAte = 0L
 
     private var pref: Preferencia? = null
     private var state = NearbyState()
     private var cells: Set<String> = emptySet()
     private var lastPoint: TrackPoint? = null
-    private var throttle = PositionThrottle()
+    private var throttle = PositionThrottle(floorMs = PISO_ENVIO_MS)
     private var needProcurar = false
     private var conectou = false
     private var indisponivel = false
@@ -146,7 +155,7 @@ class NearbyViewModel(
         state = NearbyState()
         cells = emptySet()
         lastPoint = null
-        throttle = PositionThrottle()
+        throttle = PositionThrottle(floorMs = PISO_ENVIO_MS)
         needProcurar = true
         conectou = false
         indisponivel = false
@@ -237,7 +246,7 @@ class NearbyViewModel(
 
     /** `procurar` + posição quando necessário (conexão nova, raio novo); depois só a posição, no ritmo do throttle. */
     private fun publicar(p: TrackPoint, atual: Preferencia) {
-        if (needProcurar) throttle = PositionThrottle()
+        if (needProcurar) throttle = PositionThrottle(floorMs = PISO_ENVIO_MS)
         // Em encontro a posição vai a cada 10 s (piso do servidor), com a distância e o tempo até o ponto.
         val due = throttle.shouldSend(clock(), p.latitude, p.longitude, state.encontro != null)
         if (needProcurar) {
@@ -259,9 +268,9 @@ class NearbyViewModel(
     )
 
     /**
-     * Fora de encontro, a posição vai a todos os quadrados. Em encontro, calcula antes a rota e o tempo até o ponto
-     * (o servidor decide sozinho se mostra a posição aproximada ou a real). Quem entrou pela conexão extra manda
-     * a posição com o tempo por ela e, aos quadrados da busca, a posição simples.
+     * Fora de encontro, a posição vai a todos os quadrados. Em encontro leva também a distância e o tempo até o ponto:
+     * a rota do roteador quando há uma recente (2 min ou 500 m), senão a linha reta, que é instantânea. O envio nunca
+     * espera o roteador; a rota nova é pedida em segundo plano (uma por vez, com recuo de 60 s se falhar).
      */
     private fun enviarPosicao(p: TrackPoint) {
         val ponto = state.encontro?.ponto
@@ -271,14 +280,40 @@ class NearbyViewModel(
         }
         val de = LatLon(p.latitude, p.longitude)
         val para = LatLon(ponto.lat, ponto.lon)
-        scope.launch {
-            val eta = withTimeoutOrNull(ETA_TIMEOUT_MS) { etaCalculator.eta(de, para) } ?: etaCalculator.linhaReta(de, para)
-            if (pref == null || state.encontro == null) return@launch
-            if (usandoExtra) {
-                link.sendEncounter(posicao(p, eta.distKm, eta.etaMin))
-                link.send(posicao(p))
-            } else {
+        val agora = clock()
+        val rota = rotaEta
+        val ref = rotaPonto
+        val valida = rota != null && ref != null && agora - rotaEm < ROTA_VALIDA_MS &&
+            Geo.distanceM(ref.latitude, ref.longitude, p.latitude, p.longitude) <= ROTA_VALIDA_M
+        if (!valida) pedirRota(p, de, para, agora)
+        val eta = if (valida) rota!! else etaCalculator.linhaReta(de, para)
+        if (usandoExtra) {
+            // Quem entrou: o tempo vai só pela conexão do encontro; aos quadrados da busca, a posição simples.
+            link.sendEncounter(posicao(p, eta.distKm, eta.etaMin))
+            link.send(posicao(p))
+        } else {
+            // Quem propôs: o tempo vai só ao quadrado do ponto; aos outros, a posição simples.
+            val cell = encCell
+            if (cell == null) {
                 link.send(posicao(p, eta.distKm, eta.etaMin))
+            } else {
+                link.send(posicao(p, eta.distKm, eta.etaMin), cell)
+                for (c in cells) if (c != cell) link.send(posicao(p), c)
+            }
+        }
+    }
+
+    private fun pedirRota(p: TrackPoint, de: LatLon, para: LatLon, agora: Long) {
+        if (etaJob?.isActive == true || agora < etaRecuoAte) return
+        etaJob = scope.launch {
+            val r = etaCalculator.etaRota(de, para)
+            if (pref == null || state.encontro == null) return@launch
+            if (r == null) {
+                etaRecuoAte = clock() + ETA_RECUO_MS
+            } else {
+                rotaEta = r
+                rotaPonto = p
+                rotaEm = clock()
             }
         }
     }
@@ -325,11 +360,10 @@ class NearbyViewModel(
     private fun onEvent(e: NearbyEvent) {
         val atual = pref ?: return
         val m = e.msg
-        val doEncontro = usandoExtra && e.celula == encCell // conexão extra do encontro
-        if (e.celula !in cells && !doEncontro) return
+        if (e.celula !in cells && !e.extra) return
         when (m) {
             is ServerMessage.Vizinhos, is ServerMessage.Propostas -> {
-                if (e.celula !in cells) return // a conexão extra do encontro não alimenta as listas
+                if (e.extra || e.celula !in cells) return // a conexão extra do encontro não alimenta as listas
                 conectou = true
                 state = NearbyState.reduce(state, m, e.celula)
             }
@@ -342,20 +376,22 @@ class NearbyViewModel(
                 propondo = false
                 aguardoJob?.cancel()
                 state = NearbyState.reduce(state, m, e.celula)
-                _encontro.value = EncontroUiState.Ativo(m, souProponente)
-                if (primeiro) lastPoint?.let(::enviarPosicao) // entra no quadro já com distância e tempo
+                setEnc(EncontroUiState.Ativo(m, souProponente))
+                reentradas = 0
+                // Entra no quadro já com distância e tempo, mas pelo mesmo limitador das posições (piso do servidor).
+                if (primeiro) lastPoint?.let { if (throttle.shouldSend(clock(), it.latitude, it.longitude, true)) enviarPosicao(it) }
             }
             is ServerMessage.Fim -> {
                 if (m.id != encId) return // fim atrasado de um encontro que já acabou aqui
                 val extra = usandoExtra
                 state = NearbyState.reduce(state, m, e.celula)
                 zerarEncontro()
-                _encontro.value = EncontroUiState.Encerrado(m.motivo)
+                setEnc(EncontroUiState.Encerrado(m.motivo))
                 if (extra) link.disconnectEncounter()
             }
             is ServerMessage.Erro -> {
-                if (e.celula in cells) conectou = true
-                if (m.codigo == "nao_procurando" && e.celula in cells) {
+                if (!e.extra && e.celula in cells) conectou = true
+                if (m.codigo == "nao_procurando" && !e.extra && e.celula in cells) {
                     // Esta conexão não conhece a procura (quadrado novo, ou a mensagem saiu antes de abrir): refaz só nela.
                     link.send(ClientMessage.Procurar(atual), e.celula)
                     lastPoint?.let { link.send(posicao(it), e.celula) }
@@ -369,16 +405,50 @@ class NearbyViewModel(
 
     private fun onErro(e: NearbyEvent, m: ServerMessage.Erro) {
         val texto = textoDoErro(m.codigo, m.restanteMs)
-        if (propondo && e.celula == encCell && m.codigo in ERROS_DE_PROPOSTA) {
+        if (e.extra && usandoExtra && encId != null) {
+            if (state.encontro != null) {
+                // Reconexão da conexão extra: o `entrar` reenviado pode esbarrar na sessão antiga que o servidor ainda não soltou.
+                when (m.codigo) {
+                    "ja_em_encontro" -> reentrar()
+                    "inexistente", "cheio", "nao_procurando" -> sairSemServidor()
+                    else -> if (texto != null) _aviso.value = texto
+                }
+            } else if (m.codigo in ERROS_DE_ENTRADA || m.codigo == "nao_procurando") {
+                link.disconnectEncounter()
+                zerarEncontro()
+                _aviso.value = if (m.codigo == "espera") TEXTO_ESPERA_ENTRAR else texto ?: textoDoErro("outro", null)
+            }
+            return
+        }
+        if (propondo && !e.extra && e.celula == encCell && m.codigo in ERROS_DE_PROPOSTA) {
             zerarEncontro()
             _aviso.value = texto ?: textoDoErro("indisponivel", null)
-        } else if (usandoExtra && encId != null && state.encontro == null && e.celula == encCell && m.codigo in ERROS_DE_ENTRADA) {
-            link.disconnectEncounter()
-            zerarEncontro()
-            _aviso.value = texto
         } else if (texto != null && !(m.codigo == "inexistente" && encId == null)) {
             _aviso.value = texto
         }
+    }
+
+    /** Até 3 novas tentativas de `entrar` (a cada ~3 s); esgotadas, o encontro acaba aqui com "Você saiu do encontro". */
+    private fun reentrar() {
+        val id = encId ?: return
+        if (reentradas >= MAX_REENTRADAS) {
+            sairSemServidor()
+            return
+        }
+        reentradas++
+        reentradaJob?.cancel()
+        reentradaJob = scope.launch {
+            delay(REENTRADA_MS)
+            if (encId == id && usandoExtra && state.encontro != null) link.sendEncounter(ClientMessage.Entrar(id))
+        }
+    }
+
+    /** O servidor não nos tem mais no encontro: encerra aqui com cartão de fim e fecha a conexão extra. */
+    private fun sairSemServidor() {
+        val id = encId ?: return
+        encerrarLocal(id, MotivoFim.SAIU)
+        link.disconnectEncounter()
+        refresh()
     }
 
     // ---- encontros ----
@@ -403,7 +473,7 @@ class NearbyViewModel(
         encCell = cell
         souProponente = true
         usandoExtra = false
-        _encontro.value = EncontroUiState.Aguardando
+        setEnc(EncontroUiState.Aguardando)
         link.send(ClientMessage.Proposta(lat, lon, vagas.coerceIn(2, 8)), cell)
         aguardarResposta()
     }
@@ -430,7 +500,7 @@ class NearbyViewModel(
         encCell = cell
         souProponente = false
         usandoExtra = true
-        _encontro.value = EncontroUiState.Aguardando
+        setEnc(EncontroUiState.Aguardando)
         link.connectEncounter(cell, id)
         aguardarResposta()
         refresh() // a proposta some da lista de quem está por perto
@@ -455,16 +525,29 @@ class NearbyViewModel(
     /** Fecha o aviso de "o encontro terminou". */
     fun limparFim() {
         state = state.limparFim()
-        if (_encontro.value is EncontroUiState.Encerrado) _encontro.value = EncontroUiState.Nenhum
+        if (_encontro.value is EncontroUiState.Encerrado) setEnc(EncontroUiState.Nenhum)
     }
 
     private fun encerrarLocal(id: String, motivo: MotivoFim) {
         state = state.encerrar(id, motivo)
         zerarEncontro()
-        _encontro.value = EncontroUiState.Encerrado(motivo)
+        setEnc(EncontroUiState.Encerrado(motivo))
+    }
+
+    private fun setEnc(v: EncontroUiState) {
+        _encontro.value = v
+        link.setEncounterActive(v is EncontroUiState.Aguardando || v is EncontroUiState.Ativo)
     }
 
     private fun zerarEncontro() {
+        reentradaJob?.cancel()
+        reentradaJob = null
+        reentradas = 0
+        etaJob?.cancel()
+        etaJob = null
+        rotaEta = null
+        rotaPonto = null
+        etaRecuoAte = 0L
         aguardoJob?.cancel()
         aguardoJob = null
         encId = null
@@ -472,7 +555,7 @@ class NearbyViewModel(
         souProponente = false
         usandoExtra = false
         propondo = false
-        _encontro.value = EncontroUiState.Nenhum
+        setEnc(EncontroUiState.Nenhum)
     }
 
     private fun aguardarResposta() {
@@ -494,12 +577,17 @@ class NearbyViewModel(
         _estado.value = when {
             indisponivel -> NearbyUiState.Indisponivel(NEARBY_INDISPONIVEL_TEXTO)
             !conectou -> NearbyUiState.Ligando
-            else -> NearbyUiState.Procurando(state.vizinhos, state.propostas.filter { it.id != encId })
+            else -> NearbyUiState.Procurando(state.vizinhos, state.propostas.filter { state.encontro == null || it.id != encId })
         }
     }
 
     private companion object {
-        const val ETA_TIMEOUT_MS = 5_000L
+        const val PISO_ENVIO_MS = 11_000L // o servidor descarta posição antes de 10 s: 1 s de folga
+        const val ROTA_VALIDA_MS = 120_000L
+        const val ROTA_VALIDA_M = 500.0
+        const val ETA_RECUO_MS = 60_000L
+        const val REENTRADA_MS = 3_000L
+        const val MAX_REENTRADAS = 3
         val ERROS_DE_PROPOSTA = setOf("espera", "ja_tem_proposta", "indisponivel", "ponto_invalido", "ja_em_encontro", "mensagem_invalida", "nao_procurando")
         val ERROS_DE_ENTRADA = setOf("cheio", "inexistente", "ja_em_encontro", "espera", "mensagem_invalida")
     }

@@ -155,3 +155,4 @@ fun Participante.toRiderFeatureOrNull(): RiderFeature? {
     val lo = lon ?: return null
     return RiderFeature(id = sessao, lat = la, lon = lo, rumo = 0.0, destaque = false, icon = RIDER_ICON)
 }
+const val TEXTO_ESPERA_ENTRAR = "Aguarde um instante e tente de novo"

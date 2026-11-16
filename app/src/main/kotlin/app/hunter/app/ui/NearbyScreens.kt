@@ -112,7 +112,14 @@ fun NearbySheet(
                 is NearbyUiState.Desligado -> estado.aviso?.let { StatusText(it) }
                 is NearbyUiState.Indisponivel -> StatusText(estado.mensagem)
                 NearbyUiState.Ligando -> StatusText("Ligando…")
-                is NearbyUiState.Procurando -> StatusText(faixaProcurando(estado.vizinhos.size))
+                is NearbyUiState.Procurando -> {
+                    StatusText(faixaProcurando(estado.vizinhos.size))
+                    Text(
+                        "Para propor um encontro, segure o dedo no mapa no ponto escolhido.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             if (ligado) {
@@ -202,10 +209,10 @@ fun NearbyRiderCard(vizinho: Vizinho, distancia: String?, onClose: () -> Unit, m
 // ---- Encontros ----
 
 @Composable
-private fun CardHeader(titulo: String, onClose: (() -> Unit)?) {
+private fun CardHeader(titulo: String, onClose: (() -> Unit)?, closeDescription: String = "Fechar") {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(titulo, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        if (onClose != null) IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Fechar", Modifier.size(20.dp)) }
+        if (onClose != null) IconButton(onClick = onClose) { Icon(Icons.Default.Close, closeDescription, Modifier.size(20.dp)) }
     }
 }
 
@@ -268,10 +275,10 @@ fun NearbyCreateProposalCard(aguardando: Boolean, onPropor: (vagas: Int) -> Unit
  * como "Motociclista N", sem nada que identifique). Quem propôs cancela; quem entrou sai.
  */
 @Composable
-fun NearbyEncounterCard(ativo: EncontroUiState.Ativo, onSair: () -> Unit, modifier: Modifier = Modifier) {
+fun NearbyEncounterCard(ativo: EncontroUiState.Ativo, onSair: () -> Unit, onMinimizar: () -> Unit, modifier: Modifier = Modifier) {
     val enc = ativo.encontro
     FloatingCard(modifier, scrollable = true) {
-        CardHeader("Encontro em andamento", null)
+        CardHeader("Encontro em andamento", onMinimizar, "Minimizar")
         Text(
             if (enc.vagasLivres > 0) vagasLivresTexto(enc.vagasLivres) else "Encontro cheio",
             style = MaterialTheme.typography.bodyMedium,
@@ -290,6 +297,27 @@ fun NearbyEncounterCard(ativo: EncontroUiState.Ativo, onSair: () -> Unit, modifi
             }
         }
         SecondaryButton(if (ativo.souProponente) "Cancelar encontro" else "Sair do encontro", onSair)
+    }
+}
+
+/** Resumo do encontro numa pílula ("Encontro · 3,2 km · 12 min"): cabe sobre a navegação; tocar abre o cartão. */
+@Composable
+fun NearbyEncounterChip(ativo: EncontroUiState.Ativo, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val eu = ativo.encontro.participantes.firstOrNull { it.sessao == ativo.encontro.eu }
+    val resumo = if (eu?.chegou == true) "Você chegou" else distEtaTexto(eu?.distKm, eu?.etaMin)
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
+        shadowElevation = 3.dp,
+    ) {
+        Text(
+            "Encontro · $resumo",
+            Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
     }
 }
 

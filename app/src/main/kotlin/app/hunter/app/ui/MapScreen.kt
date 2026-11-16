@@ -144,7 +144,11 @@ fun MapScreen(
     val proposal = selectedProposal?.let { id -> nearbyProposals.firstOrNull { it.id == id } }
     val activeEncounter = encontro as? EncontroUiState.Ativo
     val encounterRiders = activeEncounter?.encontro?.let { e -> e.participantes.filter { it.sessao != e.eu } }.orEmpty()
-    val nearbyCardShown = encontro !is EncontroUiState.Nenhum || proposalPoint != null || proposal != null
+    // Cartões de propor/entrar substituem o painel inferior (como o da moto tocada); o do encontro convive com ele.
+    val nearbyCardShown = proposalPoint != null || proposal != null
+    var encounterExpanded by remember { mutableStateOf(true) }
+    LaunchedEffect(activeEncounter == null) { if (activeEncounter != null) encounterExpanded = true }
+    val encounterCardShown = !nearbyCardShown && (encontro is EncontroUiState.Encerrado || (activeEncounter != null && encounterExpanded))
 
     var searching by remember { mutableStateOf(false) }
     var follow by remember { mutableStateOf(true) }
@@ -251,6 +255,7 @@ fun MapScreen(
             nearby = nearbyRiders,
             proposals = nearbyProposals,
             encounterPoint = activeEncounter?.encontro?.ponto ?: proposalPoint?.let { Ponto(it.lat, it.lon) },
+            encounterPointLabel = if (activeEncounter != null) "Ponto do encontro" else "Ponto escolhido",
             encounterRiders = encounterRiders,
             nearbySearching = nearbyState !is NearbyUiState.Desligado,
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
@@ -301,6 +306,7 @@ fun MapScreen(
                             selectedFuelStation != null -> 340.dp
                             rider != null && !navigating -> 250.dp
                             nearbyCardShown && !navigating -> 300.dp
+                            encounterCardShown && !navigating -> 430.dp
                             navigating -> 190.dp
                             rec.isRecording -> 210.dp
                             else -> 190.dp
@@ -397,14 +403,22 @@ fun MapScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
             )
         }
+        // O cartão do encontro fica acima do painel inferior (que continua lá); com navegação ativa, só a pílula de resumo.
+        if (pv == null && selectedFuelStation == null && rider == null) {
+            val acima = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 200.dp)
+            val e = encontro
+            if (e is EncontroUiState.Ativo) {
+                if (navigating) {
+                    NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 136.dp))
+                } else if (encounterCardShown) {
+                    NearbyEncounterCard(e, onSair = nearbyVm::sair, onMinimizar = { encounterExpanded = false }, modifier = acima)
+                }
+            } else if (e is EncontroUiState.Encerrado && !navigating) {
+                NearbyEndCard(e.motivo, onClose = nearbyVm::limparFim, modifier = acima)
+            }
+        }
         if (nearbyCardShown && !navigating && pv == null && selectedFuelStation == null && rider == null) {
             val cardModifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
-            when (val e = encontro) {
-                is EncontroUiState.Ativo -> NearbyEncounterCard(e, onSair = nearbyVm::sair, modifier = cardModifier)
-                is EncontroUiState.Encerrado -> NearbyEndCard(e.motivo, onClose = nearbyVm::limparFim, modifier = cardModifier)
-                EncontroUiState.Aguardando -> Unit // o aviso aparece se não der certo; o botão do cartão mostra "…"
-                EncontroUiState.Nenhum -> Unit
-            }
             if (encontro is EncontroUiState.Aguardando || encontro is EncontroUiState.Nenhum) {
                 val ponto = proposalPoint
                 if (ponto != null) {
@@ -459,6 +473,11 @@ fun MapScreen(
                 if (nearbyAvailable) {
                     NearbyStrip(nearbyState, onClick = { showNearbySheet = true }, modifier = Modifier.padding(top = 8.dp))
                     nearbyAviso?.let { NearbyNotice(it, onClose = nearbyVm::limparAviso, modifier = Modifier.padding(top = 8.dp)) }
+                    // Encontro minimizado: pílula com o resumo; tocar reabre o cartão.
+                    val ativo = activeEncounter
+                    if (ativo != null && !encounterExpanded) {
+                        NearbyEncounterChip(ativo, onClick = { encounterExpanded = true }, modifier = Modifier.padding(top = 8.dp))
+                    }
                 }
                 if (!online) {
                     Surface(

@@ -159,6 +159,8 @@ fun HunterMap(
     proposals: List<Proposta> = emptyList(),
     /** Ponto do encontro em que o usuário está (nulo fora de um). */
     encounterPoint: Ponto? = null,
+    /** "Ponto escolhido" até a proposta valer; "Ponto do encontro" depois. */
+    encounterPointLabel: String = "Ponto do encontro",
     /** Participantes do encontro com posição (motos que se movem); a própria pessoa não entra aqui. */
     encounterRiders: List<Participante> = emptyList(),
     /** Procurando rolê: o próprio marcador vira a moto laranja ("rider-self"). */
@@ -341,9 +343,9 @@ fun HunterMap(
         val src = style?.getSourceAs<GeoJsonSource>(SRC_NEARBY) ?: return@LaunchedEffect
         src.setGeoJson(nearbyFeatures(nearby, encounterRiders))
     }
-    LaunchedEffect(style, proposals, encounterPoint) {
+    LaunchedEffect(style, proposals, encounterPoint, encounterPointLabel) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_PROPOSALS) ?: return@LaunchedEffect
-        src.setGeoJson(proposalFeatures(proposals, encounterPoint))
+        src.setGeoJson(proposalFeatures(proposals, encounterPoint, encounterPointLabel))
     }
     LaunchedEffect(style, nearbySearching) {
         style?.getLayer("me-symbol")?.setProperties(iconImage(ownMarkerIcon(nearbySearching)))
@@ -488,7 +490,7 @@ private fun nearbyFeatures(riders: List<Vizinho>, encounter: List<Participante>)
     )
 
 /** Pontos de proposta (rótulo "N de M") e o ponto do encontro ativo; só `id`, rótulo e imagem, nada de pessoa. */
-private fun proposalFeatures(proposals: List<Proposta>, encounterPoint: Ponto?): FeatureCollection {
+private fun proposalFeatures(proposals: List<Proposta>, encounterPoint: Ponto?, pointLabel: String): FeatureCollection {
     val out = proposals.map { p ->
         val f = p.toProposalFeature()
         Feature.fromGeometry(Point.fromLngLat(f.lon, f.lat)).also {
@@ -500,7 +502,7 @@ private fun proposalFeatures(proposals: List<Proposta>, encounterPoint: Ponto?):
     if (encounterPoint != null) {
         out += Feature.fromGeometry(Point.fromLngLat(encounterPoint.lon, encounterPoint.lat)).also {
             it.addStringProperty("id", "")
-            it.addStringProperty("label", "Ponto do encontro")
+            it.addStringProperty("label", pointLabel)
             it.addStringProperty("icon", ENCOUNTER_ICON)
         }
     }
