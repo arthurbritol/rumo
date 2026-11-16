@@ -22,6 +22,20 @@ export class Encounters {
     // id -> { id, proponente, ponto, vagas, pref, criadoEm, andamento, marco, participantes }
     // participantes: Map sessao -> { pos, chegou }
     this.encontros = new Map();
+    // Cancelamentos por saída de quem propôs, devolvidos no próximo tick().
+    this.pendentes = [];
+  }
+
+  // Tira a sessão do encontro. Quem propôs saindo cancela; sobrando só o proponente, volta a proposta.
+  _remover(enc, sessionId) {
+    enc.participantes.delete(sessionId);
+    if (sessionId === enc.proponente) {
+      this.encontros.delete(enc.id);
+      this.pendentes.push({ id: enc.id, motivo: "cancelado" });
+    } else if (enc.participantes.size <= 1) {
+      enc.andamento = false;
+      enc.criadoEm = this.now();
+    }
   }
 
   propose(sessionId, ponto, vagas, pref) {
@@ -76,8 +90,8 @@ export class Encounters {
   leave(sessionId, id) {
     const enc = this.encontros.get(id);
     if (!enc) throw new Error("inexistente");
-    enc.participantes.delete(sessionId);
-    if (enc.participantes.size === 0) this.encontros.delete(id);
+    if (!enc.participantes.has(sessionId)) throw new Error("não participa");
+    this._remover(enc, sessionId);
   }
 
   cancel(sessionId, id) {
@@ -91,8 +105,7 @@ export class Encounters {
   // Remove a sessão (sem sinal ou desconectada) de todos os encontros, sem afetar os outros.
   dropSession(sessionId) {
     for (const [id, enc] of this.encontros) {
-      if (!enc.participantes.delete(sessionId)) continue;
-      if (enc.participantes.size === 0) this.encontros.delete(id);
+      if (enc.participantes.has(sessionId)) this._remover(enc, sessionId);
     }
   }
 
@@ -102,8 +115,13 @@ export class Encounters {
     if (!enc) throw new Error("inexistente");
     const p = enc.participantes.get(sessionId);
     if (!p) throw new Error("não participa");
+    const d = pos.distKm;
+    if (typeof d !== "number" || !Number.isFinite(d) || d < 0) throw new Error("distância inválida");
+    if (d >= REAL_KM && !(Number.isFinite(pos.aprox?.lat) && Number.isFinite(pos.aprox?.lon))) {
+      throw new Error("posição aproximada ausente");
+    }
     p.pos = { lat: pos.lat, lon: pos.lon, distKm: pos.distKm, etaMin: pos.etaMin, aprox: pos.aprox ?? null };
-    if (!p.chegou && pos.distKm * 1000 < CHEGADA_KM * 1000) {
+    if (!p.chegou && pos.distKm < CHEGADA_KM) {
       p.chegou = true;
       enc.marco = this.now();
     }
@@ -121,7 +139,7 @@ export class Encounters {
         continue;
       }
       const real = pos.distKm < REAL_KM;
-      const ponto = real || !pos.aprox ? pos : pos.aprox;
+      const ponto = real ? pos : pos.aprox;
       participantes.push({
         sessao,
         lat: ponto.lat,
@@ -138,7 +156,8 @@ export class Encounters {
   // Encerra o que venceu e devolve [{ id, motivo }].
   tick() {
     const agora = this.now();
-    const fins = [];
+    const fins = this.pendentes;
+    this.pendentes = [];
     for (const [id, enc] of this.encontros) {
       let motivo = null;
       if (enc.andamento && [...enc.participantes.values()].every((p) => p.chegou)) motivo = "chegaram";
