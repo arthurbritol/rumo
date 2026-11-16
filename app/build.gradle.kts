@@ -30,7 +30,7 @@ android {
         fun quoted(name: String) = "\"" + ((project.findProperty(name) as String?) ?: "").trim().replace("\"", "") + "\""
         buildConfigField("String", "TRAFFIC_TILE_URL", quoted("trafficTileUrl"))
         buildConfigField("String", "TRAFFIC_TOKEN", quoted("trafficToken"))
-        // Rolê por perto: endereço do Worker nearby (vem do CI; vazio = recurso desligado).
+        // Rolê por perto: endereço do Worker nearby (vem do CI pela variável NEARBY_URL; vazio = recurso desligado).
         buildConfigField("String", "NEARBY_URL", quoted("nearbyUrl"))
     }
 
