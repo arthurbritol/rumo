@@ -204,11 +204,11 @@ export class Conta {
       const q = new URLSearchParams({ uid: uidAlvo, por, motivo });
       if (e.lat !== null) q.set("lat", String(e.lat));
       if (e.lon !== null) q.set("lon", String(e.lon));
-      try {
-        await ns.get(ns.idFromName(INDICE_UID)).fetch(`https://conta/indice-add?${q}`, { method: "POST" });
-      } catch (err) {
-        console.error("falha ao gravar no índice", err?.message);
-      }
+      // Não atrasa a resposta: a denúncia já está gravada (ctx.waitUntil mantém a chamada viva).
+      const p = Promise.resolve()
+        .then(() => ns.get(ns.idFromName(INDICE_UID)).fetch(`https://conta/indice-add?${q}`, { method: "POST" }))
+        .catch((err) => console.error("falha ao gravar no índice", err?.message));
+      this.ctx.waitUntil?.(p);
     }
     return json({ ok: true });
   }

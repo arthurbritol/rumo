@@ -155,7 +155,7 @@ export class Celula {
   }
 
   async webSocketMessage(ws, mensagem) {
-    const a = ws.deserializeAttachment();
+    let a = ws.deserializeAttachment();
     if (this.expirou(a)) {
       this.fechar(ws, "token expirado");
       await this.finalizar();
@@ -169,13 +169,10 @@ export class Celula {
     if (!this.bloq.get(a.connId)?.carregado) await this.carregarBloqueios(a.connId, a.uid); // tenta de novo se a Conta falhou
     if (!this.susp.get(a.connId)?.em) await this.carregarSuspensao(a.connId, a.uid);
     if (this.susp.get(a.connId)?.suspenso) {
-      // Suspensa: perde a presença e não procura, propõe nem entra. Só ela recebe o erro.
-      if (this.presence.pessoas.has(a.connId)) {
-        this.presence.leave(a.connId);
-        this.guardar(ws, a);
-        this.mudou();
-      }
+      // Suspensa: perde a presença e o encontro, e não procura, propõe nem entra. Só ela recebe o erro.
+      await this.tirarSuspenso(ws, a);
       if (["procurar", "proposta", "entrar"].includes(msg.t)) return this.erro(ws, "suspenso");
+      a = ws.deserializeAttachment() ?? a;
     }
 
     if (msg.t === "procurar") {
@@ -756,21 +753,40 @@ export class Celula {
     }
   }
 
-  // No alarme: relê a suspensão de quem está há mais de 5 min sem leitura e tira da presença quem
-  // foi suspenso enquanto conectado (só ele recebe o erro).
+  // Tira a pessoa suspensa da presença e do encontro. Proposta aberta sem participantes é cancelada
+  // (os outros recebem o fim comum "cancelado"); com participantes, ela só sai (saída comum, sem
+  // motivo). Devolve true se mudou algo. Nenhum terceiro fica sabendo da suspensão.
+  async tirarSuspenso(ws, a) {
+    let mudou = false;
+    if (this.presence.pessoas.has(a.connId)) {
+      this.presence.leave(a.connId);
+      this.guardar(ws, a);
+      mudou = true;
+    }
+    if (a.encId) {
+      const enc = this.enc.encontros.get(a.encId);
+      if (enc && this.donos.get(a.encId) === a.uid && enc.participantes.size <= 1) await this.cancelar(ws, a);
+      else await this.sairDoEncontro(ws, a);
+      mudou = true;
+    }
+    if (mudou) this.mudou(true);
+    return mudou;
+  }
+
+  // No alarme: relê a suspensão de quem está há mais de 5 min sem leitura e tira da presença e dos
+  // encontros quem foi suspenso enquanto conectado (só ele recebe o erro).
   async renovarSuspensoes() {
+    const abertos = this.ctx.getWebSockets().filter((ws) => ws.readyState === undefined || ws.readyState === 1);
     const velhas = [];
-    for (const ws of this.ctx.getWebSockets()) {
+    for (const ws of abertos) {
       const a = ws.deserializeAttachment();
       if (a && this.now() - (this.susp.get(a.connId)?.em ?? 0) > BLOQ_RENOVAR_MS) velhas.push(a);
     }
     await Promise.allSettled(velhas.map((a) => this.carregarSuspensao(a.connId, a.uid, PRAZO_CONTA_MS)));
-    for (const ws of this.ctx.getWebSockets()) {
+    for (const ws of abertos) {
       const a = ws.deserializeAttachment();
-      if (!a || !this.susp.get(a.connId)?.suspenso || !this.presence.pessoas.has(a.connId)) continue;
-      this.presence.leave(a.connId);
-      this.guardar(ws, a);
-      this.erro(ws, "suspenso");
+      if (!a || !this.susp.get(a.connId)?.suspenso) continue;
+      if (await this.tirarSuspenso(ws, a)) this.erro(ws, "suspenso");
     }
   }
 

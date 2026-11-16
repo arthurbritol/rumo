@@ -30,8 +30,11 @@ function ambiente(extra = {}) {
 }
 const auth = (t = TOKEN) => ({ Authorization: `Bearer ${t}` });
 const req = (metodo, caminho, headers = {}) => new Request(`https://nearby.example${caminho}`, { method: metodo, headers });
-const denunciar = (env, alvo, por, motivo = "incomodo", extra = "") =>
-  env.CONTA.get(alvo).fetch(`https://conta/denunciar?por=${por}&motivo=${motivo}&uid=${alvo}${extra}`, { method: "POST" });
+const denunciar = async (env, alvo, por, motivo = "incomodo", extra = "") => {
+  const r = await env.CONTA.get(alvo).fetch(`https://conta/denunciar?por=${por}&motivo=${motivo}&uid=${alvo}${extra}`, { method: "POST" });
+  await new Promise((ok) => setTimeout(ok, 5)); // o índice é gravado sem atrasar a resposta
+  return r;
+};
 
 test("sem cabeçalho ou com token errado: 401, sem eco do token", async () => {
   const { env } = ambiente();
@@ -83,6 +86,11 @@ test("lista as denúncias de um uid e, sem uid, o índice recente", async () => 
   const g = await (await handle(req("GET", "/admin/denuncias", auth()), env)).json();
   assert.equal(g.denuncias.length, 3);
   assert.deepEqual(g.denuncias.map((d) => d.uid).sort(), ["bruno", "bruno", "dani"]);
+});
+
+test("uid com . e : é aceito (igual à Conta), __indice__ não", async () => {
+  const { env } = ambiente();
+  assert.equal((await handle(req("GET", "/admin/denuncias?uid=a.b:c", auth()), env)).status, 200);
 });
 
 test("o índice guarda só as 500 mais recentes", async () => {

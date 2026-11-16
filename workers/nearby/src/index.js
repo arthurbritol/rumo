@@ -37,7 +37,7 @@ function cellNoBrasil(cell) {
 
 const texto = (msg, status) => new Response(msg, { status });
 
-const ADMIN_UID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const ADMIN_UID_RE = /^[A-Za-z0-9_.:-]{1,128}$/; // a mesma da Conta
 const jsonAdmin = (corpo, status = 200) =>
   new Response(JSON.stringify(corpo), {
     status,

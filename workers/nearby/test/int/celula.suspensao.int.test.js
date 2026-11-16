@@ -70,4 +70,44 @@ describe("suspensão na Celula", { timeout: 20000 }, () => {
     expect(await esperar(() => lista(a2)?.length === 1)).toBe(true);
     expect(erro(a2, "suspenso")).toBe(false);
   });
+
+  it("suspenso com proposta aberta some dos vizinhos e não aceita entrar; em encontro com gente sai sem motivo", async () => {
+    const stub = env.CELULA.get(env.CELULA.idFromName(unico("susp")));
+    const uA = unico("uid-ana"), uB = unico("uid-bia"), uC = unico("uid-cai");
+    const a = await conectar(stub, uA);
+    const b = await conectar(stub, uB);
+    const c = await conectar(stub, uC);
+    for (const [x, d] of [[a, 0], [b, 0.0001], [c, 0.0002]]) { x.enviar(ROLE); x.enviar(posMsg(-20.3 + d, -40.3)); }
+    expect(await esperar(() => lista(a)?.length === 2)).toBe(true);
+    a.enviar({ t: "proposta", lat: -20.3, lon: -40.3, vagas: 3 });
+    expect(await esperar(() => b.recebidas.some((m) => m.t === "propostas" && m.lista.length === 1))).toBe(true);
+    const id = b.recebidas.filter((m) => m.t === "propostas").at(-1).lista[0].id;
+
+    await suspender(uA);
+    await runInDurableObject(stub, (inst) => { for (const v of inst.susp.values()) v.em = 0; });
+    await runDurableObjectAlarm(stub);
+    expect(await esperar(() => b.recebidas.filter((m) => m.t === "propostas").at(-1)?.lista.length === 0)).toBe(true);
+    b.enviar({ t: "entrar", id });
+    expect(await esperar(() => erro(b, "inexistente"))).toBe(true);
+    expect(b.recebidas.some((m) => m.t === "erro" && m.codigo === "suspenso")).toBe(false);
+
+    // Encontro com participante: o dono suspenso sai; o outro não vê motivo de suspensão.
+    const uD = unico("uid-dan");
+    const a2 = await conectar(stub, uD);
+    a2.enviar(ROLE); a2.enviar(posMsg(-20.3, -40.3));
+    expect(await esperar(() => lista(a2)?.length === 2)).toBe(true);
+    a2.enviar({ t: "proposta", lat: -20.3, lon: -40.3, vagas: 3 });
+    expect(await esperar(() => b.recebidas.filter((m) => m.t === "propostas").at(-1)?.lista.length === 1)).toBe(true);
+    const id2 = b.recebidas.filter((m) => m.t === "propostas").at(-1).lista[0].id;
+    b.enviar({ t: "entrar", id: id2 });
+    expect(await esperar(() => b.recebidas.some((m) => m.t === "encontro" && m.id === id2))).toBe(true);
+    await suspender(uD);
+    await runInDurableObject(stub, (inst) => { for (const v of inst.susp.values()) v.em = 0; });
+    await runDurableObjectAlarm(stub);
+    expect(await esperar(() => erro(a2, "suspenso"))).toBe(true);
+    expect(await esperar(() => b.recebidas.some((m) => m.t === "fim" && m.id === id2))).toBe(true);
+    const fimB = b.recebidas.filter((m) => m.t === "fim" && m.id === id2).at(-1);
+    expect(fimB.motivo).toBe("cancelado");
+    expect(JSON.stringify(b.recebidas)).not.toContain("suspens");
+  });
 });
