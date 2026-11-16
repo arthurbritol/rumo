@@ -79,6 +79,7 @@ export class Celula {
     // connId -> { uid, bloqueou, bloqueadoPor, em, carregado }: só memória, nunca enviado.
     // Sem lista carregada (ainda ou a Conta falhou) = falha fechada: ninguém é mostrado.
     this.bloq = new Map();
+    this.susp = new Map(); // connId -> { suspenso, em }: só memória; só o próprio suspenso fica sabendo
     this.idxBloqueou = new Map(); // uid -> Set<uid> que ele bloqueou (união das conexões desta Celula)
     this.ritmoSeg = new Map(); // connId -> ms até poder bloquear/denunciar de novo
     this.denLocal = new Map(); // "uid>alvo" -> ms da denúncia já registrada (dedupe de 24 h sem chamar a Conta)
@@ -144,7 +145,9 @@ export class Celula {
       visto: this.now(),
       ultima: null, // última posição aceita (conexão sem Presence)
     });
-    await this.carregarBloqueios(servidor.deserializeAttachment().connId, uid);
+    const connId = servidor.deserializeAttachment().connId;
+    await this.carregarBloqueios(connId, uid);
+    await this.carregarSuspensao(connId, uid);
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
@@ -164,6 +167,16 @@ export class Celula {
     if (!r.ok) return this.erro(ws, "mensagem_invalida");
     const msg = r.msg;
     if (!this.bloq.get(a.connId)?.carregado) await this.carregarBloqueios(a.connId, a.uid); // tenta de novo se a Conta falhou
+    if (!this.susp.get(a.connId)?.em) await this.carregarSuspensao(a.connId, a.uid);
+    if (this.susp.get(a.connId)?.suspenso) {
+      // Suspensa: perde a presença e não procura, propõe nem entra. Só ela recebe o erro.
+      if (this.presence.pessoas.has(a.connId)) {
+        this.presence.leave(a.connId);
+        this.guardar(ws, a);
+        this.mudou();
+      }
+      if (["procurar", "proposta", "entrar"].includes(msg.t)) return this.erro(ws, "suspenso");
+    }
 
     if (msg.t === "procurar") {
       this.presence.join(a.connId, a.uid, msg);
@@ -431,6 +444,7 @@ export class Celula {
     }
     // Pega bloqueios feitos por outra Celula: só conexões sem leitura recente, em paralelo e com prazo.
     await Promise.allSettled(velhas.map((a) => this.carregarBloqueios(a.connId, a.uid, PRAZO_CONTA_MS)));
+    await this.renovarSuspensoes();
     this.reindexarBloqueios();
     this.podarPares();
     await this.salvarPares(); // nunca lança: falha mantém o par sujo para o próximo alarme
@@ -474,6 +488,7 @@ export class Celula {
     this.pendentes.delete(a.connId);
     this.cache.delete(a.connId);
     this.bloq.delete(a.connId);
+    this.susp.delete(a.connId);
     this.ritmoSeg.delete(a.connId);
     this.reindexarBloqueios();
     this.mudou();
@@ -492,6 +507,7 @@ export class Celula {
       this.pendentes.delete(a.connId);
       this.cache.delete(a.connId);
       this.bloq.delete(a.connId);
+      this.susp.delete(a.connId);
     this.ritmoSeg.delete(a.connId);
     this.reindexarBloqueios();
     }
@@ -725,6 +741,36 @@ export class Celula {
       this.repararLadoFaltante(entrada);
     } catch (e) {
       console.error("falha ao consultar bloqueios", e?.message);
+    }
+  }
+
+  // Suspensão da pessoa (Conta), relida ao conectar e a cada 5 min. Em falha da Conta, segue sem
+  // suspensão e tenta de novo na próxima mensagem/alarme (`em` só é marcado com resposta válida).
+  async carregarSuspensao(connId, uid, prazoMs = PRAZO_CONTA_MS) {
+    try {
+      const { status, corpo } = await this.chamarConta(uid, "/suspensao", "GET", prazoMs);
+      if (status !== 200 || corpo.ok !== true) throw new Error(`status ${status}`);
+      this.susp.set(connId, { suspenso: corpo.suspenso === true, em: this.now() });
+    } catch (e) {
+      console.error("falha ao consultar suspensão", e?.message);
+    }
+  }
+
+  // No alarme: relê a suspensão de quem está há mais de 5 min sem leitura e tira da presença quem
+  // foi suspenso enquanto conectado (só ele recebe o erro).
+  async renovarSuspensoes() {
+    const velhas = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment();
+      if (a && this.now() - (this.susp.get(a.connId)?.em ?? 0) > BLOQ_RENOVAR_MS) velhas.push(a);
+    }
+    await Promise.allSettled(velhas.map((a) => this.carregarSuspensao(a.connId, a.uid, PRAZO_CONTA_MS)));
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment();
+      if (!a || !this.susp.get(a.connId)?.suspenso || !this.presence.pessoas.has(a.connId)) continue;
+      this.presence.leave(a.connId);
+      this.guardar(ws, a);
+      this.erro(ws, "suspenso");
     }
   }
 
@@ -970,7 +1016,7 @@ export class Celula {
       }
       const d = await this.chamarConta(
         alvo.uid,
-        `/denunciar?por=${encodeURIComponent(a.uid)}&motivo=${encodeURIComponent(msg.motivo)}${q}`,
+        `/denunciar?por=${encodeURIComponent(a.uid)}&motivo=${encodeURIComponent(msg.motivo)}&uid=${ele}${q}`,
         "POST",
         PRAZO_CONTA_MS,
       );

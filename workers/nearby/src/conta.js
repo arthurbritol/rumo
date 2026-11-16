@@ -8,7 +8,12 @@
 //     Com `enc`, só fecha se for a proposta aberta com esse id; senão é ignorado (200, ignorado:true),
 //     para um aviso atrasado/repetido nunca fechar a proposta nova nem prorrogar a espera.
 //   POST /bloquear?uid=<outro>[&sentido=bloqueou|bloqueadoPor], GET /bloqueios  (Tarefa 15)
-//   POST /cota-denuncia?alvo=<uid>[&desfazer=1], POST /denunciar?por=&motivo=[&lat=&lon=], GET /denuncias
+//   POST /cota-denuncia?alvo=<uid>[&desfazer=1], POST /denunciar?por=&motivo=[&lat=&lon=][&uid=<denunciado>], GET /denuncias
+//   GET /suspensao -> {ok, suspenso, ate}; POST /suspensao?acao=por|tirar (Tarefa 16; manual, `ate` reservado
+//     para a suspensão automática da Tarefa 22: null = não expira sozinha)
+//   Conta especial "índice" (uid reservado INDICE_UID, nunca alcançável por um uid real: o Worker recusa
+//     esse uid): POST /indice-add e GET /indice guardam as 500 denúncias mais recentes de todas as
+//     contas, só para o dono listar sem uid. Gravado pela Conta do denunciado, melhor esforço.
 //
 // Segurança de estado: uma proposta "aberta" há mais de 2 h é tratada como fechada (um encontro
 // dura no máximo 30 min de proposta + 60 min em andamento), para um fechar perdido nunca
@@ -30,6 +35,8 @@ const MAX_DENUNCIAS = 200; // denúncias recebidas (mantém as mais recentes)
 const DENUNCIA_DEDUP_MS = 24 * 3_600_000; // mesmo denunciante/denunciado em 24 h conta uma vez
 const COTA_DENUNCIAS = 5; // denúncias por denunciante por hora
 const COTA_JANELA_MS = 3_600_000;
+export const INDICE_UID = "__indice__";
+const MAX_INDICE = 500;
 export const MOTIVOS_DENUNCIA = ["incomodo", "comportamento", "falso", "outro"];
 
 const json = (corpo, status = 200) =>
@@ -48,7 +55,7 @@ export class Conta {
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (["/bloquear", "/bloqueios", "/cota-denuncia", "/denunciar", "/denuncias"].includes(url.pathname)) {
+    if (["/bloquear", "/bloqueios", "/cota-denuncia", "/denunciar", "/denuncias", "/suspensao", "/indice", "/indice-add"].includes(url.pathname)) {
       return this.seguranca(request, url);
     }
     if (url.pathname !== "/abrir" && url.pathname !== "/fechar") return json({ ok: false, erro: "nao_encontrado" }, 404);
@@ -80,9 +87,39 @@ export class Conta {
   // --- bloqueios e denúncias (só a Celula alcança; os uids nunca saem do servidor) ---
 
   async seguranca(request, url) {
-    const leitura = url.pathname === "/bloqueios" || url.pathname === "/denuncias";
+    if (url.pathname === "/suspensao" && request.method === "GET") {
+      const s = (await this.ctx.storage.get("suspensao")) ?? { suspenso: false, ate: null };
+      const vale = s.suspenso && (s.ate == null || s.ate > this.now());
+      return json({ ok: true, suspenso: vale, ate: s.ate ?? null });
+    }
+    const leitura = url.pathname === "/bloqueios" || url.pathname === "/denuncias" || url.pathname === "/indice";
     if (request.method !== (leitura ? "GET" : "POST")) return json({ ok: false, erro: "metodo" }, 405);
     const agora = this.now();
+
+    if (url.pathname === "/suspensao") {
+      const acao = url.searchParams.get("acao");
+      if (acao !== "por" && acao !== "tirar") return json({ ok: false, erro: "parametro_invalido" }, 400);
+      await this.ctx.storage.put("suspensao", { suspenso: acao === "por", ate: null });
+      return json({ ok: true, suspenso: acao === "por" });
+    }
+    if (url.pathname === "/indice") {
+      return json({ ok: true, denuncias: (await this.ctx.storage.get("indice")) ?? [] });
+    }
+    if (url.pathname === "/indice-add") {
+      const num = (n) => {
+        const v = url.searchParams.get(n);
+        const x = v === null || v === "" ? NaN : Number(v);
+        return Number.isFinite(x) ? x : null;
+      };
+      const e = { uid: url.searchParams.get("uid") ?? "", por: url.searchParams.get("por") ?? "", em: agora,
+        motivo: url.searchParams.get("motivo") ?? "", lat: num("lat"), lon: num("lon") };
+      if (!UID_RE.test(e.uid) || !UID_RE.test(e.por) || !MOTIVOS_DENUNCIA.includes(e.motivo)) return json({ ok: false, erro: "parametro_invalido" }, 400);
+      const l = (await this.ctx.storage.get("indice")) ?? [];
+      l.push(e);
+      if (l.length > MAX_INDICE) l.splice(0, l.length - MAX_INDICE);
+      await this.ctx.storage.put("indice", l);
+      return json({ ok: true });
+    }
 
     if (url.pathname === "/bloqueios") {
       const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
@@ -159,6 +196,20 @@ export class Conta {
     lista.push({ por, em: agora, motivo, lat: coord("lat", 90), lon: coord("lon", 180) });
     if (lista.length > MAX_DENUNCIAS) lista.splice(0, lista.length - MAX_DENUNCIAS);
     await this.ctx.storage.put("denuncias", lista);
+    // Índice do dono (melhor esforço: falha aqui nunca derruba a denúncia).
+    const uidAlvo = url.searchParams.get("uid");
+    const ns = this.env?.CONTA;
+    if (ns && uidAlvo && UID_RE.test(uidAlvo)) {
+      const e = lista.at(-1);
+      const q = new URLSearchParams({ uid: uidAlvo, por, motivo });
+      if (e.lat !== null) q.set("lat", String(e.lat));
+      if (e.lon !== null) q.set("lon", String(e.lon));
+      try {
+        await ns.get(ns.idFromName(INDICE_UID)).fetch(`https://conta/indice-add?${q}`, { method: "POST" });
+      } catch (err) {
+        console.error("falha ao gravar no índice", err?.message);
+      }
+    }
     return json({ ok: true });
   }
 }

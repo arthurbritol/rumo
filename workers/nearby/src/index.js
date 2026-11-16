@@ -2,6 +2,9 @@
 //
 //   GET /health                       -> 200 "ok"
 //   GET /ws?cell=<lat>:<lon>&t=<token> (Upgrade: websocket) -> repassa à Celula do quadrado
+//   GET /admin/denuncias[?uid=<uid>]  (Authorization: Bearer <ADMIN_TOKEN>) -> denúncias do uid, ou as 500 mais
+//     recentes de todos (índice na Conta reservada INDICE_UID); POST /admin/suspensao?uid=&acao=tirar|por
+//     -> {uid, suspenso}. Rotas do dono: nunca passam pelo /ws nem levam x-rumo-*, nada disso vai ao app.
 //   GET /ws?cell=<id>&enc=<id do encontro>&t=<token>        -> conexão extra do encontro: `cell` é o
 //     quadrado do PONTO marcado (o dono do encontro), mesmo que a pessoa esteja em outro quadrado
 //
@@ -11,6 +14,7 @@
 
 import { verifyIdToken, fetchGoogleKeys } from "./auth.js";
 import { ID_ENCONTRO_RE } from "./protocol.js";
+import { INDICE_UID } from "./conta.js";
 
 export { Celula } from "./celula.js";
 export { Conta } from "./conta.js";
@@ -33,11 +37,69 @@ function cellNoBrasil(cell) {
 
 const texto = (msg, status) => new Response(msg, { status });
 
+const ADMIN_UID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const jsonAdmin = (corpo, status = 200) =>
+  new Response(JSON.stringify(corpo), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+
+// Comparação em tempo constante: SHA-256 dos dois lados (tamanho fixo) e XOR de todos os bytes,
+// sem retorno antecipado por tamanho nem por byte diferente.
+async function tokenConfere(recebido, esperado) {
+  const enc = new TextEncoder();
+  const [x, y] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(recebido)),
+    crypto.subtle.digest("SHA-256", enc.encode(esperado)),
+  ]);
+  const a = new Uint8Array(x);
+  const b = new Uint8Array(y);
+  let dif = 0;
+  for (let i = 0; i < a.length; i++) dif |= a[i] ^ b[i];
+  return dif === 0;
+}
+
+async function admin(request, env, url) {
+  if (!env?.ADMIN_TOKEN) return jsonAdmin({ erro: "server not configured" }, 500);
+  const denuncias = url.pathname === "/admin/denuncias";
+  if (request.method !== (denuncias ? "GET" : "POST")) return jsonAdmin({ erro: "metodo" }, 405);
+  const cab = request.headers.get("Authorization") ?? "";
+  const m = /^Bearer (.+)$/.exec(cab);
+  // A comparação sempre roda (cabeçalho ausente compara com string vazia).
+  const confere = await tokenConfere(m ? m[1] : "", env.ADMIN_TOKEN);
+  if (!m || !confere) return jsonAdmin({ erro: "não autorizado" }, 401);
+
+  const uid = url.searchParams.get("uid");
+  if (uid !== null && (!ADMIN_UID_RE.test(uid) || uid === INDICE_UID)) return jsonAdmin({ erro: "uid inválido" }, 400);
+  if (!env.CONTA) return jsonAdmin({ erro: "server not configured" }, 500);
+  const conta = (nome, caminho, method) =>
+    env.CONTA.get(env.CONTA.idFromName(nome)).fetch(`https://conta${caminho}`, { method });
+
+  try {
+    if (denuncias) {
+      const r = uid === null ? await conta(INDICE_UID, "/indice", "GET") : await conta(uid, "/denuncias", "GET");
+      const c = await r.json();
+      const lista = (c.denuncias ?? []).map((d) => ({ uid: d.uid ?? uid, por: d.por, em: d.em, motivo: d.motivo, lat: d.lat ?? null, lon: d.lon ?? null }));
+      return jsonAdmin({ denuncias: lista.reverse() });
+    }
+    if (uid === null) return jsonAdmin({ erro: "uid obrigatório" }, 400);
+    const acao = url.searchParams.get("acao");
+    if (acao !== "tirar" && acao !== "por") return jsonAdmin({ erro: "acao inválida" }, 400);
+    const r = await conta(uid, `/suspensao?acao=${acao}`, "POST");
+    const c = await r.json();
+    if (r.status !== 200 || c.ok !== true) return jsonAdmin({ erro: "falha" }, 502);
+    return jsonAdmin({ uid, suspenso: c.suspenso === true });
+  } catch {
+    return jsonAdmin({ erro: "falha" }, 502);
+  }
+}
+
 // Roteador testável: `deps.getKeys` e `deps.now` são injetáveis.
 export async function handle(request, env, deps = {}) {
   const url = new URL(request.url);
 
   if (url.pathname === "/health") return texto("ok", 200);
+  if (url.pathname === "/admin/denuncias" || url.pathname === "/admin/suspensao") return admin(request, env, url);
   if (url.pathname !== "/ws" || request.method !== "GET") return texto("não encontrado", 404);
 
   // Ambiente incompleto: erro genérico, antes de mexer no token.
@@ -65,6 +127,8 @@ export async function handle(request, env, deps = {}) {
   } catch {
     return texto("não autorizado", 401);
   }
+
+  if (ident.uid === INDICE_UID) return texto("não autorizado", 401); // uid reservado da Conta índice
 
   // Repasse sem o token na URL e sem nenhum cabeçalho interno vindo do cliente.
   url.searchParams.delete("t");
