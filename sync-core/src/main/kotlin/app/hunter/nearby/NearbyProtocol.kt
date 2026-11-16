@@ -53,6 +53,47 @@ data class Vizinho(
     val combina: Boolean,
 )
 
+/** Ponto no mapa (o do encontro). */
+data class Ponto(val lat: Double, val lon: Double)
+
+/** Proposta aberta de um quadrado vizinho. Nunca traz quem propôs; [combina] é o sinal do servidor. */
+data class Proposta(
+    val id: String,
+    val lat: Double,
+    val lon: Double,
+    val vagasLivres: Int,
+    val vagasTotal: Int,
+    val ritmo: Ritmo,
+    val distancia: Distancia,
+    val parada: Parada,
+    val combina: Boolean,
+)
+
+/**
+ * Quem está no encontro, só com a [sessao] opaca. [lat]/[lon] são nulos até a pessoa mandar a posição; [real] só
+ * vale a menos de 1 km do ponto (antes disso a posição vem aproximada). [distKm]/[etaMin] são os dela.
+ */
+data class Participante(
+    val sessao: String,
+    val lat: Double?,
+    val lon: Double?,
+    val real: Boolean,
+    val distKm: Double?,
+    val etaMin: Double?,
+    val chegou: Boolean,
+)
+
+enum class MotivoFim(val wire: String) {
+    CANCELADO("cancelado"), EXPIROU("expirou"), NINGUEM_CHEGOU("ninguem_chegou"), CHEGARAM("chegaram"), SAIU("saiu"),
+
+    /** Motivo que este app ainda não conhece: o encontro acabou do mesmo jeito. */
+    OUTRO("outro");
+
+    companion object {
+        fun fromWire(s: String?): MotivoFim = entries.firstOrNull { it.wire == s } ?: OUTRO
+    }
+}
+
 sealed interface ClientMessage {
     data class Procurar(val preferencia: Preferencia) : ClientMessage
     data object Parar : ClientMessage
@@ -64,11 +105,33 @@ sealed interface ClientMessage {
         val distKm: Double?,
         val etaMin: Double?,
     ) : ClientMessage
+
+    /** Propõe um encontro no ponto (vagas de 2 a 8, com quem propõe). Vai ao quadrado do ponto. */
+    data class Proposta(val lat: Double, val lon: Double, val vagas: Int) : ClientMessage
+    data object Cancelar : ClientMessage
+    data class Entrar(val id: String) : ClientMessage
+    data object Sair : ClientMessage
 }
 
 sealed interface ServerMessage {
     data class Vizinhos(val lista: List<Vizinho>) : ServerMessage
-    data class Erro(val codigo: String) : ServerMessage
+
+    /** Propostas abertas do quadrado dentro do raio; a lista vem inteira a cada mudança. */
+    data class Propostas(val lista: List<app.hunter.nearby.Proposta>) : ServerMessage
+
+    /** O encontro em que esta conexão está. [eu] é a sessão da própria pessoa (id opaco, sem uid). */
+    data class Encontro(
+        val id: String,
+        val ponto: Ponto,
+        val vagasLivres: Int,
+        val eu: String,
+        val participantes: List<Participante>,
+    ) : ServerMessage
+
+    data class Fim(val id: String, val motivo: MotivoFim) : ServerMessage
+
+    /** [restanteMs] só vem em `espera`. */
+    data class Erro(val codigo: String, val restanteMs: Long? = null) : ServerMessage
 }
 
 /** Campos anuláveis saem como `null` explícito: o servidor recusa campo ausente. */
@@ -91,6 +154,18 @@ fun ClientMessage.toJson(): String = buildJsonObject {
             put("distKm", m.distKm)
             put("etaMin", m.etaMin)
         }
+        is ClientMessage.Proposta -> {
+            put("t", "proposta")
+            put("lat", m.lat)
+            put("lon", m.lon)
+            put("vagas", m.vagas)
+        }
+        ClientMessage.Cancelar -> put("t", "cancelar")
+        is ClientMessage.Entrar -> {
+            put("t", "entrar")
+            put("id", m.id)
+        }
+        ClientMessage.Sair -> put("t", "sair")
     }
 }.toString()
 
@@ -109,7 +184,53 @@ private data class VizinhoWire(
 @Serializable
 private data class VizinhosWire(val lista: List<VizinhoWire>)
 
+@Serializable
+private data class PropostaWire(
+    val id: String,
+    val lat: Double,
+    val lon: Double,
+    val vagasLivres: Int,
+    val vagasTotal: Int,
+    val ritmo: String,
+    val distancia: String,
+    val parada: String,
+    val combina: Boolean,
+)
+
+@Serializable
+private data class PropostasWire(val lista: List<PropostaWire>)
+
+@Serializable
+private data class PontoWire(val lat: Double, val lon: Double)
+
+@Serializable
+private data class ParticipanteWire(
+    val sessao: String,
+    val lat: Double? = null,
+    val lon: Double? = null,
+    val real: Boolean = false,
+    val distKm: Double? = null,
+    val etaMin: Double? = null,
+    val chegou: Boolean = false,
+)
+
+@Serializable
+private data class EncontroWire(
+    val id: String,
+    val ponto: PontoWire,
+    val vagasLivres: Int,
+    val eu: String,
+    val participantes: List<ParticipanteWire>,
+)
+
 private val parser = Json { ignoreUnknownKeys = true }
+
+private fun PropostaWire.toProposta(): Proposta? {
+    val r = Ritmo.fromWire(ritmo) ?: return null
+    val d = Distancia.fromWire(distancia) ?: return null
+    val p = Parada.fromWire(parada) ?: return null
+    return Proposta(id, lat, lon, vagasLivres, vagasTotal, r, d, p, combina)
+}
 
 private fun VizinhoWire.toVizinho(): Vizinho? {
     val r = Ritmo.fromWire(ritmo) ?: return null
@@ -127,7 +248,25 @@ fun parseServerMessage(json: String): ServerMessage? = try {
             val lista = wire.lista.map { it.toVizinho() ?: return null }
             ServerMessage.Vizinhos(lista)
         }
-        "erro" -> ServerMessage.Erro(obj["codigo"]!!.jsonPrimitive.content)
+        "propostas" -> {
+            val wire = parser.decodeFromJsonElement(PropostasWire.serializer(), obj)
+            ServerMessage.Propostas(wire.lista.map { it.toProposta() ?: return null })
+        }
+        "encontro" -> {
+            val w = parser.decodeFromJsonElement(EncontroWire.serializer(), obj)
+            ServerMessage.Encontro(
+                id = w.id,
+                ponto = Ponto(w.ponto.lat, w.ponto.lon),
+                vagasLivres = w.vagasLivres,
+                eu = w.eu,
+                participantes = w.participantes.map { Participante(it.sessao, it.lat, it.lon, it.real, it.distKm, it.etaMin, it.chegou) },
+            )
+        }
+        "fim" -> ServerMessage.Fim(obj["id"]!!.jsonPrimitive.content, MotivoFim.fromWire(obj["motivo"]?.jsonPrimitive?.contentOrNull))
+        "erro" -> ServerMessage.Erro(
+            obj["codigo"]!!.jsonPrimitive.content,
+            obj["restanteMs"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toLong(),
+        )
         else -> null
     }
 } catch (e: Exception) {
