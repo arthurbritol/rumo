@@ -49,3 +49,19 @@ Os dois aparelhos precisam estar a poucos quilômetros um do outro (ou use local
 - [ ] 6.1 Ligue o modo avião no A com a procura ligada: após alguns segundos a faixa vira "Rolê por perto indisponível agora" (sem piscar). Desligue o modo avião: volta a "Procurando rolê · …" sozinho.
 - [ ] 6.2 Com a procura desligada e sem internet, toque em **Procurar rolê**: a tela não trava; mostra "Ligando…" e depois a mensagem de indisponível.
 - [ ] 6.3 Revogue a localização do app e tente procurar: o app pede a permissão; sem ela, não liga.
+
+## Cenário 7: encontros (etapa 2, lado do app)
+
+Precisa do servidor com a etapa 2 publicada e dois aparelhos (A propõe, B entra), ambos procurando rolê.
+
+- [ ] 7.1 No A, segure o dedo no mapa, dentro do raio de busca: aparece o cartão "Propor encontro neste ponto" com os números 2 a 8 (4 por padrão) e o ponto marcado no mapa. Segurar fora de qualquer quadrado da busca e propor mostra "Escolha um ponto dentro da sua área de busca".
+- [ ] 7.2 Toque em **Propor encontro**: o botão mostra "Propondo…" e, em segundos, vira o cartão "Encontro em andamento" com "Você" e as vagas livres. O ponto fica no mapa como "Ponto do encontro".
+- [ ] 7.3 No B (a alguns km), o ponto aparece com "1 de 4" (ocupadas de total). Toque nele: cartão com ritmo, distância, parada, "3 vagas livres" e, se combina, "combina com você". **Sem nome ou foto.**
+- [ ] 7.4 No B, toque em **Entrar**: o cartão de encontro aparece com "Você" e "Motociclista 1", cada um com "X km · Y min". No A, o mesmo, e a proposta passa a "2 de 4" no mapa dos outros.
+- [ ] 7.5 Ande com os dois: a moto do outro se move a cada ~10 s; longe do ponto a posição fica aproximada (algumas centenas de metros), a menos de 1 km vira a real; "X km · Y min" diminui.
+- [ ] 7.6 Com B no encontro, uma terceira conta tenta entrar na última vaga ao mesmo tempo que outra: só uma entra; a outra vê "Esse encontro já está cheio".
+- [ ] 7.7 No A, tente propor de novo depois de cancelar: "Espere 5 min para propor de novo" (o tempo diminui a cada tentativa).
+- [ ] 7.8 No B, toque em **Sair do encontro**: aparece "Você saiu do encontro". No A, a lista de participantes perde o B. No A, **Cancelar encontro** mostra "O encontro foi cancelado" e, no B, o mesmo aviso.
+- [ ] 7.9 Chegue a menos de 100 m do ponto com os dois: aparece "Chegou" ao lado de cada nome e, quando todos chegam, "Todo mundo chegou ao ponto. Bom rolê!".
+- [ ] 7.10 Sem ninguém entrar, a proposta some em 30 min ("Ninguém entrou a tempo e a proposta expirou"). Desligue a internet do A no meio do encontro: o encontro não trava a tela; B continua vendo os outros e A sai dele em até 2 min.
+- [ ] 7.11 Perto da divisa de quadrados (ex.: latitude -21,0): a mesma proposta aparece uma vez só, e a lista de motos não duplica quando B entra.

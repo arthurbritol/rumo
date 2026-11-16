@@ -77,10 +77,12 @@ import app.hunter.app.PreviewUi
 import app.hunter.app.R
 import app.hunter.app.account.AuthState
 import app.hunter.app.fuel.ResolvedFuelStation
+import app.hunter.app.nearby.EncontroUiState
 import app.hunter.app.nearby.NearbyUiState
 import app.hunter.app.nearby.NearbyViewModel
 import app.hunter.app.nearby.distanciaAproximada
 import app.hunter.app.nearby.nearbyViewModelFactory
+import app.hunter.nearby.Ponto
 import app.hunter.nearby.Preferencia
 import app.hunter.nav.Place
 import app.hunter.nav.RouteProfile
@@ -133,6 +135,16 @@ fun MapScreen(
     var selectedRider by remember { mutableStateOf<String?>(null) }
     val rider = selectedRider?.let { id -> nearbyRiders.firstOrNull { it.sessao == id } }
     var pendingNearbyPref by remember { mutableStateOf<Preferencia?>(null) }
+    // Encontros: proposta tocada no mapa, ponto marcado com o dedo para propor, e o encontro do usuário.
+    val encontro by nearbyVm.encontro.collectAsStateWithLifecycle()
+    val nearbyAviso by nearbyVm.aviso.collectAsStateWithLifecycle()
+    val nearbyProposals = (nearbyState as? NearbyUiState.Procurando)?.propostas.orEmpty()
+    var selectedProposal by remember { mutableStateOf<String?>(null) }
+    var proposalPoint by remember { mutableStateOf<app.hunter.nav.LatLon?>(null) }
+    val proposal = selectedProposal?.let { id -> nearbyProposals.firstOrNull { it.id == id } }
+    val activeEncounter = encontro as? EncontroUiState.Ativo
+    val encounterRiders = activeEncounter?.encontro?.let { e -> e.participantes.filter { it.sessao != e.eu } }.orEmpty()
+    val nearbyCardShown = encontro !is EncontroUiState.Nenhum || proposalPoint != null || proposal != null
 
     var searching by remember { mutableStateOf(false) }
     var follow by remember { mutableStateOf(true) }
@@ -149,7 +161,20 @@ fun MapScreen(
 
     // Saiu da conta com a procura ligada: para tudo.
     LaunchedEffect(signedIn) { if (!signedIn) nearbyVm.desligar() }
-    LaunchedEffect(nearbyState) { if (nearbyState is NearbyUiState.Desligado) selectedRider = null }
+    LaunchedEffect(nearbyState) {
+        if (nearbyState is NearbyUiState.Desligado) {
+            selectedRider = null
+            selectedProposal = null
+            proposalPoint = null
+        }
+    }
+    // O encontro começou (ou a proposta foi enviada): fecha o que estava aberto para propor ou entrar.
+    LaunchedEffect(encontro) {
+        if (encontro !is EncontroUiState.Nenhum) {
+            selectedProposal = null
+            if (encontro is EncontroUiState.Ativo) proposalPoint = null
+        }
+    }
 
     val hasLocation = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
     val askLocation = rememberPermissionAction(ridePerms(), listOf(Manifest.permission.ACCESS_FINE_LOCATION)) { locationOk = true }
@@ -224,6 +249,9 @@ fun MapScreen(
             me = live,
             friends = friends,
             nearby = nearbyRiders,
+            proposals = nearbyProposals,
+            encounterPoint = activeEncounter?.encontro?.ponto ?: proposalPoint?.let { Ponto(it.lat, it.lon) },
+            encounterRiders = encounterRiders,
             nearbySearching = nearbyState !is NearbyUiState.Desligado,
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
             stateAverages = if (fuelLayerEnabled) stateAverages else emptyList(),
@@ -237,9 +265,22 @@ fun MapScreen(
             cameraNonce = nonce,
             paddingTopDp = if (navigating) 200 else if (preview != null) 110 else 0,
             paddingBottomDp = if (navigating) 120 else if (preview != null) 440 else if (selectedFuelStation != null) 360 else 0,
-            onLongPress = { if (!navigating) vm.previewAt(it) },
+            onLongPress = {
+                if (!navigating) {
+                    // Procurando rolê e fora de um encontro, segurar no mapa marca o ponto de uma proposta.
+                    if (nearbyState is NearbyUiState.Procurando && (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado)) {
+                        proposalPoint = it
+                        selectedRider = null
+                        selectedProposal = null
+                        nearbyVm.limparFim()
+                    } else {
+                        vm.previewAt(it)
+                    }
+                }
+            },
             onFuelStationClick = { vm.selectFuelStation(it) },
-            onNearbyClick = { selectedRider = it },
+            onNearbyClick = { selectedRider = it; selectedProposal = null },
+            onProposalClick = { selectedProposal = it; selectedRider = null; proposalPoint = null },
             onBoundingBoxChanged = { vm.updateMapBoundingBox(it) },
             onUserGesture = {
                 if (preview == null) {
@@ -259,6 +300,7 @@ fun MapScreen(
                         bottom = when {
                             selectedFuelStation != null -> 340.dp
                             rider != null && !navigating -> 250.dp
+                            nearbyCardShown && !navigating -> 300.dp
                             navigating -> 190.dp
                             rec.isRecording -> 210.dp
                             else -> 190.dp
@@ -355,6 +397,34 @@ fun MapScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
             )
         }
+        if (nearbyCardShown && !navigating && pv == null && selectedFuelStation == null && rider == null) {
+            val cardModifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+            when (val e = encontro) {
+                is EncontroUiState.Ativo -> NearbyEncounterCard(e, onSair = nearbyVm::sair, modifier = cardModifier)
+                is EncontroUiState.Encerrado -> NearbyEndCard(e.motivo, onClose = nearbyVm::limparFim, modifier = cardModifier)
+                EncontroUiState.Aguardando -> Unit // o aviso aparece se não der certo; o botão do cartão mostra "…"
+                EncontroUiState.Nenhum -> Unit
+            }
+            if (encontro is EncontroUiState.Aguardando || encontro is EncontroUiState.Nenhum) {
+                val ponto = proposalPoint
+                if (ponto != null) {
+                    NearbyCreateProposalCard(
+                        aguardando = encontro is EncontroUiState.Aguardando,
+                        onPropor = { vagas -> nearbyVm.proporPonto(ponto.lat, ponto.lon, vagas) },
+                        onClose = { proposalPoint = null },
+                        modifier = cardModifier,
+                    )
+                } else if (proposal != null) {
+                    NearbyProposalCard(
+                        proposta = proposal,
+                        aguardando = encontro is EncontroUiState.Aguardando,
+                        onEntrar = { nearbyVm.entrar(proposal.id) },
+                        onClose = { selectedProposal = null },
+                        modifier = cardModifier,
+                    )
+                }
+            }
+        }
         if (showNearbySheet && nearbyAvailable) {
             NearbySheet(
                 estado = nearbyState,
@@ -388,6 +458,7 @@ fun MapScreen(
                 SearchPill(onClick = { searching = true })
                 if (nearbyAvailable) {
                     NearbyStrip(nearbyState, onClick = { showNearbySheet = true }, modifier = Modifier.padding(top = 8.dp))
+                    nearbyAviso?.let { NearbyNotice(it, onClose = nearbyVm::limparAviso, modifier = Modifier.padding(top = 8.dp)) }
                 }
                 if (!online) {
                     Surface(
@@ -452,8 +523,8 @@ fun MapScreen(
                 Modifier.align(Alignment.BottomCenter).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (rider != null) {
-                    // O cartão da moto tocada ocupa o lugar do painel inferior.
+                if (rider != null || nearbyCardShown) {
+                    // O cartão da moto tocada (ou o do encontro) ocupa o lugar do painel inferior.
                 } else if (!hasLocation && !locationOk) {
                     FloatingCard {
                         Text("Permita a localização", style = MaterialTheme.typography.titleMedium)

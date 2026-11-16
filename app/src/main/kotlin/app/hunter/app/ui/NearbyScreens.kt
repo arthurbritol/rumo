@@ -35,12 +35,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.hunter.app.nearby.EncontroUiState
 import app.hunter.app.nearby.NearbyUiState
+import app.hunter.app.nearby.distEtaTexto
+import app.hunter.app.nearby.ocupacao
+import app.hunter.app.nearby.textoDoFim
+import app.hunter.app.nearby.vagasLivresTexto
 import app.hunter.app.nearby.faixaProcurando
 import app.hunter.app.nearby.rotulo
 import app.hunter.nearby.Distancia
+import app.hunter.nearby.MotivoFim
 import app.hunter.nearby.Parada
 import app.hunter.nearby.Preferencia
+import app.hunter.nearby.Proposta
 import app.hunter.nearby.Ritmo
 import app.hunter.nearby.Vizinho
 
@@ -189,5 +196,125 @@ fun NearbyRiderCard(vizinho: Vizinho, distancia: String?, onClose: () -> Unit, m
                 )
             }
         }
+    }
+}
+
+// ---- Encontros ----
+
+@Composable
+private fun CardHeader(titulo: String, onClose: (() -> Unit)?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(titulo, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        if (onClose != null) IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Fechar", Modifier.size(20.dp)) }
+    }
+}
+
+@Composable
+private fun CombinaChip() {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+    ) {
+        Text(
+            "combina com você",
+            Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+/** Cartão de uma proposta tocada no mapa: as três escolhas, vagas livres e "Entrar". Nenhum nome. */
+@Composable
+fun NearbyProposalCard(proposta: Proposta, aguardando: Boolean, onEntrar: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    FloatingCard(modifier) {
+        CardHeader("Encontro proposto por perto", onClose)
+        Text(
+            "${proposta.ritmo.rotulo} · ${proposta.distancia.rotulo} · ${proposta.parada.rotulo}",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(
+            "${ocupacao(proposta.vagasLivres, proposta.vagasTotal)} · ${vagasLivresTexto(proposta.vagasLivres)}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (proposta.combina) CombinaChip()
+        PrimaryButton(if (aguardando) "Entrando…" else "Entrar", onEntrar, Modifier.fillMaxWidth(), enabled = !aguardando)
+    }
+}
+
+/** Ponto marcado com o dedo: escolhe as vagas (2 a 8, com você) e propõe. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun NearbyCreateProposalCard(aguardando: Boolean, onPropor: (vagas: Int) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    var vagas by rememberSaveable { mutableStateOf(4) }
+    FloatingCard(modifier) {
+        CardHeader("Propor encontro neste ponto", onClose)
+        Text(
+            "Quem estiver por perto vê o ponto no mapa e pode entrar. Vagas contando com você:",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            (2..8).forEach { n -> SelectChip(n.toString(), vagas == n, { vagas = n }) }
+        }
+        PrimaryButton(if (aguardando) "Propondo…" else "Propor encontro", { onPropor(vagas) }, Modifier.fillMaxWidth(), enabled = !aguardando)
+    }
+}
+
+/**
+ * O encontro em andamento: vagas, e por participante "X km · Y min" (a própria pessoa aparece como "Você"; os outros
+ * como "Motociclista N", sem nada que identifique). Quem propôs cancela; quem entrou sai.
+ */
+@Composable
+fun NearbyEncounterCard(ativo: EncontroUiState.Ativo, onSair: () -> Unit, modifier: Modifier = Modifier) {
+    val enc = ativo.encontro
+    FloatingCard(modifier, scrollable = true) {
+        CardHeader("Encontro em andamento", null)
+        Text(
+            if (enc.vagasLivres > 0) vagasLivresTexto(enc.vagasLivres) else "Encontro cheio",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        var outro = 0
+        enc.participantes.forEach { p ->
+            val nome = if (p.sessao == enc.eu) "Você" else "Motociclista ${++outro}"
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(nome, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, fontWeight = if (p.sessao == enc.eu) FontWeight.Bold else FontWeight.Normal)
+                Text(
+                    if (p.chegou) "Chegou" else distEtaTexto(p.distKm, p.etaMin),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        SecondaryButton(if (ativo.souProponente) "Cancelar encontro" else "Sair do encontro", onSair)
+    }
+}
+
+/** Aviso curto de erro (ex.: "Esse encontro já está cheio"), com botão de fechar. */
+@Composable
+fun NearbyNotice(texto: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = Warn.copy(alpha = 0.95f),
+        shadowElevation = 3.dp,
+    ) {
+        Row(Modifier.padding(start = 14.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(texto, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = androidx.compose.ui.graphics.Color.Black)
+            IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Fechar aviso", Modifier.size(18.dp), tint = androidx.compose.ui.graphics.Color.Black) }
+        }
+    }
+}
+
+/** Como o encontro acabou. */
+@Composable
+fun NearbyEndCard(motivo: MotivoFim, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    FloatingCard(modifier) {
+        CardHeader("Encontro encerrado", onClose)
+        Text(textoDoFim(motivo), style = MaterialTheme.typography.bodyLarge)
+        PrimaryButton("Ok", onClose, Modifier.fillMaxWidth())
     }
 }

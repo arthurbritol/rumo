@@ -6,6 +6,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import app.hunter.app.BuildConfig
 import app.hunter.app.HunterApp
 import app.hunter.app.account.AuthState
+import app.hunter.nav.NavServices
+import app.hunter.nav.RouteProfile
 import app.hunter.trips.recording.AndroidLocationSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +28,7 @@ fun nearbyViewModelFactory(app: HunterApp): ViewModelProvider.Factory = viewMode
             stopRequests = NearbyService.stopRequests,
             startFailures = NearbyService.startFailures,
             onDispose = { clientScope.cancel() },
+            etaCalculator = EtaCalculator { from, to -> NavServices.router.route(from, to, RouteProfile.FASTEST).firstOrNull() },
         )
     }
 }

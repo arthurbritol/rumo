@@ -84,3 +84,29 @@ fun riderBitmap(density: Float, destaque: Boolean, proprio: Boolean): Bitmap {
     paint.shader = null
     return bmp
 }
+
+/**
+ * Pino redondo dos pontos de encontro: laranja claro para a proposta que combina, cinza-azulado para a que não
+ * combina, laranja forte para o encontro em que o usuário está. Sem texto: o "2 de 4" é um rótulo da camada.
+ */
+fun encounterPinBitmap(density: Float, cor: Int): Bitmap {
+    val size = (34 * density).toInt().coerceAtLeast(2)
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val s = size.toFloat()
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    paint.style = Paint.Style.FILL
+    paint.color = cor
+    c.drawCircle(s / 2, s / 2, s * 0.42f, paint)
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 3f * density
+    paint.color = 0xFFFFFFFF.toInt()
+    c.drawCircle(s / 2, s / 2, s * 0.42f, paint)
+    paint.style = Paint.Style.FILL
+    c.drawCircle(s / 2, s / 2, s * 0.12f, paint)
+    return bmp
+}
+
+const val PIN_COMBINA = 0xFFFF8A2B.toInt()
+const val PIN_NORMAL = 0xFF7F93B2.toInt()
+const val PIN_ENCONTRO = 0xFFD9600A.toInt()

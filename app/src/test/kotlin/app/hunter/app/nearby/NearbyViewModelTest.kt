@@ -23,20 +23,28 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class FakeLink : NearbyLink {
+internal class FakeLink : NearbyLink {
     val eventFlow = MutableSharedFlow<NearbyEvent>(extraBufferCapacity = 16)
     val statusFlow = MutableStateFlow(NearbyStatus.DESCONECTADO)
     val openedFlow = MutableSharedFlow<String>(extraBufferCapacity = 16)
     override val opened: SharedFlow<String> = openedFlow
+    val openedEncFlow = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    override val openedEncounter: SharedFlow<String> = openedEncFlow
     override val events: SharedFlow<NearbyEvent> = eventFlow
     override val status: StateFlow<NearbyStatus> = statusFlow
 
     val connects = mutableListOf<Set<String>>()
     val sent = mutableListOf<Pair<ClientMessage, String?>>()
     var disconnects = 0
+    val encConnects = mutableListOf<Pair<String, String>>()
+    val sentEnc = mutableListOf<ClientMessage>()
+    var encDisconnects = 0
 
     override fun connect(cells: Set<String>) { connects += cells }
     override fun send(msg: ClientMessage, cell: String?) { sent += msg to cell }
+    override fun connectEncounter(cell: String, encId: String) { encConnects += cell to encId }
+    override fun disconnectEncounter() { encDisconnects++ }
+    override fun sendEncounter(msg: ClientMessage) { sentEnc += msg }
     override fun disconnect() { disconnects++ }
 }
 

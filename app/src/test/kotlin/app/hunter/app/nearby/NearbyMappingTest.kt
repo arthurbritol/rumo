@@ -57,3 +57,50 @@ class NearbyMappingTest {
         assertEquals(listOf("Café ou lanche", "Mirante", "Só estrada", "Sem parada"), Parada.entries.map { it.rotulo })
     }
 }
+
+class NearbyEncounterMappingTest {
+    private val proposta = app.hunter.nearby.Proposta(
+        "0123456789abcdef", -20.0, -40.0, 2, 4, Ritmo.MODERADO, Distancia.ATE50, app.hunter.nearby.Parada.CAFE, true,
+    )
+
+    @Test
+    fun `ponto da proposta mostra ocupadas de total`() {
+        val f = proposta.toProposalFeature()
+        assertEquals("2 de 4", f.label)
+        assertEquals(PROPOSAL_ICON_COMBINA, f.icon)
+        assertEquals(PROPOSAL_ICON, proposta.copy(combina = false).toProposalFeature().icon)
+        assertEquals("7 de 8", ocupacao(1, 8))
+    }
+
+    @Test
+    fun `vagas livres no singular e no plural`() {
+        assertEquals("1 vaga livre", vagasLivresTexto(1))
+        assertEquals("3 vagas livres", vagasLivresTexto(3))
+    }
+
+    @Test
+    fun `distancia e tempo por participante`() {
+        assertEquals("3,2 km · 12 min", distEtaTexto(3.2, 12.0))
+        assertEquals("calculando…", distEtaTexto(null, null))
+    }
+
+    @Test
+    fun `erros do servidor viram texto em portugues`() {
+        assertEquals("Esse encontro já está cheio", textoDoErro("cheio", null))
+        assertEquals("Espere 5 min para propor de novo", textoDoErro("espera", 300_000))
+        assertEquals("Espere 5 min para propor de novo", textoDoErro("espera", 240_001))
+        assertEquals("Espere menos de 1 min para propor de novo", textoDoErro("espera", 20_000))
+        assertEquals("Você já tem uma proposta aberta", textoDoErro("ja_tem_proposta", null))
+        assertEquals("Esse encontro não existe mais", textoDoErro("inexistente", null))
+        assertEquals(null, textoDoErro("posicao_implausivel", null))
+        assertEquals("Algo deu errado. Tente de novo", textoDoErro("codigo_novo", null))
+    }
+
+    @Test
+    fun `participante sem posicao nao vira moto`() {
+        val sem = app.hunter.nearby.Participante("s", null, null, false, null, null, false)
+        assertEquals(null, sem.toRiderFeatureOrNull())
+        val com = app.hunter.nearby.Participante("s", -20.0, -40.0, true, 1.0, 3.0, false)
+        assertEquals(RiderFeature("s", -20.0, -40.0, 0.0, false, RIDER_ICON), com.toRiderFeatureOrNull())
+    }
+}

@@ -22,11 +22,19 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.hunter.app.fuel.PriceSource
 import app.hunter.app.fuel.ResolvedFuelStation
+import app.hunter.app.nearby.ENCOUNTER_ICON
 import app.hunter.app.nearby.OWN_ICON_SEARCHING
+import app.hunter.app.nearby.PROPOSAL_ICON
+import app.hunter.app.nearby.PROPOSAL_ICON_COMBINA
 import app.hunter.app.nearby.RIDER_ICON
 import app.hunter.app.nearby.RIDER_ICON_COMBINA
 import app.hunter.app.nearby.ownMarkerIcon
+import app.hunter.app.nearby.toProposalFeature
 import app.hunter.app.nearby.toRiderFeature
+import app.hunter.app.nearby.toRiderFeatureOrNull
+import app.hunter.nearby.Participante
+import app.hunter.nearby.Ponto
+import app.hunter.nearby.Proposta
 import app.hunter.nearby.Vizinho
 import app.hunter.model.GeoBox
 import app.hunter.model.TrackPoint
@@ -124,6 +132,7 @@ private const val SRC_FRIENDS = "friends-src"
 private const val SRC_ME = "me-src"
 private const val SRC_FUEL = "fuel-src"
 private const val SRC_NEARBY = "nearby-src"
+private const val SRC_PROPOSALS = "nearby-proposals-src"
 private const val SRC_FUEL_STATE = "fuel-state-src"
 private const val SRC_FUEL_CITY = "fuel-city-src"
 
@@ -146,6 +155,12 @@ fun HunterMap(
     friends: List<FriendMarker> = emptyList(),
     /** Motos anônimas de quem procura rolê por perto (só posição aproximada e rumo). */
     nearby: List<Vizinho> = emptyList(),
+    /** Propostas abertas por perto: um ponto com "N de M" (ocupadas de total) em cada. */
+    proposals: List<Proposta> = emptyList(),
+    /** Ponto do encontro em que o usuário está (nulo fora de um). */
+    encounterPoint: Ponto? = null,
+    /** Participantes do encontro com posição (motos que se movem); a própria pessoa não entra aqui. */
+    encounterRiders: List<Participante> = emptyList(),
     /** Procurando rolê: o próprio marcador vira a moto laranja ("rider-self"). */
     nearbySearching: Boolean = false,
     fuelStations: List<ResolvedFuelStation> = emptyList(),
@@ -168,6 +183,8 @@ fun HunterMap(
     onFuelStationClick: (ResolvedFuelStation) -> Unit = {},
     /** Toque numa moto por perto: recebe o id da sessão (aleatório, sem nome). */
     onNearbyClick: (String) -> Unit = {},
+    /** Toque no ponto de uma proposta: recebe o id do encontro. */
+    onProposalClick: (String) -> Unit = {},
     onBoundingBoxChanged: (GeoBox) -> Unit = {},
     onUserGesture: () -> Unit = {},
 ) {
@@ -190,6 +207,7 @@ fun HunterMap(
     val latestFuelStations by rememberUpdatedState(fuelStations)
     val latestFuelClick by rememberUpdatedState(onFuelStationClick)
     val latestNearbyClick by rememberUpdatedState(onNearbyClick)
+    val latestProposalClick by rememberUpdatedState(onProposalClick)
     val latestBoxChanged by rememberUpdatedState(onBoundingBoxChanged)
 
     DisposableEffect(lifecycle, mapView) {
@@ -224,6 +242,15 @@ fun HunterMap(
             }
             m.addOnMapClickListener { latLng ->
                 val screenPoint = m.projection.toScreenLocation(latLng)
+                val pontos = m.queryRenderedFeatures(screenPoint, "nearby-proposals")
+                if (pontos.isNotEmpty()) {
+                    pontos.first().getStringProperty("id")?.let { id ->
+                        if (id.isNotEmpty()) {
+                            latestProposalClick(id)
+                            return@addOnMapClickListener true
+                        }
+                    }
+                }
                 val riders = m.queryRenderedFeatures(screenPoint, "nearby-riders")
                 if (riders.isNotEmpty()) {
                     riders.first().getStringProperty("id")?.let { id ->
@@ -310,9 +337,13 @@ fun HunterMap(
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
         src.setGeoJson(friendsFeatures(friends))
     }
-    LaunchedEffect(style, nearby) {
+    LaunchedEffect(style, nearby, encounterRiders) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_NEARBY) ?: return@LaunchedEffect
-        src.setGeoJson(nearbyFeatures(nearby))
+        src.setGeoJson(nearbyFeatures(nearby, encounterRiders))
+    }
+    LaunchedEffect(style, proposals, encounterPoint) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_PROPOSALS) ?: return@LaunchedEffect
+        src.setGeoJson(proposalFeatures(proposals, encounterPoint))
     }
     LaunchedEffect(style, nearbySearching) {
         style?.getLayer("me-symbol")?.setProperties(iconImage(ownMarkerIcon(nearbySearching)))
@@ -444,10 +475,9 @@ private fun trailFeatures(points: List<TrackPoint>?): FeatureCollection {
 }
 
 /** Motos anônimas: só `id` (sessão aleatória), `rumo`, `destaque` e a imagem; nada que identifique a pessoa. */
-private fun nearbyFeatures(riders: List<Vizinho>): FeatureCollection =
+private fun nearbyFeatures(riders: List<Vizinho>, encounter: List<Participante>): FeatureCollection =
     FeatureCollection.fromFeatures(
-        riders.map { v ->
-            val r = v.toRiderFeature()
+        (riders.map { it.toRiderFeature() } + encounter.mapNotNull { it.toRiderFeatureOrNull() }).map { r ->
             Feature.fromGeometry(Point.fromLngLat(r.lon, r.lat)).also { f ->
                 f.addStringProperty("id", r.id)
                 f.addNumberProperty("rumo", r.rumo)
@@ -456,6 +486,26 @@ private fun nearbyFeatures(riders: List<Vizinho>): FeatureCollection =
             }
         },
     )
+
+/** Pontos de proposta (rótulo "N de M") e o ponto do encontro ativo; só `id`, rótulo e imagem, nada de pessoa. */
+private fun proposalFeatures(proposals: List<Proposta>, encounterPoint: Ponto?): FeatureCollection {
+    val out = proposals.map { p ->
+        val f = p.toProposalFeature()
+        Feature.fromGeometry(Point.fromLngLat(f.lon, f.lat)).also {
+            it.addStringProperty("id", f.id)
+            it.addStringProperty("label", f.label)
+            it.addStringProperty("icon", f.icon)
+        }
+    }.toMutableList()
+    if (encounterPoint != null) {
+        out += Feature.fromGeometry(Point.fromLngLat(encounterPoint.lon, encounterPoint.lat)).also {
+            it.addStringProperty("id", "")
+            it.addStringProperty("label", "Ponto do encontro")
+            it.addStringProperty("icon", ENCOUNTER_ICON)
+        }
+    }
+    return FeatureCollection.fromFeatures(out)
+}
 
 private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
     if (friends.isEmpty()) return FeatureCollection.fromFeatures(emptyList())
@@ -495,7 +545,10 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addImage(RIDER_ICON, riderBitmap(density, destaque = false, proprio = false))
     st.addImage(OWN_ICON_SEARCHING, riderBitmap(density, destaque = false, proprio = true))
     st.addImage(RIDER_ICON_COMBINA, riderBitmap(density, destaque = true, proprio = false))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_NEARBY, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
+    st.addImage(PROPOSAL_ICON, encounterPinBitmap(density, PIN_NORMAL))
+    st.addImage(PROPOSAL_ICON_COMBINA, encounterPinBitmap(density, PIN_COMBINA))
+    st.addImage(ENCOUNTER_ICON, encounterPinBitmap(density, PIN_ENCONTRO))
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_NEARBY, SRC_PROPOSALS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -589,6 +642,22 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
             iconRotationAlignment("map"),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
+        ),
+    )
+    st.addLayer(
+        SymbolLayer("nearby-proposals", SRC_PROPOSALS).withProperties(
+            iconImage(Expression.get("icon")),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
+            textField(Expression.get("label")),
+            textSize(12f),
+            textColor(if (dark) "#FFFFFF" else "#0F172A"),
+            textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
+            textHaloWidth(2f),
+            textAnchor("top"),
+            textOffset(arrayOf(0f, 1.2f)),
+            textAllowOverlap(true),
+            textIgnorePlacement(true),
         ),
     )
     st.addLayer(

@@ -12,11 +12,22 @@ interface NearbyLink {
     /** Emite o id do quadrado cada vez que a conexão dele abre (inclusive reconexões). */
     val opened: SharedFlow<String>
 
+    /** Emite o id do encontro cada vez que a conexão extra dele abre (inclusive reconexões). */
+    val openedEncounter: SharedFlow<String>
+
     /** Passa a manter exatamente uma conexão por quadrado de [cells]. */
     fun connect(cells: Set<String>)
 
     /** [cell] nulo: todas as conexões de quadrado (posição, procurar, parar). */
     fun send(msg: ClientMessage, cell: String? = null)
+
+    /** Conexão extra ao quadrado [cell] do encontro [encId]; repetir a mesma não abre outra. */
+    fun connectEncounter(cell: String, encId: String)
+
+    fun disconnectEncounter()
+
+    /** Manda a mensagem só pela conexão extra do encontro. */
+    fun sendEncounter(msg: ClientMessage)
 
     fun disconnect()
 }

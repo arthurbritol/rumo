@@ -57,6 +57,9 @@ class NearbyClient(
     private val _opened = MutableSharedFlow<String>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val opened: SharedFlow<String> = _opened
 
+    private val _openedEncounter = MutableSharedFlow<String>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val openedEncounter: SharedFlow<String> = _openedEncounter
+
     private val _status = MutableStateFlow(NearbyStatus.DESCONECTADO)
     override val status: StateFlow<NearbyStatus> = _status
 
@@ -75,7 +78,7 @@ class NearbyClient(
     }
 
     /** Conexão extra do encontro: `/ws?cell=<cell>&enc=<encId>&t=<token>`. Substitui a anterior, se houver. */
-    fun connectEncounter(cell: String, encId: String) {
+    override fun connectEncounter(cell: String, encId: String) {
         synchronized(lock) {
             val key = "$ENC|$cell|$encId"
             if (encKey == key && conns.containsKey(key)) return
@@ -86,7 +89,7 @@ class NearbyClient(
         }
     }
 
-    fun disconnectEncounter() {
+    override fun disconnectEncounter() {
         synchronized(lock) {
             encKey?.let { conns.remove(it)?.stop() }
             encKey = null
@@ -124,7 +127,7 @@ class NearbyClient(
     }
 
     /** Manda a mensagem só pela conexão do encontro. */
-    fun sendEncounter(msg: ClientMessage) {
+    override fun sendEncounter(msg: ClientMessage) {
         val text = msg.toJson()
         val c = synchronized(lock) { encKey?.let { conns[it] } }
         c?.ws?.send(text)
@@ -211,7 +214,7 @@ class NearbyClient(
                         last401 = false
                         attempt = 0 // conexão que abriu zera a espera: a próxima queda recomeça do básico
                         mudar(NearbyStatus.CONECTADO)
-                        if (encId == null) _opened.tryEmit(cell)
+                        if (encId == null) _opened.tryEmit(cell) else _openedEncounter.tryEmit(encId)
                     }
 
                     override fun onMessage(webSocket: WebSocket, text: String) {
