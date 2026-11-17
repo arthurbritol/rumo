@@ -24,6 +24,7 @@ Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar
 | 16 | Rotas do dono (`/admin/denuncias`, `/admin/suspensao`) e suspensão manual (`suspenso` ao procurar/propor/entrar) | `6366ab9`, `491a1f4` | 134 unitários + 64 de integração |
 | 17 | App: bloquear e denunciar (cartão da moto, encontro e fim), `suspenso` desliga a busca | `3b3b983`, `92d84ff` | suíte do sync-core e do app verdes, `assembleDebug` ok |
 | 19 | Marcas "quero ser amigo" recíprocas no servidor (`amigo`, `amigo_confirmado`, `amigo_ack`) | `9e4f8b3`, `8de298a`, `a56ab0b` | 147 unitários + 73 de integração |
+| 20 | App: "Quero ser amigo" no cartão de fim, `amigo_confirmado` vira convite (uma vez por pessoa) e `amigo_ack` pela conexão de origem | `de094b3`, `ea0b68f` | suíte do sync-core e do app verdes, `assembleDebug` ok |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -108,3 +109,10 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 - Marca e bloquear/denunciar compartilham o limite de ritmo (só UX); prazo da marca conta a partir da marca, não do fim do encontro; `/amigos-confirmados` faz até 50 chamadas de Conta para Conta por conexão.
 - Corrida de leitura e gravação em `/amigos-confirmados` (janela de ~2 s; pode entregar uid de quem acabou de ser bloqueado em uma resposta já em andamento); `/amigo-confirmar` sem prazo próprio.
 - A entrega imediata só vale na mesma Celula do encontro; o app (T20) deve mandar `amigo` pelo quadrado do encontro e responder `amigo_ack {uid}` a cada `amigo_confirmado`.
+
+## Pendências registradas na Tarefa 20
+
+- "Ao abrir o app" só vale com a busca ligada (a confirmação só chega pela conexão do quadrado; o servidor reentrega por 72 h). Quem não ligar a busca nesse prazo perde a amizade em silêncio; solução futura: endpoint de consulta.
+- Quem já tem 50 amigos perde a amizade recíproca sem aviso; se a conta do Social não carregou, o convite só é refeito na próxima conexão; `convidarAmigo` é `var` pública ligando as duas ViewModels.
+- Rótulo mantido como "Motociclista N" (igual ao cartão da T17); a spec só exige "sem nome".
+- CHANGELOG e roteiro manual da etapa ficam para T21/T23.
