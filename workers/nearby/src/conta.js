@@ -11,6 +11,10 @@
 //   POST /cota-denuncia?alvo=<uid>[&desfazer=1], POST /denunciar?por=&motivo=[&lat=&lon=][&uid=<denunciado>], GET /denuncias
 //   GET /suspensao -> {ok, suspenso, ate}; POST /suspensao?acao=por|tirar (Tarefa 16; manual, `ate` reservado
 //     para a suspensão automática da Tarefa 22: null = não expira sozinha)
+//   POST /amigo?uid=<alvo>[&simular=1], GET /amigo-marca?uid=<quem pergunta>, GET /amigos-confirmados?eu=<uid>,
+//     POST /amigo-entregue?uid=<outro>[&desfazer=1] (Tarefa 19): marcas "quero ser amigo" de 24 h (até 50 ativas).
+//     O uid só aparece em /amigos-confirmados quando as DUAS marcas existem e valem; a Celula entrega uma vez
+//     (`entregue`). Bloquear (qualquer sentido) apaga a marca daquela pessoa.
 //   Conta especial "índice" (uid reservado INDICE_UID, nunca alcançável por um uid real: o Worker recusa
 //     esse uid): POST /indice-add e GET /indice guardam as 500 denúncias mais recentes de todas as
 //     contas, só para o dono listar sem uid. Gravado pela Conta do denunciado, melhor esforço.
@@ -35,6 +39,9 @@ const MAX_DENUNCIAS = 200; // denúncias recebidas (mantém as mais recentes)
 const DENUNCIA_DEDUP_MS = 24 * 3_600_000; // mesmo denunciante/denunciado em 24 h conta uma vez
 const COTA_DENUNCIAS = 5; // denúncias por denunciante por hora
 const COTA_JANELA_MS = 3_600_000;
+export const MAX_MARCAS_AMIGO = 50; // marcas "quero ser amigo" ativas por pessoa
+const MARCA_AMIGO_MS = 24 * 3_600_000;
+const PRAZO_OUTRA_CONTA_MS = 2000; // prazo da pergunta à Conta do outro lado
 export const INDICE_UID = "__indice__";
 const MAX_INDICE = 500;
 export const MOTIVOS_DENUNCIA = ["incomodo", "comportamento", "falso", "outro"];
@@ -55,6 +62,9 @@ export class Conta {
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (["/amigo", "/amigo-marca", "/amigos-confirmados", "/amigo-entregue"].includes(url.pathname)) {
+      return this.amigos(request, url);
+    }
     if (["/bloquear", "/bloqueios", "/cota-denuncia", "/denunciar", "/denuncias", "/suspensao", "/indice", "/indice-add"].includes(url.pathname)) {
       return this.seguranca(request, url);
     }
@@ -82,6 +92,69 @@ export class Conta {
     const cooldownUntil = COM_ESPERA.has(motivo) ? agora + ESPERA_MS : e.cooldownUntil;
     await this.ctx.storage.put("estado", { aberta: false, abertaEm: 0, encId: null, cooldownUntil });
     return json({ ok: true });
+  }
+
+  // --- marcas "quero ser amigo" (só a Celula alcança) ---
+
+  async amigos(request, url) {
+    const leitura = url.pathname === "/amigo-marca" || url.pathname === "/amigos-confirmados";
+    if (request.method !== (leitura ? "GET" : "POST")) return json({ ok: false, erro: "metodo" }, 405);
+    const agora = this.now();
+    const marcas = ((await this.ctx.storage.get("amigos")) ?? []).filter((m) => m.ate > agora);
+    const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
+    const bloqueado = (u) => b.bloqueados.includes(u) || b.bloqueadoPor.includes(u);
+    const param = url.pathname === "/amigos-confirmados" ? "eu" : "uid";
+    const uid = url.searchParams.get(param) ?? "";
+    if (!UID_RE.test(uid)) return json({ ok: false, erro: "parametro_invalido" }, 400);
+
+    if (url.pathname === "/amigo-marca") {
+      return json({ ok: true, marcou: !bloqueado(uid) && marcas.some((m) => m.uid === uid) });
+    }
+    if (url.pathname === "/amigo") {
+      // Bloqueio em qualquer sentido: não grava, mas responde igual (a Celula já responde "ok" igual).
+      if (bloqueado(uid) || marcas.some((m) => m.uid === uid)) return json({ ok: true });
+      if (marcas.length >= MAX_MARCAS_AMIGO) return json({ ok: false, erro: "limite" }, 409);
+      if (url.searchParams.get("simular") !== "1") {
+        marcas.push({ uid, ate: agora + MARCA_AMIGO_MS, entregue: false });
+        await this.ctx.storage.put("amigos", marcas);
+      }
+      return json({ ok: true });
+    }
+    if (url.pathname === "/amigo-entregue") {
+      const m = marcas.find((x) => x.uid === uid);
+      if (!m) return json({ ok: true, novo: false });
+      if (url.searchParams.get("desfazer") === "1") {
+        m.entregue = false;
+        await this.ctx.storage.put("amigos", marcas);
+        return json({ ok: true });
+      }
+      if (m.entregue) return json({ ok: true, novo: false });
+      m.entregue = true;
+      await this.ctx.storage.put("amigos", marcas);
+      return json({ ok: true, novo: true });
+    }
+
+    // /amigos-confirmados: minhas marcas ainda não entregues cuja outra ponta também marcou e vale.
+    const ns = this.env?.CONTA;
+    if (!ns) return json({ ok: true, uids: [] });
+    const candidatos = marcas.filter((m) => !m.entregue && !bloqueado(m.uid));
+    const respostas = await Promise.all(candidatos.map(async (m) => {
+      let timer;
+      try {
+        const chamada = (async () => {
+          const r = await ns.get(ns.idFromName(m.uid)).fetch(`https://conta/amigo-marca?uid=${encodeURIComponent(uid)}`, { method: "GET" });
+          return (await r.json()).marcou === true;
+        })();
+        chamada.catch(() => {});
+        const limite = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("prazo")), PRAZO_OUTRA_CONTA_MS); });
+        return await Promise.race([chamada, limite]);
+      } catch {
+        return false; // sem resposta: não confirma agora, a próxima consulta tenta de novo
+      } finally {
+        clearTimeout(timer);
+      }
+    }));
+    return json({ ok: true, uids: candidatos.filter((_, i) => respostas[i]).map((m) => m.uid) });
   }
 
   // --- bloqueios e denúncias (só a Celula alcança; os uids nunca saem do servidor) ---
@@ -135,6 +208,10 @@ export class Conta {
       const sentido = url.searchParams.get("sentido") ?? "bloqueou";
       if (!UID_RE.test(alvo) || (sentido !== "bloqueou" && sentido !== "bloqueadoPor")) {
         return json({ ok: false, erro: "parametro_invalido" }, 400);
+      }
+      if (url.searchParams.get("simular") !== "1") {
+        const marcas = (await this.ctx.storage.get("amigos")) ?? [];
+        if (marcas.some((m) => m.uid === alvo)) await this.ctx.storage.put("amigos", marcas.filter((m) => m.uid !== alvo));
       }
       const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
       const lista = sentido === "bloqueou" ? b.bloqueados : b.bloqueadoPor;

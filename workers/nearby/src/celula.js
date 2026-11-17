@@ -27,7 +27,7 @@ import { Encounters } from "./encounter.js";
 import { parseClientMessage, ID_ENCONTRO_RE } from "./protocol.js";
 import { applyOffset, cellId, distanceM, fuzzOffset } from "./geo.js";
 import { combina } from "./match.js";
-import { MAX_BLOQUEADOS } from "./conta.js";
+import { MAX_BLOQUEADOS, MAX_MARCAS_AMIGO } from "./conta.js";
 
 const BLOQ_RENOVAR_MS = 300_000; // a lista de bloqueios de cada conexão é relida da Conta a cada 5 min (no alarme)
 const PRAZO_CONTA_MS = 3000; // prazo de cada chamada à Conta nas leituras de bloqueio e na segurança
@@ -86,6 +86,7 @@ export class Celula {
     this.reparos = []; // lado "bloqueadoPor" que falhou ao gravar: [{ de, para, tentativas }]
     this.pares = {}; // uid -> [{ sessao, uid, ate }]: outros participantes de encontros que terminaram (24 h)
     this.paresSujos = new Set(); // uids com par ainda não gravado (chave `par:<uid>`)
+    this.entregas = new Map(); // uid -> promessa da entrega de amigo_confirmado em curso (uma por vez por pessoa)
     this.falsos = new Map(); // "ref:uid>alvo" -> ms: respostas "ok" sem gravar (alvo que me bloqueou e foi meu par)
     ctx.blockConcurrencyWhile(async () => {
       await Promise.all(
@@ -148,6 +149,9 @@ export class Celula {
     const connId = servidor.deserializeAttachment().connId;
     await this.carregarBloqueios(connId, uid);
     await this.carregarSuspensao(connId, uid);
+    // Amizade confirmada enquanto estava fora: entrega agora (não atrasa a conexão; nunca lança).
+    const p = this.entregarAmigos(uid).catch((e) => console.error("falha ao entregar amigos", e?.message));
+    this.ctx.waitUntil?.(p);
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(this.now() + ALARME_MS);
     }
@@ -171,7 +175,7 @@ export class Celula {
     if (this.susp.get(a.connId)?.suspenso) {
       // Suspensa: perde a presença e o encontro, e não procura, propõe nem entra. Só ela recebe o erro.
       await this.tirarSuspenso(ws, a);
-      if (["procurar", "proposta", "entrar"].includes(msg.t)) return this.erro(ws, "suspenso");
+      if (["procurar", "proposta", "entrar", "amigo"].includes(msg.t)) return this.erro(ws, "suspenso");
       a = ws.deserializeAttachment() ?? a;
     }
 
@@ -198,6 +202,8 @@ export class Celula {
       await this.bloquear(ws, a, msg);
     } else if (msg.t === "denunciar") {
       await this.denunciar(ws, a, msg);
+    } else if (msg.t === "amigo") {
+      await this.amigo(ws, a, msg);
     }
   }
 
@@ -1046,6 +1052,87 @@ export class Celula {
       return this.erro(ws, "indisponivel");
     }
     this.ok(ws, "denuncia");
+  }
+
+  // "Quero ser amigo" (Tarefa 19). Só vale para quem esteve no mesmo encontro (par de 24 h). A resposta é
+  // sempre o mesmo `ok`, haja ou não marca do outro lado; o uid só chega, via `amigo_confirmado`, a cada
+  // um dos dois e só quando as duas marcas existem. Quem me bloqueou recebe o mesmo `ok` sem gravar nada;
+  // quem eu bloqueei, quem nunca foi par e sessão desconhecida respondem `inexistente`, igual ao bloquear.
+  async amigo(ws, a, msg) {
+    if (!this.ritmoOk(ws, a)) return;
+    const alvo = this.resolverSessao(msg.sessao, a.uid);
+    if (alvo && alvo.uid === a.uid) return this.erro(ws, "sessao_propria");
+    if (!alvo || !alvo.par) return this.inexistenteIgual(ws, a);
+    if (this.bloq.get(a.connId)?.bloqueou.has(alvo.uid)) return this.inexistenteIgual(ws, a);
+    if (this.alvoInvisivel(a, alvo.uid)) return this.falsoAmigo(ws, a, alvo.uid);
+    const ele = encodeURIComponent(alvo.uid);
+    try {
+      const r = await this.chamarConta(a.uid, `/amigo?uid=${ele}`, "POST", PRAZO_CONTA_MS);
+      if (r.status === 409 && r.corpo.erro === "limite") return this.erro(ws, "limite", { max: MAX_MARCAS_AMIGO });
+      if (r.status !== 200 || r.corpo.ok !== true) throw new Error(`status ${r.status}`);
+    } catch (e) {
+      console.error("falha ao gravar marca de amizade", e?.message);
+      return this.erro(ws, "indisponivel");
+    }
+    this.ok(ws, "amigo"); // antes de olhar a reciprocidade: a resposta nunca depende dela
+    for (const uid of new Set([a.uid, alvo.uid])) {
+      await this.entregarAmigos(uid).catch((e) => console.error("falha ao entregar amigos", e?.message));
+    }
+  }
+
+  // Alvo (par) que me bloqueou: mesmo `ok`, mesmo teto, mesmas idas à Conta, sem gravar nada.
+  async falsoAmigo(ws, a, uidAlvo) {
+    const ele = encodeURIComponent(uidAlvo);
+    try {
+      const r = await this.chamarConta(a.uid, `/amigo?uid=${ele}&simular=1`, "POST", PRAZO_CONTA_MS);
+      if (r.status === 409 && r.corpo.erro === "limite") return this.erro(ws, "limite", { max: MAX_MARCAS_AMIGO });
+      if (r.status !== 200 || r.corpo.ok !== true) throw new Error(`status ${r.status}`);
+      await this.chamarConta(uidAlvo, "/bloqueios", "GET", PRAZO_CONTA_MS);
+    } catch (e) {
+      console.error("falha na resposta de amizade", e?.message);
+      return this.erro(ws, "indisponivel");
+    }
+    this.ok(ws, "amigo");
+  }
+
+  // Entrega `amigo_confirmado {uid}` (o uid do OUTRO) a `uid` se ele está conectado aqui; uma vez só
+  // (a Conta marca como entregue antes do envio e desfaz se o envio falha). Serializada por pessoa.
+  async entregarAmigos(uid) {
+    const anterior = this.entregas.get(uid) ?? Promise.resolve();
+    const p = anterior.catch(() => {}).then(() => this.entregarAmigosAgora(uid));
+    this.entregas.set(uid, p);
+    try {
+      await p;
+    } finally {
+      if (this.entregas.get(uid) === p) this.entregas.delete(uid);
+    }
+  }
+
+  async entregarAmigosAgora(uid) {
+    const aberto = () => this.ctx.getWebSockets().find((ws) => {
+      if (ws.readyState !== undefined && ws.readyState !== 1) return false;
+      const o = ws.deserializeAttachment();
+      return o?.uid === uid && !this.susp.get(o.connId)?.suspenso;
+    });
+    if (!aberto()) return;
+    const { status, corpo } = await this.chamarConta(uid, `/amigos-confirmados?eu=${encodeURIComponent(uid)}`, "GET", PRAZO_CONTA_MS);
+    if (status !== 200 || corpo.ok !== true) return;
+    for (const outro of corpo.uids ?? []) {
+      const ele = encodeURIComponent(outro);
+      const c = await this.chamarConta(uid, `/amigo-entregue?uid=${ele}`, "POST", PRAZO_CONTA_MS);
+      if (c.status !== 200 || c.corpo.novo !== true) continue; // já entregue (inclusive por outra Celula)
+      let enviou = false;
+      const ws = aberto();
+      if (ws) {
+        try {
+          ws.send(JSON.stringify({ t: "amigo_confirmado", uid: outro }));
+          enviou = true;
+        } catch {
+          // socket caiu: desfaz abaixo
+        }
+      }
+      if (!enviou) await this.chamarConta(uid, `/amigo-entregue?uid=${ele}&desfazer=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
+    }
   }
 
   ok(ws, ref) {
