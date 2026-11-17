@@ -103,8 +103,11 @@ fun MapScreen(
     vm: HunterViewModel,
     friends: List<FriendMarker> = emptyList(),
     nearbyVm: NearbyViewModel = viewModel(factory = nearbyViewModelFactory(LocalContext.current.applicationContext as HunterApp)),
+    /** Para o convite de amizade que nasce de um encontro ("Quero ser amigo" das duas pessoas). */
+    social: app.hunter.app.social.SocialViewModel? = null,
 ) {
     val context = LocalContext.current
+    if (social != null) LaunchedEffect(nearbyVm, social) { nearbyVm.convidarAmigo = social::conviteDeEncontro }
     val live by vm.live.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
     val nav by vm.nav.collectAsStateWithLifecycle()
@@ -140,6 +143,7 @@ fun MapScreen(
     val nearbyAviso by nearbyVm.aviso.collectAsStateWithLifecycle()
     val nearbyEnviando by nearbyVm.enviando.collectAsStateWithLifecycle()
     val fimPessoas by nearbyVm.fimPessoas.collectAsStateWithLifecycle()
+    val amigosMarcados by nearbyVm.amigosMarcados.collectAsStateWithLifecycle()
     val nearbyProposals = (nearbyState as? NearbyUiState.Procurando)?.propostas.orEmpty()
     var selectedProposal by remember { mutableStateOf<String?>(null) }
     var proposalPoint by remember { mutableStateOf<app.hunter.nav.LatLon?>(null) }
@@ -447,6 +451,8 @@ fun MapScreen(
                     enviando = nearbyEnviando,
                     onBloquear = nearbyVm::bloquear,
                     onDenunciar = nearbyVm::denunciar,
+                    marcadas = amigosMarcados,
+                    onQueroAmigo = nearbyVm::querSerAmigo,
                 )
             }
         }

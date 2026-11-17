@@ -120,6 +120,12 @@ sealed interface ClientMessage {
     /** Bloqueia a pessoa pela sessão opaca (nunca nome nem uid); vale nos dois sentidos. */
     data class Bloquear(val sessao: String) : ClientMessage
     data class Denunciar(val sessao: String, val motivo: MotivoDenuncia) : ClientMessage
+
+    /** "Quero ser amigo" de quem esteve no encontro (sessão opaca); só vira amizade se a outra pessoa também marcar. */
+    data class Amigo(val sessao: String) : ClientMessage
+
+    /** Confirma ao servidor que o `amigo_confirmado` de [uid] foi tratado (sem isso ele reenvia a cada conexão por até 72 h). */
+    data class AmigoAck(val uid: String) : ClientMessage
 }
 
 sealed interface ServerMessage {
@@ -141,6 +147,9 @@ sealed interface ServerMessage {
 
     /** Confirma `bloquear` (`ref` = "bloqueio") ou `denunciar` (`ref` = "denuncia"). */
     data class Ok(val ref: String) : ServerMessage
+
+    /** As duas pessoas marcaram "quero ser amigo": [uid] é a outra (o mesmo uid do Social), para convidar. */
+    data class AmigoConfirmado(val uid: String) : ServerMessage
 
     /** [restanteMs] só vem em `espera`. */
     data class Erro(val codigo: String, val restanteMs: Long? = null) : ServerMessage
@@ -186,6 +195,14 @@ fun ClientMessage.toJson(): String = buildJsonObject {
             put("t", "denunciar")
             put("sessao", m.sessao)
             put("motivo", m.motivo.wire)
+        }
+        is ClientMessage.Amigo -> {
+            put("t", "amigo")
+            put("sessao", m.sessao)
+        }
+        is ClientMessage.AmigoAck -> {
+            put("t", "amigo_ack")
+            put("uid", m.uid)
         }
     }
 }.toString()
@@ -284,6 +301,10 @@ fun parseServerMessage(json: String): ServerMessage? = try {
             )
         }
         "fim" -> ServerMessage.Fim(obj["id"]!!.jsonPrimitive.content, MotivoFim.fromWire(obj["motivo"]?.jsonPrimitive?.contentOrNull))
+        "amigo_confirmado" -> {
+            val uid = obj["uid"]!!.jsonPrimitive.content
+            if (uid.isEmpty()) null else ServerMessage.AmigoConfirmado(uid)
+        }
         "ok" -> ServerMessage.Ok(obj["ref"]!!.jsonPrimitive.content)
         "erro" -> ServerMessage.Erro(
             obj["codigo"]!!.jsonPrimitive.content,

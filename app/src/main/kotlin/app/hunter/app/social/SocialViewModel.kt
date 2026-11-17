@@ -67,6 +67,9 @@ data class SocialUi(
     val rolesLoaded: Boolean = false,
 )
 
+/** Resultado do convite que nasce de um encontro (ver [SocialViewModel.conviteDeEncontro]). */
+enum class ConviteDeEncontro { ENVIADO, IGNORADO, FALHOU }
+
 const val OFFLINE_MESSAGE = "Sem conexão. Mostrando o que já foi carregado."
 const val ACTION_FAILED_MESSAGE = "Não deu para concluir agora. Confira a internet e tente de novo."
 const val BUDGET_NOT_ACCEPTED_MESSAGE = "Aceite o convite do rolê antes de informar o orçamento."
@@ -559,6 +562,34 @@ class SocialViewModel(
 
     fun invite(uid: String) = act { s ->
         s.engine.invite(uid).also { if (it == SocialResult.Ok) _state.update { u -> u.copy(searchResults = u.searchResults.filter { h -> h.uid != uid }) } }
+    }
+
+    /**
+     * Convite vindo do "Quero ser amigo" do Rolê por perto: as duas pessoas marcaram. Chamado pelo [NearbyViewModel]
+     * (sem o `busy` da tela Amigos, que é de toques). Quem já é amigo, está bloqueado, sou eu ou passou do limite
+     * de amigos não gera convite ([ConviteDeEncontro.IGNORADO], o servidor pode parar de reenviar); falha de
+     * rede ou sem conta devolve [ConviteDeEncontro.FALHOU] (o servidor reentrega na próxima conexão).
+     */
+    suspend fun conviteDeEncontro(uid: String): ConviteDeEncontro {
+        val s = session ?: return ConviteDeEncontro.FALHOU
+        return try {
+            when (val r = s.engine.invite(uid)) {
+                SocialResult.Ok -> {
+                    actionFailed = false
+                    syncOffline()
+                    loadSent(s)
+                    ConviteDeEncontro.ENVIADO
+                }
+                is SocialResult.Refused -> when (r.reason) {
+                    Refusal.ALREADY_FRIENDS, Refusal.BLOCKED_BY_ME, Refusal.SELF, Refusal.FRIEND_LIMIT -> ConviteDeEncontro.IGNORADO
+                    else -> ConviteDeEncontro.FALHOU
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ConviteDeEncontro.FALHOU
+        }
     }
 
     fun acceptInvite(from: String) = act { it.engine.acceptInvite(from) }

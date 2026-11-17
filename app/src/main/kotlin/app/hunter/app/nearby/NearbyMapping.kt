@@ -162,6 +162,8 @@ const val TEXTO_ESPERA_ENTRAR = "Aguarde um instante e tente de novo"
 
 const val REF_BLOQUEIO = "bloqueio"
 const val REF_DENUNCIA = "denuncia"
+const val REF_AMIGO = "amigo"
+const val TEXTO_CONVITE_ENVIADO = "Convite de amizade enviado"
 const val TEXTO_SUSPENSO = "Recurso indisponível por denúncias. Fale com o dono do Rumo."
 const val TEXTO_DENUNCIA_ENVIADA = "Denúncia enviada"
 const val TEXTO_CONFIRMAR_BLOQUEIO = "Você não verá mais essa pessoa e ela não verá você"
@@ -176,10 +178,18 @@ val MotivoDenuncia.rotulo: String
 
 /** Aviso curto para um erro de `bloquear`/`denunciar` ([ref] = "bloqueio" ou "denuncia"). */
 fun textoDaModeracao(codigo: String, restanteMs: Long?, ref: String): String {
-    val acao = if (ref == REF_BLOQUEIO) "bloquear" else "denunciar"
+    val acao = when (ref) {
+        REF_BLOQUEIO -> "bloquear"
+        REF_AMIGO -> "marcar"
+        else -> "denunciar"
+    }
     return when (codigo) {
         "inexistente" -> "Não foi possível encontrar essa pessoa. Ela pode ter saído"
-        "limite" -> if (ref == REF_BLOQUEIO) "Você atingiu o limite de pessoas bloqueadas" else "Muitas denúncias seguidas. Tente de novo mais tarde"
+        "limite" -> when (ref) {
+            REF_BLOQUEIO -> "Você atingiu o limite de pessoas bloqueadas"
+            REF_AMIGO -> "Você já marcou muitas pessoas. Tente de novo mais tarde"
+            else -> "Muitas denúncias seguidas. Tente de novo mais tarde"
+        }
         "espera" -> if (restanteMs != null && restanteMs >= 60_000L) {
             "Espere ${(restanteMs + 59_999L) / 60_000L} min para $acao de novo"
         } else {

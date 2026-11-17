@@ -87,7 +87,7 @@ class NearbyState private constructor(
                     // Fim de outro encontro (atrasado) não derruba o atual.
                     if (atual != null && atual.id != msg.id) state else state.copiar(encontro = null, fim = msg)
                 }
-                is ServerMessage.Ok -> state
+                is ServerMessage.Ok, is ServerMessage.AmigoConfirmado -> state
                 is ServerMessage.Erro -> state.copiar(ultimoErro = msg.codigo, ultimaEsperaMs = msg.restanteMs)
             }
     }

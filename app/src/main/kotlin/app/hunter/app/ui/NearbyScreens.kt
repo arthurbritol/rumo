@@ -421,17 +421,33 @@ fun NearbyEndCard(
     enviando: Boolean = false,
     onBloquear: (String) -> Unit = {},
     onDenunciar: (String, MotivoDenuncia) -> Unit = { _, _ -> },
+    /** Sessões já marcadas com "Quero ser amigo": o botão vira "Marcado" e fica desabilitado. */
+    marcadas: Set<String> = emptySet(),
+    onQueroAmigo: (String) -> Unit = {},
 ) {
     FloatingCard(modifier, scrollable = true) {
         CardHeader("Encontro encerrado", onClose)
         Text(textoDoFim(motivo), style = MaterialTheme.typography.bodyLarge)
         pessoas.forEachIndexed { i, sessao ->
             key(sessao) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Motociclista ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Motociclista ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                        val marcada = sessao in marcadas
+                        TextButton(onClick = { onQueroAmigo(sessao) }, enabled = !marcada && !enviando) {
+                            Text(if (marcada) "Marcado" else "Quero ser amigo")
+                        }
+                    }
                     ModeracaoBotoes(enviando, { onBloquear(sessao) }, { m -> onDenunciar(sessao, m) }, nome = "Motociclista ${i + 1}")
                 }
             }
+        }
+        if (pessoas.isNotEmpty()) {
+            Text(
+                "A amizade só acontece se a outra pessoa também marcar. Ela não vê quem você é até lá.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         PrimaryButton("Ok", onClose, Modifier.fillMaxWidth())
     }

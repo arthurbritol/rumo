@@ -394,7 +394,7 @@ private fun HunterRoot(
         Box(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
             // O mapa fica SEMPRE montado por baixo: trocar de aba não recria o mapa nem recarrega os tiles
             // (era a maior causa de lentidão). As outras abas aparecem por cima, opacas.
-            MapScreen(vm, friends = friendMarkers)
+            MapScreen(vm, friends = friendMarkers, social = socialVm)
             Crossfade(targetState = tab, animationSpec = tween(160), label = "tab") { t ->
                 if (t != Tab.Map) {
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

@@ -3,6 +3,7 @@ package app.hunter.app.nearby
 import androidx.lifecycle.ViewModel
 import app.hunter.model.Geo
 import app.hunter.model.TrackPoint
+import app.hunter.app.social.ConviteDeEncontro
 import app.hunter.nav.LatLon
 import app.hunter.nearby.ClientMessage
 import app.hunter.nearby.MotivoDenuncia
@@ -86,6 +87,8 @@ class NearbyViewModel(
     private val etaCalculator: EtaCalculator = EtaCalculator { _, _ -> null },
     /** Quanto esperar a resposta de uma proposta ou entrada antes de desistir. */
     private val respostaMs: Long = 15_000,
+    /** Convida o uid pelo Social quando as duas pessoas marcaram; a tela liga isto ao `SocialViewModel` (sem ele, falha e o servidor reenvia depois). */
+    var convidarAmigo: suspend (String) -> ConviteDeEncontro = { ConviteDeEncontro.FALHOU },
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -118,8 +121,17 @@ class NearbyViewModel(
     /** Sessões (opacas) de quem estava no encontro que acabou, para bloquear ou denunciar no cartão de fim. */
     val fimPessoas: StateFlow<List<String>> = _fimPessoas.asStateFlow()
 
+    private val _amigosMarcados = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Sessões que o usuário marcou com "Quero ser amigo" (o servidor já confirmou o recebimento); o botão vira "Marcado". */
+    val amigosMarcados: StateFlow<Set<String>> = _amigosMarcados.asStateFlow()
+
     /** Quem o usuário bloqueou nesta busca: some das listas mesmo se o servidor mandar a sessão de novo. Só em memória. */
     private val bloqueadas = mutableSetOf<String>()
+
+    /** Uids já tratados (convite enviado ou ignorado) e os em andamento, nesta execução: um convite por uid. */
+    private val convidados = mutableSetOf<String>()
+    private val convidando = mutableSetOf<String>()
     private var pendente: Pendente? = null
     private var pendenteJob: Job? = null
     private var fimCell: String? = null
@@ -439,8 +451,10 @@ class NearbyViewModel(
                 if (p != null && p.ref == m.ref && mesmoCanal(e, p)) {
                     concluir()
                     if (p.ref == REF_DENUNCIA) _aviso.value = TEXTO_DENUNCIA_ENVIADA
+                    if (p.ref == REF_AMIGO) _amigosMarcados.value = _amigosMarcados.value + p.sessao
                 }
             }
+            is ServerMessage.AmigoConfirmado -> aoAmigoConfirmado(m.uid, e)
             is ServerMessage.Erro -> {
                 val p = pendente
                 if (p != null && m.codigo in ERROS_DE_MODERACAO && mesmoCanal(e, p) && !(propondo && !e.extra && e.celula == encCell)) {
@@ -660,6 +674,54 @@ class NearbyViewModel(
 
     fun denunciar(sessao: String, motivo: MotivoDenuncia) = moderar(ClientMessage.Denunciar(sessao, motivo), REF_DENUNCIA, sessao)
 
+    /** "Quero ser amigo" de [sessao]: vai pela conexão do quadrado do encontro; "Marcado" só depois do `ok` do servidor. */
+    fun querSerAmigo(sessao: String) {
+        if (sessao in _amigosMarcados.value) return
+        moderar(ClientMessage.Amigo(sessao), REF_AMIGO, sessao)
+    }
+
+    /**
+     * As duas pessoas marcaram: convida uma vez por uid (memória desta execução) e responde `amigo_ack` pela mesma
+     * conexão de onde veio. Repetição (o servidor reenvia sem ack) só reenvia o ack. Se o convite falha, nada é
+     * confirmado nem repetido: o servidor volta a entregar na próxima conexão.
+     */
+    private fun aoAmigoConfirmado(uid: String, e: NearbyEvent) {
+        if (uid in convidados) {
+            enviarAck(uid, e)
+            return
+        }
+        if (!convidando.add(uid)) return // já em andamento: o ack sai quando terminar
+        scope.launch {
+            val r = try {
+                convidarAmigo(uid)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (x: Exception) {
+                ConviteDeEncontro.FALHOU
+            } finally {
+                convidando.remove(uid)
+            }
+            if (pref == null) return@launch // desligou nesse meio tempo: a conexão já foi fechada
+            when (r) {
+                ConviteDeEncontro.ENVIADO -> {
+                    convidados += uid
+                    enviarAck(uid, e)
+                    _aviso.value = TEXTO_CONVITE_ENVIADO
+                }
+                ConviteDeEncontro.IGNORADO -> {
+                    convidados += uid
+                    enviarAck(uid, e)
+                }
+                ConviteDeEncontro.FALHOU -> Unit
+            }
+        }
+    }
+
+    private fun enviarAck(uid: String, e: NearbyEvent) {
+        val ack = ClientMessage.AmigoAck(uid)
+        if (e.extra) link.sendEncounter(ack) else link.send(ack, e.celula)
+    }
+
     private fun moderar(msg: ClientMessage, ref: String, sessao: String) {
         if (pref == null || pendente != null) return
         val destino = destinoDe(sessao)
@@ -774,6 +836,7 @@ class NearbyViewModel(
         fecharExtraAoConcluir = false
         concluir()
         bloqueadas.clear()
+        _amigosMarcados.value = emptySet()
         fimCell = null
         _fimPessoas.value = emptyList()
     }
