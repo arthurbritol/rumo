@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar). A etapa 3 (T15 a T18) foi publicada em 2026-11-17: release v0.7.24, servidor com bloqueios/denúncias/rotas do dono no ar (/admin sem token responde 401). Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13 e 15 a 17 concluídas; etapas 1 a 3 publicadas (v0.7.24) e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 19 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar). A etapa 3 (T15 a T18) foi publicada em 2026-11-17: release v0.7.24, servidor com bloqueios/denúncias/rotas do dono no ar (/admin sem token responde 401). Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13 15 a 17 e 19 concluídas; etapas 1 a 3 publicadas (v0.7.24) e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 20 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
@@ -23,6 +23,7 @@ Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar
 | 15 | Bloqueios e denúncias na `Conta`/`Celula` (simétrico, sem revelar quem bloqueou, pares de 24 h para denunciar no fim do encontro) | `4b7a553`, `1838657`, `b5f2984`, `748987c` | 126 unitários + 61 de integração |
 | 16 | Rotas do dono (`/admin/denuncias`, `/admin/suspensao`) e suspensão manual (`suspenso` ao procurar/propor/entrar) | `6366ab9`, `491a1f4` | 134 unitários + 64 de integração |
 | 17 | App: bloquear e denunciar (cartão da moto, encontro e fim), `suspenso` desliga a busca | `3b3b983`, `92d84ff` | suíte do sync-core e do app verdes, `assembleDebug` ok |
+| 19 | Marcas "quero ser amigo" recíprocas no servidor (`amigo`, `amigo_confirmado`, `amigo_ack`) | `9e4f8b3`, `8de298a`, `a56ab0b` | 147 unitários + 73 de integração |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -101,3 +102,9 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 - Falha aberta da suspensão (se a Conta não responde, a pessoa pode procurar) e cache de 5 min: `por`/`tirar` só valem em conexão aberta após até 5 min.
 - Uid na query string das rotas do dono (aparece em logs da Cloudflare).
 - Para publicar a etapa 3 faltam: T17 (bloquear/denunciar no app) e T18 (publicar). Servidor das T15/T16 ainda não está no ar.
+
+## Pendências registradas na Tarefa 19 (servidor só na branch local `feat/role-por-perto-etapa4`, não publicado)
+
+- Marca e bloquear/denunciar compartilham o limite de ritmo (só UX); prazo da marca conta a partir da marca, não do fim do encontro; `/amigos-confirmados` faz até 50 chamadas de Conta para Conta por conexão.
+- Corrida de leitura e gravação em `/amigos-confirmados` (janela de ~2 s; pode entregar uid de quem acabou de ser bloqueado em uma resposta já em andamento); `/amigo-confirmar` sem prazo próprio.
+- A entrega imediata só vale na mesma Celula do encontro; o app (T20) deve mandar `amigo` pelo quadrado do encontro e responder `amigo_ack {uid}` a cada `amigo_confirmado`.

@@ -303,7 +303,7 @@ Cada linha tem um teste na tarefa dona do código.
 **Interfaces:**
 - `POST /amigo?uid=<alvo>` grava `{de, para, ate: now + 24h}` na Conta de quem marca; `GET /amigos-confirmados` devolve os `uid`s com marca **recíproca** ainda válida; só então aparece o `uid` (mensagem do servidor `{t:"amigo_confirmado", uid}`). A `Celula` só aceita `amigo` para quem **esteve no mesmo encontro** (guardar os pares de sessões do encontro por 24 h na Conta).
 
-- [ ] **Passo 1: testes**: marca de um lado só não revela nada; as duas marcas revelam o `uid` de cada um para o outro (e só a ele); marca depois de 24 h não vale; marcar alguém que não esteve no encontro é recusado; marca de quem foi bloqueado depois é recusada. **Passos 2 a 4:** implementar e passar. Commit.
+- [x] **Passo 1: testes**: marca de um lado só não revela nada; as duas marcas revelam o `uid` de cada um para o outro (e só a ele); marca depois de 24 h não vale; marcar alguém que não esteve no encontro é recusado; marca de quem foi bloqueado depois é recusada. **Passos 2 a 4:** implementar e passar. Commit.
 
 ### Tarefa 20: "Quero ser amigo" no app
 
