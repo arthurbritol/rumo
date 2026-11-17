@@ -4,6 +4,8 @@ Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [..
 
 Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar). A etapa 3 (T15 a T18) foi publicada em 2026-11-17: release v0.7.24, servidor com bloqueios/denúncias/rotas do dono no ar (/admin sem token responde 401). Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13 15 a 17 e 19 concluídas; etapas 1 a 3 publicadas (v0.7.24) e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 20 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
+A etapa 4 (T19 a T21) foi publicada em 2026-11-17: release v0.7.25, servidor com marcas de amizade no ar (`/health` ok, `/admin` 401). Pendentes: T22 (suspensão automática) e T23 (carga e documentação); testes com dois aparelhos das etapas 2 a 4 são do dono.
+
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 
 | Tarefa | O que é | Commits | Testes |
