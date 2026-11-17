@@ -14,6 +14,7 @@ import app.hunter.nearby.Proposta
 import app.hunter.nearby.Ritmo
 import app.hunter.nearby.ServerMessage
 import app.hunter.nearby.Vizinho
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
@@ -221,5 +222,84 @@ class NearbyAmigoViewModelTest {
         r.vm.querSerAmigo("zzz")
         assertTrue(r.link.sent.isEmpty())
         assertEquals("Não foi possível encontrar essa pessoa. Ela pode ter saído", r.vm.aviso.value)
+    }
+
+    @Test
+    fun `amigo vai sempre pela celula do encontro mesmo com a pessoa vista por outro quadrado`() = runTest {
+        val r = rig()
+        r.encontroAcabado()
+        val quina = TrackPoint(timeMs = 0, latitude = -21.0, longitude = -41.0) // quatro quadrados, inclusive o do encontro
+        r.positions.tryEmit(quina)
+        r.emit(ServerMessage.Vizinhos(listOf(viz("p2"))), celula = "-22:-41")
+        r.link.sent.clear()
+        r.vm.querSerAmigo("p2")
+        assertEquals(ClientMessage.Amigo("p2") to cellCentro, r.link.sent.single())
+    }
+
+    @Test
+    fun `vizinho que nao esteve no encontro nao pode ser marcado`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.querSerAmigo("a") // "a" e so um vizinho
+        assertTrue(r.link.sent.isEmpty())
+        assertEquals("Não foi possível encontrar essa pessoa. Ela pode ter saído", r.vm.aviso.value)
+    }
+
+    @Test
+    fun `amizade direta mostra aviso neutro`() = runTest {
+        val r = rig { ConviteDeEncontro.AMIGOS_AGORA }
+        r.procurando()
+        r.emit(ServerMessage.AmigoConfirmado("u-9"))
+        assertEquals("Vocês agora são amigos", r.vm.aviso.value)
+        assertEquals(1, acks(r).size)
+    }
+
+    @Test
+    fun `desligar durante o convite registra o uid e nao convida de novo`() = runTest {
+        val link = FakeLink()
+        val positions = MutableSharedFlow<TrackPoint>(extraBufferCapacity = 8)
+        val gate = CompletableDeferred<ConviteDeEncontro>()
+        var chamadas = 0
+        val vm = NearbyViewModel(
+            link = link, signedIn = { true }, positions = { positions },
+            dispatcher = UnconfinedTestDispatcher(testScheduler),
+            convidarAmigo = { chamadas++; gate.await() },
+        )
+        vm.ligar(pref)
+        positions.tryEmit(centro)
+        link.eventFlow.tryEmit(NearbyEvent(cellCentro, ServerMessage.AmigoConfirmado("u-9"), false))
+        vm.desligar()
+        gate.complete(ConviteDeEncontro.ENVIADO)
+        assertNull(vm.aviso.value)
+        vm.ligar(pref)
+        positions.tryEmit(centro)
+        link.sent.clear()
+        link.eventFlow.tryEmit(NearbyEvent(cellCentro, ServerMessage.AmigoConfirmado("u-9"), false))
+        assertEquals(1, chamadas)
+        assertEquals(listOf<Pair<ClientMessage, String?>>(ClientMessage.AmigoAck("u-9") to cellCentro), link.sent)
+        assertNull(vm.aviso.value) // sem novo "Convite enviado"
+    }
+
+    @Test
+    fun `segunda entrega com convite em andamento recebe o ack pela propria conexao`() = runTest {
+        val link = FakeLink()
+        val positions = MutableSharedFlow<TrackPoint>(extraBufferCapacity = 8)
+        val gate = CompletableDeferred<ConviteDeEncontro>()
+        var chamadas = 0
+        val vm = NearbyViewModel(
+            link = link, signedIn = { true }, positions = { positions },
+            dispatcher = UnconfinedTestDispatcher(testScheduler),
+            convidarAmigo = { chamadas++; gate.await() },
+        )
+        vm.ligar(pref)
+        positions.tryEmit(centro)
+        link.sent.clear()
+        link.eventFlow.tryEmit(NearbyEvent(cellCentro, ServerMessage.AmigoConfirmado("u-9"), false))
+        link.eventFlow.tryEmit(NearbyEvent("qualquer", ServerMessage.AmigoConfirmado("u-9"), true))
+        assertTrue(link.sent.isEmpty())
+        gate.complete(ConviteDeEncontro.ENVIADO)
+        assertEquals(1, chamadas)
+        assertEquals(listOf<Pair<ClientMessage, String?>>(ClientMessage.AmigoAck("u-9") to cellCentro), link.sent)
+        assertEquals(listOf<ClientMessage>(ClientMessage.AmigoAck("u-9")), link.sentEnc)
     }
 }

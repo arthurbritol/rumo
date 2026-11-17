@@ -558,4 +558,44 @@ class SocialViewModelTest {
         runCurrent()
         assertEquals(1, created)
     }
+
+    @Test
+    fun `convite de encontro - amigo existente e bloqueado sao ignorados, sem convite`() = runTest {
+        store.friendsFlow.value = listOf(friend("ana", "Ana"))
+        store.blockedUids += "bia"
+        val vm = vm()
+        runCurrent()
+        assertEquals(ConviteDeEncontro.IGNORADO, vm.conviteDeEncontro("ana"))
+        assertEquals(ConviteDeEncontro.IGNORADO, vm.conviteDeEncontro("bia"))
+        assertEquals(ConviteDeEncontro.IGNORADO, vm.conviteDeEncontro("me"))
+        assertTrue(store.sentInvites.isEmpty())
+    }
+
+    @Test
+    fun `convite de encontro - novo grava uma vez e repetido nao duplica`() = runTest {
+        val vm = vm()
+        runCurrent()
+        assertEquals(ConviteDeEncontro.ENVIADO, vm.conviteDeEncontro("caio"))
+        assertEquals(ConviteDeEncontro.ENVIADO, vm.conviteDeEncontro("caio"))
+        assertEquals(listOf("me" to "caio"), store.sentInvites.toList())
+    }
+
+    @Test
+    fun `convite de encontro - quem ja me convidou vira amizade direta`() = runTest {
+        store.invitesFlow.value = listOf(Invite("duda", "me", 1))
+        val vm = vm()
+        runCurrent()
+        assertEquals(ConviteDeEncontro.AMIGOS_AGORA, vm.conviteDeEncontro("duda"))
+    }
+
+    @Test
+    fun `convite de encontro - falha de rede e sem conta devolvem FALHOU`() = runTest {
+        val vm = vm()
+        runCurrent()
+        store.failure = IOException("sem rede")
+        assertEquals(ConviteDeEncontro.FALHOU, vm.conviteDeEncontro("caio"))
+        val semConta = vm(FakeBackend(initialUid = null))
+        runCurrent()
+        assertEquals(ConviteDeEncontro.FALHOU, semConta.conviteDeEncontro("caio"))
+    }
 }

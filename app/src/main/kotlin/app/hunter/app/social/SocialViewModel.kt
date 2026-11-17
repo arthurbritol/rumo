@@ -68,7 +68,14 @@ data class SocialUi(
 )
 
 /** Resultado do convite que nasce de um encontro (ver [SocialViewModel.conviteDeEncontro]). */
-enum class ConviteDeEncontro { ENVIADO, IGNORADO, FALHOU }
+enum class ConviteDeEncontro {
+    ENVIADO,
+
+    /** A outra pessoa já tinha me convidado: o convite foi aceito e já são amigos. */
+    AMIGOS_AGORA,
+    IGNORADO,
+    FALHOU,
+}
 
 const val OFFLINE_MESSAGE = "Sem conexão. Mostrando o que já foi carregado."
 const val ACTION_FAILED_MESSAGE = "Não deu para concluir agora. Confira a internet e tente de novo."
@@ -573,12 +580,13 @@ class SocialViewModel(
     suspend fun conviteDeEncontro(uid: String): ConviteDeEncontro {
         val s = session ?: return ConviteDeEncontro.FALHOU
         return try {
+            val jaMeConvidou = s.store.invitesReceived(s.uid).any { it.fromUid == uid }
             when (val r = s.engine.invite(uid)) {
                 SocialResult.Ok -> {
                     actionFailed = false
                     syncOffline()
                     loadSent(s)
-                    ConviteDeEncontro.ENVIADO
+                    if (jaMeConvidou) ConviteDeEncontro.AMIGOS_AGORA else ConviteDeEncontro.ENVIADO
                 }
                 is SocialResult.Refused -> when (r.reason) {
                     Refusal.ALREADY_FRIENDS, Refusal.BLOCKED_BY_ME, Refusal.SELF, Refusal.FRIEND_LIMIT -> ConviteDeEncontro.IGNORADO

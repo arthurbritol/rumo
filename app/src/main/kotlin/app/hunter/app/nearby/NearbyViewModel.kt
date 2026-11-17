@@ -131,7 +131,7 @@ class NearbyViewModel(
 
     /** Uids já tratados (convite enviado ou ignorado) e os em andamento, nesta execução: um convite por uid. */
     private val convidados = mutableSetOf<String>()
-    private val convidando = mutableSetOf<String>()
+    private val convidando = mutableMapOf<String, MutableList<NearbyEvent>>()
     private var pendente: Pendente? = null
     private var pendenteJob: Job? = null
     private var fimCell: String? = null
@@ -690,7 +690,9 @@ class NearbyViewModel(
             enviarAck(uid, e)
             return
         }
-        if (!convidando.add(uid)) return // já em andamento: o ack sai quando terminar
+        convidando[uid]?.let { it += e; return } // em andamento: o ack sai, por esta conexão também, quando terminar
+        val origens = mutableListOf(e)
+        convidando[uid] = origens
         scope.launch {
             val r = try {
                 convidarAmigo(uid)
@@ -701,18 +703,14 @@ class NearbyViewModel(
             } finally {
                 convidando.remove(uid)
             }
-            if (pref == null) return@launch // desligou nesse meio tempo: a conexão já foi fechada
+            if (r == ConviteDeEncontro.FALHOU) return@launch
+            convidados += uid // mesmo que a busca tenha desligado no meio: o convite já foi feito
+            if (pref == null) return@launch // a conexão já foi fechada: sem ack (o servidor reentrega e só o ack sai)
+            origens.forEach { enviarAck(uid, it) }
             when (r) {
-                ConviteDeEncontro.ENVIADO -> {
-                    convidados += uid
-                    enviarAck(uid, e)
-                    _aviso.value = TEXTO_CONVITE_ENVIADO
-                }
-                ConviteDeEncontro.IGNORADO -> {
-                    convidados += uid
-                    enviarAck(uid, e)
-                }
-                ConviteDeEncontro.FALHOU -> Unit
+                ConviteDeEncontro.ENVIADO -> _aviso.value = TEXTO_CONVITE_ENVIADO
+                ConviteDeEncontro.AMIGOS_AGORA -> _aviso.value = TEXTO_AMIGOS_AGORA
+                else -> Unit
             }
         }
     }
@@ -724,7 +722,7 @@ class NearbyViewModel(
 
     private fun moderar(msg: ClientMessage, ref: String, sessao: String) {
         if (pref == null || pendente != null) return
-        val destino = destinoDe(sessao)
+        val destino = if (ref == REF_AMIGO) destinoDoEncontro(sessao) else destinoDe(sessao)
         if (destino == null) {
             _aviso.value = textoDaModeracao("inexistente", null, ref)
             return
@@ -754,6 +752,19 @@ class NearbyViewModel(
             return if (usandoExtra) Destino(null, true) else encCell?.let { Destino(it, false) }
         }
         state.celulaDoVizinho(sessao)?.let { return Destino(it, false) }
+        if (sessao in _fimPessoas.value) return fimCell?.let { Destino(it, false) }
+        return null
+    }
+
+    /**
+     * `amigo` só vale na Celula do encontro (é lá que ficam os pares de 24 h): nunca no quadrado onde a pessoa aparece
+     * como vizinha. Só vale para quem esteve no encontro (em andamento ou que acabou).
+     */
+    private fun destinoDoEncontro(sessao: String): Destino? {
+        val enc = state.encontro
+        if (enc != null && sessao != enc.eu && enc.participantes.any { it.sessao == sessao }) {
+            return if (usandoExtra) Destino(null, true) else encCell?.let { Destino(it, false) }
+        }
         if (sessao in _fimPessoas.value) return fimCell?.let { Destino(it, false) }
         return null
     }
