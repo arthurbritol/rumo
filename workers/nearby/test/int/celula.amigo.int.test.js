@@ -23,6 +23,7 @@ async function conectar(stub, uid, extra = {}) {
   const c = { ws, uid, recebidas: [] };
   ws.addEventListener("message", (e) => { c.recebidas.push(JSON.parse(e.data)); });
   c.enviar = (m) => ws.send(JSON.stringify(m));
+  c.ack = (uidOutro) => c.enviar({ t: "amigo_ack", uid: uidOutro });
   return c;
 }
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -99,11 +100,19 @@ describe("marcas de amizade na Celula", { timeout: 25000 }, () => {
     const a2 = await conectar(stub, uA);
     expect(await esperar(() => confirmados(a2).length === 1)).toBe(true);
     expect(confirmados(a2)).toEqual([uB]);
+    // Sem ack, a próxima conexão reenvia (entrega perdida); com ack, encerra.
     a2.ws.close(1000, "x");
     await dormir(200);
     const a3 = await conectar(stub, uA);
+    expect(await esperar(() => confirmados(a3).length === 1)).toBe(true);
+    expect(confirmados(a3)).toEqual([uB]);
+    a3.ack(uB);
+    await dormir(400);
+    a3.ws.close(1000, "x");
+    await dormir(200);
+    const a4 = await conectar(stub, uA);
     await dormir(600);
-    expect(confirmados(a3)).toEqual([]); // já foi entregue
+    expect(confirmados(a4)).toEqual([]); // ack encerrou
     // C, de fora, nada recebe.
     const c = await conectar(stub, unico("uid-carla"));
     await dormir(400);
@@ -178,6 +187,29 @@ describe("marcas de amizade na Celula", { timeout: 25000 }, () => {
     await dormir(300);
     expect(confirmados(a)).toEqual([]);
     expect(confirmados(b)).toEqual([]);
+  });
+
+  it("caminho falso faz uma única ida à Conta (POST /amigo simulado) e o teto vale igual", async () => {
+    const stub = novaCelula();
+    const uA = unico("uid-ana"), uB = unico("uid-bruno");
+    const { a, b, sA, sB } = await dupla(stub, uA, uB);
+    a.enviar({ t: "bloquear", sessao: sB });
+    expect(await esperar(() => ok(a, "bloqueio"))).toBe(true);
+    await livre(stub);
+    await runInDurableObject(stub, (inst) => {
+      inst.chamadas = [];
+      const orig = inst.chamarConta.bind(inst);
+      inst.chamarConta = (uid, caminho, ...r) => { inst.chamadas.push(caminho.split("?")[0] + (caminho.includes("simular") ? "+s" : "")); return orig(uid, caminho, ...r); };
+    });
+    b.enviar({ t: "amigo", sessao: sA });
+    expect(await esperar(() => ok(b, "amigo"))).toBe(true);
+    await dormir(300);
+    expect(await runInDurableObject(stub, (inst) => inst.chamadas)).toEqual(["/amigo+s"]);
+    // Teto cheio: mesmo erro de um alvo normal.
+    for (let i = 0; i < 50; i++) await conta(uB).fetch(`https://conta/amigo?uid=x${i}`, { method: "POST" });
+    await livre(stub);
+    b.enviar({ t: "amigo", sessao: sA });
+    expect(await esperar(() => erro(b, "limite"))).toBe(true);
   });
 
   it("bloqueio depois das duas marcas, antes da entrega: nada é entregue", async () => {

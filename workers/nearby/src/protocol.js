@@ -45,6 +45,7 @@ const VALIDADORES = {
   // Segurança: o app só conhece o id opaco de sessão (o servidor resolve para o uid).
   bloquear: { sessao: idEncontro },
   amigo: { sessao: idEncontro }, // "quero ser amigo": sessão opaca de quem esteve no mesmo encontro
+  amigo_ack: { uid: (v) => typeof v === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(v) }, // ack da entrega de amigo_confirmado
   denunciar: { sessao: idEncontro, motivo: daLista(["incomodo", "comportamento", "falso", "outro"]) },
 };
 

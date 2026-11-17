@@ -86,6 +86,7 @@ export class Celula {
     this.reparos = []; // lado "bloqueadoPor" que falhou ao gravar: [{ de, para, tentativas }]
     this.pares = {}; // uid -> [{ sessao, uid, ate }]: outros participantes de encontros que terminaram (24 h)
     this.paresSujos = new Set(); // uids com par ainda não gravado (chave `par:<uid>`)
+    this.enviadosAmigo = new Map(); // connId -> Set<uid do outro> já enviado nesta conexão (sem ack ainda)
     this.entregas = new Map(); // uid -> promessa da entrega de amigo_confirmado em curso (uma por vez por pessoa)
     this.falsos = new Map(); // "ref:uid>alvo" -> ms: respostas "ok" sem gravar (alvo que me bloqueou e foi meu par)
     ctx.blockConcurrencyWhile(async () => {
@@ -204,6 +205,8 @@ export class Celula {
       await this.denunciar(ws, a, msg);
     } else if (msg.t === "amigo") {
       await this.amigo(ws, a, msg);
+    } else if (msg.t === "amigo_ack") {
+      await this.chamarConta(a.uid, `/amigo-entregue?uid=${encodeURIComponent(msg.uid)}`, "POST", PRAZO_CONTA_MS).catch((e) => console.error("falha no ack de amigo", e?.message));
     }
   }
 
@@ -493,6 +496,7 @@ export class Celula {
     this.bloq.delete(a.connId);
     this.susp.delete(a.connId);
     this.ritmoSeg.delete(a.connId);
+    this.enviadosAmigo.delete(a.connId);
     this.reindexarBloqueios();
     this.mudou();
   }
@@ -512,6 +516,7 @@ export class Celula {
       this.bloq.delete(a.connId);
       this.susp.delete(a.connId);
     this.ritmoSeg.delete(a.connId);
+    this.enviadosAmigo.delete(a.connId);
     this.reindexarBloqueios();
     }
     try {
@@ -1080,14 +1085,13 @@ export class Celula {
     }
   }
 
-  // Alvo (par) que me bloqueou: mesmo `ok`, mesmo teto, mesmas idas à Conta, sem gravar nada.
+  // Alvo (par) que me bloqueou: mesmo `ok`, mesmo teto e a MESMA ida à Conta (POST /amigo, só simulado).
   async falsoAmigo(ws, a, uidAlvo) {
     const ele = encodeURIComponent(uidAlvo);
     try {
       const r = await this.chamarConta(a.uid, `/amigo?uid=${ele}&simular=1`, "POST", PRAZO_CONTA_MS);
       if (r.status === 409 && r.corpo.erro === "limite") return this.erro(ws, "limite", { max: MAX_MARCAS_AMIGO });
       if (r.status !== 200 || r.corpo.ok !== true) throw new Error(`status ${r.status}`);
-      await this.chamarConta(uidAlvo, "/bloqueios", "GET", PRAZO_CONTA_MS);
     } catch (e) {
       console.error("falha na resposta de amizade", e?.message);
       return this.erro(ws, "indisponivel");
@@ -1095,8 +1099,9 @@ export class Celula {
     this.ok(ws, "amigo");
   }
 
-  // Entrega `amigo_confirmado {uid}` (o uid do OUTRO) a `uid` se ele está conectado aqui; uma vez só
-  // (a Conta marca como entregue antes do envio e desfaz se o envio falha). Serializada por pessoa.
+  // Entrega `amigo_confirmado {uid}` (o uid do OUTRO) a `uid` se ele está conectado aqui. A Conta só marca
+  // como entregue quando o cliente responde `amigo_ack {uid}`; sem ack, a próxima conexão reenvia (o app tolera
+  // repetição). Numa mesma conexão, cada uid é enviado uma vez. Serializada por pessoa.
   async entregarAmigos(uid) {
     const anterior = this.entregas.get(uid) ?? Promise.resolve();
     const p = anterior.catch(() => {}).then(() => this.entregarAmigosAgora(uid));
@@ -1114,24 +1119,21 @@ export class Celula {
       const o = ws.deserializeAttachment();
       return o?.uid === uid && !this.susp.get(o.connId)?.suspenso;
     });
-    if (!aberto()) return;
+    const ws = aberto();
+    if (!ws) return;
+    const connId = ws.deserializeAttachment().connId;
     const { status, corpo } = await this.chamarConta(uid, `/amigos-confirmados?eu=${encodeURIComponent(uid)}`, "GET", PRAZO_CONTA_MS);
     if (status !== 200 || corpo.ok !== true) return;
+    const enviados = this.enviadosAmigo.get(connId) ?? new Set();
+    this.enviadosAmigo.set(connId, enviados);
     for (const outro of corpo.uids ?? []) {
-      const ele = encodeURIComponent(outro);
-      const c = await this.chamarConta(uid, `/amigo-entregue?uid=${ele}`, "POST", PRAZO_CONTA_MS);
-      if (c.status !== 200 || c.corpo.novo !== true) continue; // já entregue (inclusive por outra Celula)
-      let enviou = false;
-      const ws = aberto();
-      if (ws) {
-        try {
-          ws.send(JSON.stringify({ t: "amigo_confirmado", uid: outro }));
-          enviou = true;
-        } catch {
-          // socket caiu: desfaz abaixo
-        }
+      if (enviados.has(outro)) continue;
+      try {
+        ws.send(JSON.stringify({ t: "amigo_confirmado", uid: outro }));
+        enviados.add(outro);
+      } catch {
+        // socket caiu: a próxima conexão reenvia
       }
-      if (!enviou) await this.chamarConta(uid, `/amigo-entregue?uid=${ele}&desfazer=1`, "POST", PRAZO_CONTA_MS).catch(() => {});
     }
   }
 

@@ -12,7 +12,7 @@
 //   GET /suspensao -> {ok, suspenso, ate}; POST /suspensao?acao=por|tirar (Tarefa 16; manual, `ate` reservado
 //     para a suspensão automática da Tarefa 22: null = não expira sozinha)
 //   POST /amigo?uid=<alvo>[&simular=1], GET /amigo-marca?uid=<quem pergunta>, GET /amigos-confirmados?eu=<uid>,
-//     POST /amigo-entregue?uid=<outro>[&desfazer=1] (Tarefa 19): marcas "quero ser amigo" de 24 h (até 50 ativas).
+//     POST /amigo-entregue?uid=<outro> (ack do cliente) (Tarefa 19): marcas "quero ser amigo" de 24 h (até 50 ativas).
 //     O uid só aparece em /amigos-confirmados quando as DUAS marcas existem e valem; a Celula entrega uma vez
 //     (`entregue`). Bloquear (qualquer sentido) apaga a marca daquela pessoa.
 //   Conta especial "índice" (uid reservado INDICE_UID, nunca alcançável por um uid real: o Worker recusa
@@ -41,6 +41,7 @@ const COTA_DENUNCIAS = 5; // denúncias por denunciante por hora
 const COTA_JANELA_MS = 3_600_000;
 export const MAX_MARCAS_AMIGO = 50; // marcas "quero ser amigo" ativas por pessoa
 const MARCA_AMIGO_MS = 24 * 3_600_000;
+const ENTREGA_MS = 72 * 3_600_000; // confirmação (duas marcas válidas) segue pendente de ack por até 72 h
 const PRAZO_OUTRA_CONTA_MS = 2000; // prazo da pergunta à Conta do outro lado
 export const INDICE_UID = "__indice__";
 const MAX_INDICE = 500;
@@ -100,7 +101,9 @@ export class Conta {
     const leitura = url.pathname === "/amigo-marca" || url.pathname === "/amigos-confirmados";
     if (request.method !== (leitura ? "GET" : "POST")) return json({ ok: false, erro: "metodo" }, 405);
     const agora = this.now();
-    const marcas = ((await this.ctx.storage.get("amigos")) ?? []).filter((m) => m.ate > agora);
+    // Marca viva = dentro das 24 h; reciprocidade já confirmada e ainda sem ack vale até ENTREGA_MS.
+    const todas = ((await this.ctx.storage.get("amigos")) ?? []).filter((m) => m.ate > agora || (m.confirmadaEm && !m.entregue && agora - m.confirmadaEm < ENTREGA_MS));
+    const marcas = todas.filter((m) => m.ate > agora); // as que contam como "marquei" e para o teto
     const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
     const bloqueado = (u) => b.bloqueados.includes(u) || b.bloqueadoPor.includes(u);
     const param = url.pathname === "/amigos-confirmados" ? "eu" : "uid";
@@ -111,34 +114,33 @@ export class Conta {
       return json({ ok: true, marcou: !bloqueado(uid) && marcas.some((m) => m.uid === uid) });
     }
     if (url.pathname === "/amigo") {
-      // Bloqueio em qualquer sentido: não grava, mas responde igual (a Celula já responde "ok" igual).
-      if (bloqueado(uid) || marcas.some((m) => m.uid === uid)) return json({ ok: true });
+      if (marcas.some((m) => m.uid === uid)) return json({ ok: true });
+      // O teto vem ANTES do atalho de bloqueio: quem me bloqueou recebe o mesmo limite de um alvo normal.
       if (marcas.length >= MAX_MARCAS_AMIGO) return json({ ok: false, erro: "limite" }, 409);
+      if (bloqueado(uid)) return json({ ok: true }); // não grava; a Celula responde igual
       if (url.searchParams.get("simular") !== "1") {
-        marcas.push({ uid, ate: agora + MARCA_AMIGO_MS, entregue: false });
-        await this.ctx.storage.put("amigos", marcas);
+        todas.push({ uid, ate: agora + MARCA_AMIGO_MS, entregue: false });
+        await this.ctx.storage.put("amigos", todas);
       }
       return json({ ok: true });
     }
     if (url.pathname === "/amigo-entregue") {
-      const m = marcas.find((x) => x.uid === uid);
-      if (!m) return json({ ok: true, novo: false });
-      if (url.searchParams.get("desfazer") === "1") {
-        m.entregue = false;
-        await this.ctx.storage.put("amigos", marcas);
-        return json({ ok: true });
+      // Ack do cliente: só agora a confirmação deixa de ser reentregue.
+      const m = todas.find((x) => x.uid === uid);
+      if (m && !m.entregue) {
+        m.entregue = true;
+        await this.ctx.storage.put("amigos", todas);
       }
-      if (m.entregue) return json({ ok: true, novo: false });
-      m.entregue = true;
-      await this.ctx.storage.put("amigos", marcas);
-      return json({ ok: true, novo: true });
+      return json({ ok: true });
     }
 
-    // /amigos-confirmados: minhas marcas ainda não entregues cuja outra ponta também marcou e vale.
+    // /amigos-confirmados: minhas marcas sem ack cuja outra ponta também marcou. A reciprocidade, uma vez
+    // vista, fica gravada (confirmadaEm) e segue pendente até o ack, mesmo depois das 24 h da marca.
     const ns = this.env?.CONTA;
     if (!ns) return json({ ok: true, uids: [] });
-    const candidatos = marcas.filter((m) => !m.entregue && !bloqueado(m.uid));
+    const candidatos = todas.filter((m) => !m.entregue && !bloqueado(m.uid));
     const respostas = await Promise.all(candidatos.map(async (m) => {
+      if (m.confirmadaEm) return true;
       let timer;
       try {
         const chamada = (async () => {
@@ -154,6 +156,9 @@ export class Conta {
         clearTimeout(timer);
       }
     }));
+    let mudou = false;
+    candidatos.forEach((m, i) => { if (respostas[i] && !m.confirmadaEm) { m.confirmadaEm = agora; mudou = true; } });
+    if (mudou) await this.ctx.storage.put("amigos", todas);
     return json({ ok: true, uids: candidatos.filter((_, i) => respostas[i]).map((m) => m.uid) });
   }
 
@@ -209,12 +214,16 @@ export class Conta {
       if (!UID_RE.test(alvo) || (sentido !== "bloqueou" && sentido !== "bloqueadoPor")) {
         return json({ ok: false, erro: "parametro_invalido" }, 400);
       }
+      const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
+      const lista = sentido === "bloqueou" ? b.bloqueados : b.bloqueadoPor;
+      // O teto vem antes de apagar marcas: uma recusa por limite não pode ter efeito colateral.
+      if (!lista.includes(alvo) && lista.length >= (sentido === "bloqueou" ? MAX_BLOQUEADOS : MAX_BLOQUEADO_POR)) {
+        return json({ ok: false, erro: "limite" }, 409);
+      }
       if (url.searchParams.get("simular") !== "1") {
         const marcas = (await this.ctx.storage.get("amigos")) ?? [];
         if (marcas.some((m) => m.uid === alvo)) await this.ctx.storage.put("amigos", marcas.filter((m) => m.uid !== alvo));
       }
-      const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
-      const lista = sentido === "bloqueou" ? b.bloqueados : b.bloqueadoPor;
       if (!lista.includes(alvo)) {
         if (sentido === "bloqueou") {
           if (lista.length >= MAX_BLOQUEADOS) return json({ ok: false, erro: "limite" }, 409);
