@@ -784,6 +784,17 @@ export class Celula {
     return mudou;
   }
 
+  // Suspensão automática: marca e retira agora as conexões abertas desta Celula; só a pessoa suspensa recebe o erro.
+  async aplicarSuspensao(uid) {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== undefined && ws.readyState !== 1) continue;
+      const o = ws.deserializeAttachment();
+      if (!o || o.uid !== uid) continue;
+      this.susp.set(o.connId, { suspenso: true, em: this.now() });
+      if (await this.tirarSuspenso(ws, o)) this.erro(ws, "suspenso");
+    }
+  }
+
   // No alarme: relê a suspensão de quem está há mais de 5 min sem leitura e tira da presença e dos
   // encontros quem foi suspenso enquanto conectado (só ele recebe o erro).
   async renovarSuspensoes() {
@@ -1043,11 +1054,13 @@ export class Celula {
       }
       const d = await this.chamarConta(
         alvo.uid,
-        `/denunciar?por=${encodeURIComponent(a.uid)}&motivo=${encodeURIComponent(msg.motivo)}&uid=${ele}${q}`,
+        `/denunciar?por=${encodeURIComponent(a.uid)}&motivo=${encodeURIComponent(msg.motivo)}&uid=${ele}${alvo.par ? "&encontro=1" : ""}${q}`,
         "POST",
         PRAZO_CONTA_MS,
       );
       if (d.status !== 200 || d.corpo.ok !== true) throw new Error(`status ${d.status}`);
+      // Suspensão automática disparou: mesma retirada da manual, na hora (resposta a quem denuncia não muda).
+      if (d.corpo.suspendeu === true) await this.aplicarSuspensao(alvo.uid).catch((e) => console.error("falha ao aplicar suspensão", e?.message));
       // 3) só agora a reserva vira definitiva (24 h); sem confirmação ela expira sozinha em 30 s
       const conf = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&confirmar=1`, "POST", PRAZO_CONTA_MS).catch(() => null);
       if (conf?.status === 200) this.denLocal.set(chave, this.now());

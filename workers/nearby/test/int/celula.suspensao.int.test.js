@@ -17,8 +17,8 @@ async function esperar(pred, ms = 4000) {
   }
   return pred();
 }
-async function conectar(stub, uid) {
-  const resp = await stub.fetch("https://celula/ws", { headers: { Upgrade: "websocket", "x-rumo-uid": uid, "x-rumo-cell": CELL } });
+async function conectar(stub, uid, extra = {}) {
+  const resp = await stub.fetch("https://celula/ws", { headers: { Upgrade: "websocket", "x-rumo-uid": uid, "x-rumo-cell": CELL, ...extra } });
   expect(resp.status).toBe(101);
   const ws = resp.webSocket;
   ws.accept();
@@ -109,5 +109,33 @@ describe("suspensão na Celula", { timeout: 20000 }, () => {
     const fimB = b.recebidas.filter((m) => m.t === "fim" && m.id === id2).at(-1);
     expect(fimB.motivo).toBe("cancelado");
     expect(JSON.stringify(b.recebidas)).not.toContain("suspens");
+  });
+
+  it("a 3ª denúncia de pessoas diferentes do mesmo encontro retira o denunciado conectado e procurar dá suspenso", async () => {
+    const stub = env.CELULA.get(env.CELULA.idFromName(unico("susp")));
+    const uD = unico("uid-dan");
+    const ultimo = (c, t) => c.recebidas.filter((m) => m.t === t).at(-1);
+    const d = await conectar(stub, uD);
+    d.enviar(ROLE); d.enviar(posMsg(-20.3, -40.3));
+    await dormir(200);
+    d.enviar({ t: "proposta", lat: -20.3, lon: -40.3, vagas: 5 });
+    expect(await esperar(() => ultimo(d, "encontro"))).toBeTruthy();
+    const id = ultimo(d, "encontro").id, sessD = ultimo(d, "encontro").eu;
+    const outros = [];
+    for (const p of ["ana", "bia", "cai"]) {
+      const x = await conectar(stub, unico(`uid-${p}`), { "x-rumo-enc": id });
+      x.enviar({ t: "entrar", id });
+      expect(await esperar(() => ultimo(x, "encontro"))).toBeTruthy();
+      outros.push(x);
+    }
+    for (const x of outros) {
+      x.enviar({ t: "denunciar", sessao: sessD, motivo: "incomodo" });
+      expect(await esperar(() => x.recebidas.some((m) => m.t === "ok" && m.ref === "denuncia"))).toBe(true);
+    }
+    expect(await esperar(() => erro(d, "suspenso"))).toBe(true);
+    expect(await esperar(() => outros.every((x) => x.recebidas.some((m) => m.t === "fim" && m.id === id)))).toBe(true);
+    expect(JSON.stringify(outros.map((x) => x.recebidas))).not.toContain("suspens");
+    d.enviar(ROLE);
+    expect(await esperar(() => d.recebidas.filter((m) => m.codigo === "suspenso").length >= 2)).toBe(true);
   });
 });

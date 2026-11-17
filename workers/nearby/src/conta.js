@@ -9,8 +9,16 @@
 //     para um aviso atrasado/repetido nunca fechar a proposta nova nem prorrogar a espera.
 //   POST /bloquear?uid=<outro>[&sentido=bloqueou|bloqueadoPor], GET /bloqueios  (Tarefa 15)
 //   POST /cota-denuncia?alvo=<uid>[&desfazer=1], POST /denunciar?por=&motivo=[&lat=&lon=][&uid=<denunciado>], GET /denuncias
-//   GET /suspensao -> {ok, suspenso, ate}; POST /suspensao?acao=por|tirar (Tarefa 16; manual, `ate` reservado
-//     para a suspensão automática da Tarefa 22: null = não expira sozinha)
+//   GET /suspensao -> {ok, suspenso, ate}; POST /suspensao?acao=por|tirar (Tarefa 16; manual; `ate` fica null:
+//     a suspensão nunca expira sozinha, só o dono reverte com `tirar`)
+//   Suspensão automática (Tarefa 22): /denunciar marca suspensa quando a Conta tem 3 denúncias de uids DIFERENTES
+//     nos últimos 7 dias. Decisão contra abuso (contas descartáveis suspenderem qualquer pessoa): só contam
+//     denúncias `encontro:true` (denunciante que esteve de fato num encontro com o denunciado, par de 24 h; a
+//     Celula manda encontro=1). Denúncia por presença no mapa fica registrada para o dono (encontro:false) mas
+//     não conta. Conta no máximo uma por denunciante e ignora quem o denunciado bloqueou. `tirar` grava `desde`:
+//     depois dele só contam denúncias posteriores (as antigas não re-suspendem na hora). A resposta a quem
+//     denuncia é a mesma de sempre; só a Celula (nunca o cliente) recebe `suspendeu:true` para tirar o
+//     denunciado conectado. Sem painel: o dono lista em /denuncias (`encontro:true` quando conta para a suspensão).
 //   POST /amigo?uid=<alvo>[&simular=1], GET /amigo-marca?uid=<quem pergunta>, GET /amigos-confirmados?eu=<uid>,
 //     POST /amigo-entregue?uid=<outro> (ack do cliente) (Tarefa 19): marcas "quero ser amigo" de 24 h (até 50 ativas).
 //     O uid só aparece em /amigos-confirmados quando as DUAS marcas existem e valem; a Celula entrega uma vez
@@ -37,6 +45,8 @@ const MAX_BLOQUEADO_POR = 5000; // quem bloqueou esta pessoa (recusa acima disso
 const RESERVA_MS = 30_000; // reserva de cota ainda não confirmada vale 30 s
 const MAX_DENUNCIAS = 200; // denúncias recebidas (mantém as mais recentes)
 const DENUNCIA_DEDUP_MS = 24 * 3_600_000; // mesmo denunciante/denunciado em 24 h conta uma vez
+const SUSPENSAO_DENUNCIAS = 3; // denúncias de pessoas diferentes que suspendem
+const SUSPENSAO_JANELA_MS = 7 * 24 * 3_600_000;
 const COTA_DENUNCIAS = 5; // denúncias por denunciante por hora
 const COTA_JANELA_MS = 3_600_000;
 export const MAX_MARCAS_AMIGO = 50; // marcas "quero ser amigo" ativas por pessoa
@@ -211,7 +221,9 @@ export class Conta {
     if (url.pathname === "/suspensao") {
       const acao = url.searchParams.get("acao");
       if (acao !== "por" && acao !== "tirar") return json({ ok: false, erro: "parametro_invalido" }, 400);
-      await this.ctx.storage.put("suspensao", { suspenso: acao === "por", ate: null });
+      const antes = (await this.ctx.storage.get("suspensao")) ?? {};
+      // `tirar` reinicia a contagem automática: só denúncias posteriores a `desde` contam.
+      await this.ctx.storage.put("suspensao", { suspenso: acao === "por", ate: null, desde: acao === "tirar" ? agora : (antes.desde ?? 0) });
       return json({ ok: true, suspenso: acao === "por" });
     }
     if (url.pathname === "/indice") {
@@ -314,8 +326,10 @@ export class Conta {
     const lista = (await this.ctx.storage.get("denuncias")) ?? [];
     if (lista.some((d) => d.por === por && agora - d.em < DENUNCIA_DEDUP_MS)) return json({ ok: true, duplicada: true });
     lista.push({ por, em: agora, motivo, lat: coord("lat", 90), lon: coord("lon", 180) });
+    if (url.searchParams.get("encontro") === "1") lista.at(-1).encontro = true; // ausente = só presença no mapa
     if (lista.length > MAX_DENUNCIAS) lista.splice(0, lista.length - MAX_DENUNCIAS);
     await this.ctx.storage.put("denuncias", lista);
+    const suspendeu = await this.suspenderSeMerece(lista, agora);
     // Índice do dono (melhor esforço: falha aqui nunca derruba a denúncia).
     const uidAlvo = url.searchParams.get("uid");
     const ns = this.env?.CONTA;
@@ -330,6 +344,23 @@ export class Conta {
         .catch((err) => console.error("falha ao gravar no índice", err?.message));
       this.ctx.waitUntil?.(p);
     }
-    return json({ ok: true });
+    return json(suspendeu ? { ok: true, suspendeu: true } : { ok: true });
+  }
+
+  // Suspensão automática: 3 denunciantes diferentes, de encontro, nos últimos 7 dias e depois do último `tirar`.
+  // Devolve true só quando acabou de suspender (a Celula então tira a pessoa do encontro/presença).
+  async suspenderSeMerece(lista, agora) {
+    const s = (await this.ctx.storage.get("suspensao")) ?? { suspenso: false, ate: null };
+    if (s.suspenso && (s.ate == null || s.ate > agora)) return false;
+    const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
+    const quem = new Set();
+    for (const d of lista) {
+      if (d.encontro !== true || agora - d.em >= SUSPENSAO_JANELA_MS || d.em <= (s.desde ?? 0)) continue;
+      if (b.bloqueados.includes(d.por)) continue; // quem o denunciado bloqueou não conta
+      quem.add(d.por);
+    }
+    if (quem.size < SUSPENSAO_DENUNCIAS) return false;
+    await this.ctx.storage.put("suspensao", { suspenso: true, ate: null, desde: s.desde ?? 0, auto: true });
+    return true;
   }
 }
