@@ -5,6 +5,7 @@ import app.hunter.model.Geo
 import app.hunter.model.TrackPoint
 import app.hunter.nav.LatLon
 import app.hunter.nearby.ClientMessage
+import app.hunter.nearby.MotivoDenuncia
 import app.hunter.nearby.MotivoFim
 import app.hunter.nearby.NearbyState
 import app.hunter.nearby.Preferencia
@@ -107,6 +108,22 @@ class NearbyViewModel(
     /** Erro do servidor em português (ex.: "Esse encontro já está cheio"); [limparAviso] apaga. */
     val aviso: StateFlow<String?> = _aviso.asStateFlow()
 
+    private val _enviando = MutableStateFlow(false)
+
+    /** Um bloqueio ou denúncia foi enviado e ainda não teve resposta: os botões ficam desabilitados. */
+    val enviando: StateFlow<Boolean> = _enviando.asStateFlow()
+
+    private val _fimPessoas = MutableStateFlow<List<String>>(emptyList())
+
+    /** Sessões (opacas) de quem estava no encontro que acabou, para bloquear ou denunciar no cartão de fim. */
+    val fimPessoas: StateFlow<List<String>> = _fimPessoas.asStateFlow()
+
+    /** Quem o usuário bloqueou nesta busca: some das listas mesmo se o servidor mandar a sessão de novo. Só em memória. */
+    private val bloqueadas = mutableSetOf<String>()
+    private var pendente: Pendente? = null
+    private var pendenteJob: Job? = null
+    private var fimCell: String? = null
+
     private var encId: String? = null
     private var encCell: String? = null
     private var souProponente = false
@@ -164,6 +181,7 @@ class NearbyViewModel(
         conectou = false
         indisponivel = false
         zerarEncontro()
+        zerarModeracao()
         _aviso.value = null
         _estado.value = NearbyUiState.Ligando
         eventsJob = scope.launch { link.events.collect(::onEvent) }
@@ -224,6 +242,7 @@ class NearbyViewModel(
         conectou = false
         indisponivel = false
         zerarEncontro()
+        zerarModeracao()
         _aviso.value = null
         onActive(false)
         _estado.value = NearbyUiState.Desligado(aviso)
@@ -377,6 +396,11 @@ class NearbyViewModel(
     private fun onEvent(e: NearbyEvent) {
         val atual = pref ?: return
         val m = e.msg
+        // Conta suspensa por denúncias: vale a qualquer momento e desliga a busca.
+        if (m is ServerMessage.Erro && m.codigo == "suspenso") {
+            parar(TEXTO_SUSPENSO)
+            return
+        }
         if (e.celula !in cells && !e.extra) return
         when (m) {
             is ServerMessage.Vizinhos, is ServerMessage.Propostas -> {
@@ -393,7 +417,7 @@ class NearbyViewModel(
                 propondo = false
                 aguardoJob?.cancel()
                 state = NearbyState.reduce(state, m, e.celula)
-                setEnc(EncontroUiState.Ativo(m, souProponente))
+                setEnc(EncontroUiState.Ativo(m.semBloqueadas(), souProponente))
                 reentradas = 0
                 entradaPendente = false
                 entradaTimeoutJob?.cancel()
@@ -403,12 +427,26 @@ class NearbyViewModel(
             is ServerMessage.Fim -> {
                 if (m.id != encId) return // fim atrasado de um encontro que já acabou aqui
                 val extra = usandoExtra
+                guardarPessoasDoFim()
                 state = NearbyState.reduce(state, m, e.celula)
                 zerarEncontro()
                 setEnc(EncontroUiState.Encerrado(m.motivo))
                 if (extra) link.disconnectEncounter()
             }
+            is ServerMessage.Ok -> {
+                val p = pendente
+                if (p != null && p.ref == m.ref && mesmoCanal(e, p)) {
+                    concluir()
+                    if (p.ref == REF_DENUNCIA) _aviso.value = TEXTO_DENUNCIA_ENVIADA
+                }
+            }
             is ServerMessage.Erro -> {
+                val p = pendente
+                if (p != null && m.codigo in ERROS_DE_MODERACAO && mesmoCanal(e, p)) {
+                    erroDeModeracao(p, m)
+                    refresh()
+                    return
+                }
                 if (!e.extra && e.celula in cells) conectou = true
                 if (m.codigo == "nao_procurando" && !e.extra && e.celula in cells) {
                     // Esta conexão não conhece a procura (quadrado novo, ou a mensagem saiu antes de abrir): refaz só nela.
@@ -553,10 +591,13 @@ class NearbyViewModel(
     /** Fecha o aviso de "o encontro terminou". */
     fun limparFim() {
         state = state.limparFim()
+        fimCell = null
+        _fimPessoas.value = emptyList()
         if (_encontro.value is EncontroUiState.Encerrado) setEnc(EncontroUiState.Nenhum)
     }
 
     private fun encerrarLocal(id: String, motivo: MotivoFim) {
+        guardarPessoasDoFim()
         state = state.encerrar(id, motivo)
         zerarEncontro()
         setEnc(EncontroUiState.Encerrado(motivo))
@@ -603,12 +644,129 @@ class NearbyViewModel(
         }
     }
 
+    // ---- bloquear e denunciar ----
+
+    /** Por onde a mensagem sai: a conexão extra do encontro ([extra]) ou a do quadrado [cell]. */
+    private data class Destino(val cell: String?, val extra: Boolean)
+
+    private class Pendente(val msg: ClientMessage, val ref: String, val sessao: String, val destino: Destino, val tentou: Boolean)
+
+    /**
+     * Bloqueia [sessao] (só o id opaco vai ao servidor). A moto some na hora, sem esperar a resposta, e continua escondida
+     * enquanto durar a busca. Se o servidor recusar por algo que não seja "a pessoa já não existe", ela volta para poder tentar de novo.
+     */
+    fun bloquear(sessao: String) = moderar(ClientMessage.Bloquear(sessao), REF_BLOQUEIO, sessao)
+
+    fun denunciar(sessao: String, motivo: MotivoDenuncia) = moderar(ClientMessage.Denunciar(sessao, motivo), REF_DENUNCIA, sessao)
+
+    private fun moderar(msg: ClientMessage, ref: String, sessao: String) {
+        if (pref == null || pendente != null) return
+        val destino = destinoDe(sessao)
+        if (destino == null) {
+            _aviso.value = textoDaModeracao("inexistente", null, ref)
+            return
+        }
+        _aviso.value = null
+        if (ref == REF_BLOQUEIO) {
+            bloqueadas += sessao
+            atualizarAtivo()
+            refresh()
+        }
+        val p = Pendente(msg, ref, sessao, destino, tentou = false)
+        pendente = p
+        _enviando.value = true
+        enviar(p)
+        armarTimeoutDaModeracao()
+    }
+
+    /** Onde a sessão vive: o encontro (conexão extra de quem entrou, quadrado do ponto para quem propôs), a lista de vizinhos ou o encontro que acabou. */
+    private fun destinoDe(sessao: String): Destino? {
+        val enc = state.encontro
+        if (enc != null && sessao != enc.eu && enc.participantes.any { it.sessao == sessao }) {
+            return if (usandoExtra) Destino(null, true) else encCell?.let { Destino(it, false) }
+        }
+        state.celulaDoVizinho(sessao)?.let { return Destino(it, false) }
+        if (sessao in _fimPessoas.value) return fimCell?.let { Destino(it, false) }
+        return null
+    }
+
+    private fun enviar(p: Pendente) {
+        if (p.destino.extra) link.sendEncounter(p.msg) else link.send(p.msg, p.destino.cell)
+    }
+
+    private fun mesmoCanal(e: NearbyEvent, p: Pendente): Boolean =
+        if (p.destino.extra) e.extra else !e.extra && e.celula == p.destino.cell
+
+    private fun armarTimeoutDaModeracao() {
+        pendenteJob?.cancel()
+        pendenteJob = scope.launch {
+            delay(respostaMs)
+            val p = pendente ?: return@launch
+            concluir()
+            desfazerOcultar(p)
+            _aviso.value = TEXTO_SEM_RESPOSTA
+            refresh()
+        }
+    }
+
+    private fun concluir() {
+        pendenteJob?.cancel()
+        pendenteJob = null
+        pendente = null
+        _enviando.value = false
+    }
+
+    private fun erroDeModeracao(p: Pendente, m: ServerMessage.Erro) {
+        if (m.codigo == "indisponivel" && !p.tentou) {
+            // Uma nova tentativa, depois do intervalo de 2 s que o servidor exige entre pedidos.
+            val de = Pendente(p.msg, p.ref, p.sessao, p.destino, tentou = true)
+            pendente = de
+            pendenteJob?.cancel()
+            pendenteJob = scope.launch {
+                delay(REPETIR_MODERACAO_MS)
+                if (pendente !== de) return@launch
+                enviar(de)
+                armarTimeoutDaModeracao()
+            }
+            return
+        }
+        concluir()
+        if (m.codigo != "inexistente") desfazerOcultar(p)
+        _aviso.value = textoDaModeracao(m.codigo, m.restanteMs, p.ref)
+    }
+
+    private fun desfazerOcultar(p: Pendente) {
+        if (p.ref == REF_BLOQUEIO && bloqueadas.remove(p.sessao)) atualizarAtivo()
+    }
+
+    private fun ServerMessage.Encontro.semBloqueadas() = copy(participantes = participantes.filter { it.sessao !in bloqueadas })
+
+    private fun atualizarAtivo() {
+        val atual = state.encontro ?: return
+        val ativo = _encontro.value as? EncontroUiState.Ativo ?: return
+        _encontro.value = ativo.copy(encontro = atual.semBloqueadas())
+    }
+
+    /** Antes de o encontro acabar aqui: guarda quem estava nele e o quadrado, para bloquear ou denunciar no cartão de fim. */
+    private fun guardarPessoasDoFim() {
+        val enc = state.encontro ?: return
+        fimCell = encCell
+        _fimPessoas.value = enc.participantes.map { it.sessao }.filter { it != enc.eu && it !in bloqueadas }
+    }
+
+    private fun zerarModeracao() {
+        concluir()
+        bloqueadas.clear()
+        fimCell = null
+        _fimPessoas.value = emptyList()
+    }
+
     private fun refresh() {
         if (pref == null) return
         _estado.value = when {
             indisponivel -> NearbyUiState.Indisponivel(NEARBY_INDISPONIVEL_TEXTO)
             !conectou -> NearbyUiState.Ligando
-            else -> NearbyUiState.Procurando(state.vizinhos, state.propostas.filter { state.encontro == null || it.id != encId })
+            else -> NearbyUiState.Procurando(state.vizinhos.filter { it.sessao !in bloqueadas }, state.propostas.filter { state.encontro == null || it.id != encId })
         }
     }
 
@@ -621,6 +779,8 @@ class NearbyViewModel(
         const val MAX_REENTRADAS = 3
         const val ENTRADA_TIMEOUT_MS = 15_000L
         val ERROS_DE_PROPOSTA = setOf("espera", "ja_tem_proposta", "indisponivel", "ponto_invalido", "ja_em_encontro", "mensagem_invalida", "nao_procurando")
+        val ERROS_DE_MODERACAO = setOf("inexistente", "indisponivel", "limite", "espera", "sessao_propria", "mensagem_invalida")
+        const val REPETIR_MODERACAO_MS = 2_500L
         val ERROS_DE_ENTRADA = setOf("cheio", "inexistente", "ja_em_encontro", "espera", "mensagem_invalida")
     }
 

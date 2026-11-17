@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -23,6 +24,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.hunter.app.nearby.EncontroUiState
 import app.hunter.app.nearby.NearbyUiState
+import app.hunter.app.nearby.TEXTO_CONFIRMAR_BLOQUEIO
 import app.hunter.app.nearby.distEtaTexto
 import app.hunter.app.nearby.ocupacao
 import app.hunter.app.nearby.textoDoFim
@@ -44,6 +47,7 @@ import app.hunter.app.nearby.vagasLivresTexto
 import app.hunter.app.nearby.faixaProcurando
 import app.hunter.app.nearby.rotulo
 import app.hunter.nearby.Distancia
+import app.hunter.nearby.MotivoDenuncia
 import app.hunter.nearby.MotivoFim
 import app.hunter.nearby.Parada
 import app.hunter.nearby.Preferencia
@@ -174,7 +178,15 @@ fun NearbyStrip(estado: NearbyUiState, onClick: () -> Unit, modifier: Modifier =
 
 /** Cartão ao tocar numa moto: distância arredondada, as três escolhas e "combina com você". Nenhum nome. */
 @Composable
-fun NearbyRiderCard(vizinho: Vizinho, distancia: String?, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun NearbyRiderCard(
+    vizinho: Vizinho,
+    distancia: String?,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    enviando: Boolean = false,
+    onBloquear: () -> Unit = {},
+    onDenunciar: (MotivoDenuncia) -> Unit = {},
+) {
     FloatingCard(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -203,6 +215,50 @@ fun NearbyRiderCard(vizinho: Vizinho, distancia: String?, onClose: () -> Unit, m
                 )
             }
         }
+        ModeracaoBotoes(enviando, onBloquear, onDenunciar)
+    }
+}
+
+/**
+ * "Bloquear" (pede confirmação) e "Denunciar" (lista curta de motivos) de uma pessoa. Desabilitados enquanto há um envio
+ * em andamento. Nada aqui diz quem é a pessoa: o app só conhece o id opaco da sessão.
+ */
+@Composable
+fun ModeracaoBotoes(
+    enviando: Boolean,
+    onBloquear: () -> Unit,
+    onDenunciar: (MotivoDenuncia) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var confirmando by remember { mutableStateOf(false) }
+    var escolhendo by remember { mutableStateOf(false) }
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = { confirmando = true }, enabled = !enviando) { Text("Bloquear") }
+        TextButton(onClick = { escolhendo = true }, enabled = !enviando) { Text("Denunciar") }
+    }
+    if (confirmando) {
+        AlertDialog(
+            onDismissRequest = { confirmando = false },
+            title = { Text("Bloquear") },
+            text = { Text(TEXTO_CONFIRMAR_BLOQUEIO) },
+            confirmButton = { TextButton(onClick = { confirmando = false; onBloquear() }) { Text("Bloquear") } },
+            dismissButton = { TextButton(onClick = { confirmando = false }) { Text("Cancelar") } },
+        )
+    }
+    if (escolhendo) {
+        AlertDialog(
+            onDismissRequest = { escolhendo = false },
+            title = { Text("Denunciar: qual o motivo?") },
+            text = {
+                Column {
+                    MotivoDenuncia.entries.forEach { m ->
+                        TextButton(onClick = { escolhendo = false; onDenunciar(m) }, modifier = Modifier.fillMaxWidth()) { Text(m.rotulo) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { escolhendo = false }) { Text("Cancelar") } },
+        )
     }
 }
 
@@ -275,7 +331,15 @@ fun NearbyCreateProposalCard(aguardando: Boolean, onPropor: (vagas: Int) -> Unit
  * como "Motociclista N", sem nada que identifique). Quem propôs cancela; quem entrou sai.
  */
 @Composable
-fun NearbyEncounterCard(ativo: EncontroUiState.Ativo, onSair: () -> Unit, onMinimizar: () -> Unit, modifier: Modifier = Modifier) {
+fun NearbyEncounterCard(
+    ativo: EncontroUiState.Ativo,
+    onSair: () -> Unit,
+    onMinimizar: () -> Unit,
+    modifier: Modifier = Modifier,
+    enviando: Boolean = false,
+    onBloquear: (String) -> Unit = {},
+    onDenunciar: (String, MotivoDenuncia) -> Unit = { _, _ -> },
+) {
     val enc = ativo.encontro
     FloatingCard(modifier, scrollable = true) {
         CardHeader("Encontro em andamento", onMinimizar, "Minimizar")
@@ -294,6 +358,9 @@ fun NearbyEncounterCard(ativo: EncontroUiState.Ativo, onSair: () -> Unit, onMini
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+            if (p.sessao != enc.eu) {
+                ModeracaoBotoes(enviando, { onBloquear(p.sessao) }, { m -> onDenunciar(p.sessao, m) })
             }
         }
         SecondaryButton(if (ativo.souProponente) "Cancelar encontro" else "Sair do encontro", onSair)
@@ -339,10 +406,25 @@ fun NearbyNotice(texto: String, onClose: () -> Unit, modifier: Modifier = Modifi
 
 /** Como o encontro acabou. */
 @Composable
-fun NearbyEndCard(motivo: MotivoFim, onClose: () -> Unit, modifier: Modifier = Modifier) {
-    FloatingCard(modifier) {
+fun NearbyEndCard(
+    motivo: MotivoFim,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Sessões de quem estava no encontro, para bloquear ou denunciar depois (o servidor guarda os pares por 24 h). */
+    pessoas: List<String> = emptyList(),
+    enviando: Boolean = false,
+    onBloquear: (String) -> Unit = {},
+    onDenunciar: (String, MotivoDenuncia) -> Unit = { _, _ -> },
+) {
+    FloatingCard(modifier, scrollable = true) {
         CardHeader("Encontro encerrado", onClose)
         Text(textoDoFim(motivo), style = MaterialTheme.typography.bodyLarge)
+        pessoas.forEachIndexed { i, sessao ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Motociclista ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                ModeracaoBotoes(enviando, { onBloquear(sessao) }, { m -> onDenunciar(sessao, m) })
+            }
+        }
         PrimaryButton("Ok", onClose, Modifier.fillMaxWidth())
     }
 }

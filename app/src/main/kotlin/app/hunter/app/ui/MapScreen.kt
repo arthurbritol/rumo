@@ -138,6 +138,8 @@ fun MapScreen(
     // Encontros: proposta tocada no mapa, ponto marcado com o dedo para propor, e o encontro do usuário.
     val encontro by nearbyVm.encontro.collectAsStateWithLifecycle()
     val nearbyAviso by nearbyVm.aviso.collectAsStateWithLifecycle()
+    val nearbyEnviando by nearbyVm.enviando.collectAsStateWithLifecycle()
+    val fimPessoas by nearbyVm.fimPessoas.collectAsStateWithLifecycle()
     val nearbyProposals = (nearbyState as? NearbyUiState.Procurando)?.propostas.orEmpty()
     var selectedProposal by remember { mutableStateOf<String?>(null) }
     var proposalPoint by remember { mutableStateOf<app.hunter.nav.LatLon?>(null) }
@@ -410,6 +412,9 @@ fun MapScreen(
                 distancia = live?.let { distanciaAproximada(it.latitude, it.longitude, rider) },
                 onClose = { selectedRider = null },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
+                enviando = nearbyEnviando,
+                onBloquear = { nearbyVm.bloquear(rider.sessao) },
+                onDenunciar = { motivo -> nearbyVm.denunciar(rider.sessao, motivo) },
             )
         }
         // O cartão do encontro fica acima do painel inferior (que continua lá); com navegação ativa, só a pílula de resumo.
@@ -420,10 +425,26 @@ fun MapScreen(
                 if (navigating) {
                     NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 136.dp))
                 } else if (encounterCardShown) {
-                    NearbyEncounterCard(e, onSair = nearbyVm::sair, onMinimizar = { encounterExpanded = false }, modifier = acima)
+                    NearbyEncounterCard(
+                        e,
+                        onSair = nearbyVm::sair,
+                        onMinimizar = { encounterExpanded = false },
+                        modifier = acima,
+                        enviando = nearbyEnviando,
+                        onBloquear = nearbyVm::bloquear,
+                        onDenunciar = nearbyVm::denunciar,
+                    )
                 }
             } else if (e is EncontroUiState.Encerrado && encounterCardShown && !navigating) {
-                NearbyEndCard(e.motivo, onClose = nearbyVm::limparFim, modifier = acima)
+                NearbyEndCard(
+                    e.motivo,
+                    onClose = nearbyVm::limparFim,
+                    modifier = acima,
+                    pessoas = fimPessoas,
+                    enviando = nearbyEnviando,
+                    onBloquear = nearbyVm::bloquear,
+                    onDenunciar = nearbyVm::denunciar,
+                )
             }
         }
         if (nearbyCardShown && !navigating && pv == null && selectedFuelStation == null && rider == null) {

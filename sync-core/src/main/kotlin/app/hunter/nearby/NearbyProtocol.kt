@@ -94,6 +94,11 @@ enum class MotivoFim(val wire: String) {
     }
 }
 
+/** Motivos de denúncia aceitos pelo servidor (`motivo` na rede). */
+enum class MotivoDenuncia(val wire: String) {
+    INCOMODO("incomodo"), COMPORTAMENTO("comportamento"), FALSO("falso"), OUTRO("outro"),
+}
+
 sealed interface ClientMessage {
     data class Procurar(val preferencia: Preferencia) : ClientMessage
     data object Parar : ClientMessage
@@ -111,6 +116,10 @@ sealed interface ClientMessage {
     data object Cancelar : ClientMessage
     data class Entrar(val id: String) : ClientMessage
     data object Sair : ClientMessage
+
+    /** Bloqueia a pessoa pela sessão opaca (nunca nome nem uid); vale nos dois sentidos. */
+    data class Bloquear(val sessao: String) : ClientMessage
+    data class Denunciar(val sessao: String, val motivo: MotivoDenuncia) : ClientMessage
 }
 
 sealed interface ServerMessage {
@@ -129,6 +138,9 @@ sealed interface ServerMessage {
     ) : ServerMessage
 
     data class Fim(val id: String, val motivo: MotivoFim) : ServerMessage
+
+    /** Confirma `bloquear` (`ref` = "bloqueio") ou `denunciar` (`ref` = "denuncia"). */
+    data class Ok(val ref: String) : ServerMessage
 
     /** [restanteMs] só vem em `espera`. */
     data class Erro(val codigo: String, val restanteMs: Long? = null) : ServerMessage
@@ -166,6 +178,15 @@ fun ClientMessage.toJson(): String = buildJsonObject {
             put("id", m.id)
         }
         ClientMessage.Sair -> put("t", "sair")
+        is ClientMessage.Bloquear -> {
+            put("t", "bloquear")
+            put("sessao", m.sessao)
+        }
+        is ClientMessage.Denunciar -> {
+            put("t", "denunciar")
+            put("sessao", m.sessao)
+            put("motivo", m.motivo.wire)
+        }
     }
 }.toString()
 
@@ -263,6 +284,7 @@ fun parseServerMessage(json: String): ServerMessage? = try {
             )
         }
         "fim" -> ServerMessage.Fim(obj["id"]!!.jsonPrimitive.content, MotivoFim.fromWire(obj["motivo"]?.jsonPrimitive?.contentOrNull))
+        "ok" -> ServerMessage.Ok(obj["ref"]!!.jsonPrimitive.content)
         "erro" -> ServerMessage.Erro(
             obj["codigo"]!!.jsonPrimitive.content,
             obj["restanteMs"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.toLong(),

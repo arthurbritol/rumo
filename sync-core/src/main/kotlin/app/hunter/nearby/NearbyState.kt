@@ -49,6 +49,10 @@ class NearbyState private constructor(
         todas.filter { it.combina } + todas.filterNot { it.combina }
     }
 
+    /** O quadrado cuja lista (a mais recente que traz a pessoa) vale para [sessao]; nulo se ela não está na lista. */
+    fun celulaDoVizinho(sessao: String): String? =
+        porCelula.entries.lastOrNull { (_, lista) -> lista.any { it.sessao == sessao } }?.key
+
     /** Descarta vizinhos e propostas (quadrados novos), mas guarda o encontro, o fim e o erro. */
     fun semListas(): NearbyState = copiar(porCelula = emptyMap(), propostasPorCelula = emptyMap())
 
@@ -83,6 +87,7 @@ class NearbyState private constructor(
                     // Fim de outro encontro (atrasado) não derruba o atual.
                     if (atual != null && atual.id != msg.id) state else state.copiar(encontro = null, fim = msg)
                 }
+                is ServerMessage.Ok -> state
                 is ServerMessage.Erro -> state.copiar(ultimoErro = msg.codigo, ultimaEsperaMs = msg.restanteMs)
             }
     }

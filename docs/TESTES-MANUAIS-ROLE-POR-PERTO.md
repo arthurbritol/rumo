@@ -65,3 +65,18 @@ Precisa do servidor com a etapa 2 publicada e dois aparelhos (A propõe, B entra
 - [ ] 7.9 Chegue a menos de 100 m do ponto com os dois: aparece "Chegou" ao lado de cada nome e, quando todos chegam, "Todo mundo chegou ao ponto. Bom rolê!".
 - [ ] 7.10 Sem ninguém entrar, a proposta some em 30 min ("Ninguém entrou a tempo e a proposta expirou"). Desligue a internet do A no meio do encontro: o encontro não trava a tela; B continua vendo os outros e A sai dele em até 2 min.
 - [ ] 7.11 Perto da divisa de quadrados (ex.: latitude -21,0): a mesma proposta aparece uma vez só, e a lista de motos não duplica quando B entra.
+
+## Cenário 8: bloquear e denunciar (etapa 3, lado do app)
+
+Precisa do servidor com as tarefas 15 e 16 publicadas e dois aparelhos (A e B), ambos procurando rolê.
+
+- [ ] 8.1 No A, toque na moto do B: o cartão mostra **Bloquear** e **Denunciar**. Toque em **Bloquear**: aparece "Você não verá mais essa pessoa e ela não verá você". **Cancelar** não faz nada.
+- [ ] 8.2 Confirme: a moto do B some do mapa do A na hora, e a faixa passa a contar uma pessoa a menos. Ela não volta enquanto a busca do A estiver ligada, mesmo com o B se mexendo.
+- [ ] 8.3 No B, a moto do A também some (em até alguns segundos) e as propostas do A deixam de aparecer. O B não recebe nenhum aviso de que foi bloqueado.
+- [ ] 8.4 Pare e ligue a busca no A: a moto do B continua invisível nos dois lados (o servidor guarda o bloqueio; o app não guarda nada).
+- [ ] 8.5 Com um terceiro aparelho C, toque na moto do C e em **Denunciar**: aparece a lista Incômodo, Comportamento, Perfil falso, Outro. Escolha uma: aparece "Denúncia enviada" e a moto do C continua no mapa. Os botões ficam desabilitados enquanto envia.
+- [ ] 8.6 Entre num encontro com C. Na tela do encontro, cada participante (menos você) tem **Bloquear** e **Denunciar**. Bloqueie o C: ele some da lista do encontro e sai do encontro (quem bloqueou o dono do encontro sai dele).
+- [ ] 8.7 **Denunciar no fim do encontro**: termine um encontro com mais gente (chegaram, cancelado ou saiu). No cartão "Encontro encerrado" aparecem "Motociclista 1…" com **Bloquear** e **Denunciar**. Denuncie um deles: "Denúncia enviada". Vale por 24 h depois do encontro; depois disso o aviso é "Não foi possível encontrar essa pessoa. Ela pode ter saído".
+- [ ] 8.8 Denunciar a mesma pessoa de novo em seguida não gasta cota nem dá erro; muitas denúncias seguidas mostram "Espere um instante…" ou "Muitas denúncias seguidas…".
+- [ ] 8.9 Conta suspensa (o dono usa a rota de suspensão do servidor): ao ligar a busca, ou quando for suspensa com ela ligada, a busca desliga e aparece "Recurso indisponível por denúncias. Fale com o dono do Rumo.".
+- [ ] 8.10 Sem internet, toque em **Bloquear**: a moto some, mas depois de ~15 s aparece "O servidor não respondeu. Tente de novo" e a moto volta (o bloqueio não chegou ao servidor).

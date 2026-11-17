@@ -2,6 +2,7 @@ package app.hunter.app.nearby
 
 import app.hunter.model.Geo
 import app.hunter.nearby.Distancia
+import app.hunter.nearby.MotivoDenuncia
 import app.hunter.nearby.MotivoFim
 import app.hunter.nearby.Parada
 import app.hunter.nearby.Participante
@@ -156,3 +157,35 @@ fun Participante.toRiderFeatureOrNull(): RiderFeature? {
     return RiderFeature(id = sessao, lat = la, lon = lo, rumo = 0.0, destaque = false, icon = RIDER_ICON)
 }
 const val TEXTO_ESPERA_ENTRAR = "Aguarde um instante e tente de novo"
+
+// ---- Bloquear e denunciar ----
+
+const val REF_BLOQUEIO = "bloqueio"
+const val REF_DENUNCIA = "denuncia"
+const val TEXTO_SUSPENSO = "Recurso indisponível por denúncias. Fale com o dono do Rumo."
+const val TEXTO_DENUNCIA_ENVIADA = "Denúncia enviada"
+const val TEXTO_CONFIRMAR_BLOQUEIO = "Você não verá mais essa pessoa e ela não verá você"
+
+val MotivoDenuncia.rotulo: String
+    get() = when (this) {
+        MotivoDenuncia.INCOMODO -> "Incômodo"
+        MotivoDenuncia.COMPORTAMENTO -> "Comportamento"
+        MotivoDenuncia.FALSO -> "Perfil falso"
+        MotivoDenuncia.OUTRO -> "Outro"
+    }
+
+/** Aviso curto para um erro de `bloquear`/`denunciar` ([ref] = "bloqueio" ou "denuncia"). */
+fun textoDaModeracao(codigo: String, restanteMs: Long?, ref: String): String {
+    val acao = if (ref == REF_BLOQUEIO) "bloquear" else "denunciar"
+    return when (codigo) {
+        "inexistente" -> "Não foi possível encontrar essa pessoa. Ela pode ter saído"
+        "limite" -> if (ref == REF_BLOQUEIO) "Você atingiu o limite de pessoas bloqueadas" else "Muitas denúncias seguidas. Tente de novo mais tarde"
+        "espera" -> if (restanteMs != null && restanteMs >= 60_000L) {
+            "Espere ${(restanteMs + 59_999L) / 60_000L} min para $acao de novo"
+        } else {
+            "Espere um instante para $acao de novo"
+        }
+        "sessao_propria" -> "Essa é a sua própria sessão"
+        else -> "Não foi possível $acao agora. Tente de novo daqui a pouco"
+    }
+}
