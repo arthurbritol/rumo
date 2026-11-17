@@ -2,7 +2,7 @@
 
 Plano: [2026-11-11-role-por-perto.md](2026-11-11-role-por-perto.md) · Spec: [../specs/2026-11-11-role-por-perto-design.md](../specs/2026-11-11-role-por-perto-design.md)
 
-Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar). As tarefas 15 e 16 (etapa 3, servidor) estão só na branch local `feat/role-por-perto-etapa3`, não publicadas. Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13, 15 a 17 concluídas e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 18 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
+Publicado em 2026-11-16: etapas 1 e 2 na `main` (release v0.7.23, servidor no ar). A etapa 3 (T15 a T18) foi publicada em 2026-11-17: release v0.7.24, servidor com bloqueios/denúncias/rotas do dono no ar (/admin sem token responde 401). Estado em 2026-11-12: **Tarefas 1 a 9, 11 a 13 e 15 a 17 concluídas; etapas 1 a 3 publicadas (v0.7.24) e aprovadas; Tarefa 10 publicada (falta o teste com dois aparelhos); Tarefa 14 publicada (falta teste com dois aparelhos); 19 a 23 pendentes**, por pedido do dono. Nada disto aparece no app instalado até a Tarefa 10 (publicação) ser feita.
 
 ## Concluídas (cada uma passou por revisão de spec e qualidade)
 

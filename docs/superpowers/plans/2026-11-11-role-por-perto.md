@@ -289,7 +289,7 @@ Cada linha tem um teste na tarefa dona do código.
 
 ### Tarefa 18: Publicar a Etapa 3
 
-- [ ] CHANGELOG, roteiro manual (bloquear e conferir invisibilidade nos dois lados), release publicada e conferida. Commit do app sem workflow.
+- [x] (publicado na v0.7.24; falta o teste de bloqueio com dois aparelhos, do dono) CHANGELOG, roteiro manual (bloquear e conferir invisibilidade nos dois lados), release publicada e conferida. Commit do app sem workflow.
 
 ---
 
