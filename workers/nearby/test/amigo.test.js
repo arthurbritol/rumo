@@ -84,7 +84,7 @@ test("reciprocidade confirmada segue pendente por 72 h depois das 24 h da marca;
   assert.deepEqual(await confirmados("ana"), ["bruno"]); // confirmada agora
   relogio.t += H24 + 1000; // marcas expiradas
   assert.deepEqual(await confirmados("ana"), ["bruno"]); // ainda pendente de ack
-  assert.deepEqual(await confirmados("bruno"), []); // bruno nunca viu a confirmação: a marca de ana expirou
+  assert.deepEqual(await confirmados("bruno"), ["ana"]); // a confirmação foi gravada nas DUAS Contas
   relogio.t += 72 * 3_600_000;
   assert.deepEqual(await confirmados("ana"), []);
   // Nova marca depois do ack não repete a entrega indevidamente.
@@ -122,7 +122,7 @@ test("bloqueio posterior (qualquer sentido) apaga marcas e confirmações penden
   // Marca nova contra bloqueado não grava (responde ok igual).
   assert.equal((await chamar("ana", "/amigo?uid=bruno")).corpo.ok, true);
   await chamar("carla", "/amigo?uid=ana");
-  assert.deepEqual((await chamar("ana", "/amigo-marca?uid=bruno", "GET")).corpo, { ok: true, marcou: false });
+  assert.deepEqual((await chamar("ana", "/amigo-marca?uid=bruno", "GET")).corpo, { ok: true, bloqueado: true, marcou: false });
 });
 
 test("teto de 50 marcas ativas, simular não grava, uid inválido e método errado", async () => {
@@ -149,4 +149,38 @@ test("protocolo: amigo_ack exige uid válido", () => {
   assert.deepEqual(parseClientMessage('{"t":"amigo_ack","uid":"abc.DEF_1:2-3"}'), { ok: true, msg: { t: "amigo_ack", uid: "abc.DEF_1:2-3" } });
   assert.equal(parseClientMessage('{"t":"amigo_ack","uid":"a/b"}').ok, false);
   assert.equal(parseClientMessage('{"t":"amigo_ack"}').ok, false);
+});
+
+test("A: a outra ponta volta depois de 24 h da marca do primeiro e ainda recebe", async () => {
+  const { chamar, confirmados, relogio } = mundo();
+  await chamar("ana", "/amigo?uid=bruno");
+  relogio.t += 23 * 3_600_000;
+  await chamar("bruno", "/amigo?uid=ana");
+  assert.deepEqual(await confirmados("ana"), ["bruno"]); // ana confirma primeiro
+  relogio.t += 2 * 3_600_000; // a marca de ana já venceu; a de bruno ainda vale
+  assert.deepEqual(await confirmados("bruno"), ["ana"]);
+});
+
+test("B: bloqueio posterior barra confirmação guardada, mesmo se a gravação simétrica falhar", async () => {
+  const { chamar, confirmados } = mundo();
+  await chamar("ana", "/amigo?uid=bruno");
+  await chamar("bruno", "/amigo?uid=ana");
+  assert.deepEqual(await confirmados("ana"), ["bruno"]); // confirmada nas duas
+  // bruno bloqueia ana; a gravação do lado de ana (bloqueadoPor) nunca chega.
+  await chamar("bruno", "/bloquear?uid=ana");
+  assert.deepEqual(await confirmados("ana"), []); // a consulta na entrega barra
+  assert.deepEqual(await confirmados("bruno"), []);
+  assert.equal((await chamar("ana", "/amigo-marca?uid=bruno", "GET")).corpo.marcou, false); // e a pendente foi apagada
+});
+
+test("C: marca nova renova a entrada pendente (sem duplicar) e o ack marca todas do uid", async () => {
+  const { chamar, confirmados, relogio } = mundo();
+  await chamar("ana", "/amigo?uid=bruno");
+  await chamar("bruno", "/amigo?uid=ana");
+  await confirmados("ana");
+  relogio.t += H24 + 1000; // marca vencida, confirmação pendente
+  await chamar("ana", "/amigo?uid=bruno");
+  assert.deepEqual(await confirmados("ana"), ["bruno"]); // um só uid
+  await chamar("ana", "/amigo-entregue?uid=bruno");
+  assert.deepEqual(await confirmados("ana"), []);
 });

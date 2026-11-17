@@ -63,7 +63,7 @@ export class Conta {
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (["/amigo", "/amigo-marca", "/amigos-confirmados", "/amigo-entregue"].includes(url.pathname)) {
+    if (["/amigo", "/amigo-marca", "/amigo-confirmar", "/amigos-confirmados", "/amigo-entregue"].includes(url.pathname)) {
       return this.amigos(request, url);
     }
     if (["/bloquear", "/bloqueios", "/cota-denuncia", "/denunciar", "/denuncias", "/suspensao", "/indice", "/indice-add"].includes(url.pathname)) {
@@ -111,7 +111,18 @@ export class Conta {
     if (!UID_RE.test(uid)) return json({ ok: false, erro: "parametro_invalido" }, 400);
 
     if (url.pathname === "/amigo-marca") {
-      return json({ ok: true, marcou: !bloqueado(uid) && marcas.some((m) => m.uid === uid) });
+      // `marcou`: marca viva ou reciprocidade já confirmada e pendente de ack; `bloqueado`: bloqueio nos dois sentidos aqui.
+      const blq = bloqueado(uid);
+      return json({ ok: true, bloqueado: blq, marcou: !blq && todas.some((m) => m.uid === uid) });
+    }
+    if (url.pathname === "/amigo-confirmar") {
+      // A outra Conta viu as duas marcas: grava a confirmação aqui também (entrada ainda viva ou pendente).
+      const m = todas.find((x) => x.uid === uid);
+      if (m && !bloqueado(uid) && !m.confirmadaEm) {
+        m.confirmadaEm = agora;
+        await this.ctx.storage.put("amigos", todas);
+      }
+      return json({ ok: true });
     }
     if (url.pathname === "/amigo") {
       if (marcas.some((m) => m.uid === uid)) return json({ ok: true });
@@ -119,18 +130,19 @@ export class Conta {
       if (marcas.length >= MAX_MARCAS_AMIGO) return json({ ok: false, erro: "limite" }, 409);
       if (bloqueado(uid)) return json({ ok: true }); // não grava; a Celula responde igual
       if (url.searchParams.get("simular") !== "1") {
-        todas.push({ uid, ate: agora + MARCA_AMIGO_MS, entregue: false });
+        // Entrada vencida mas pendente de ack (confirmada): renova a mesma, nunca cria uma segunda.
+        const velha = todas.find((m) => m.uid === uid);
+        if (velha) velha.ate = agora + MARCA_AMIGO_MS;
+        else todas.push({ uid, ate: agora + MARCA_AMIGO_MS, entregue: false });
         await this.ctx.storage.put("amigos", todas);
       }
       return json({ ok: true });
     }
     if (url.pathname === "/amigo-entregue") {
       // Ack do cliente: só agora a confirmação deixa de ser reentregue.
-      const m = todas.find((x) => x.uid === uid);
-      if (m && !m.entregue) {
-        m.entregue = true;
-        await this.ctx.storage.put("amigos", todas);
-      }
+      let mudou = false;
+      for (const m of todas) if (m.uid === uid && !m.entregue) { m.entregue = true; mudou = true; }
+      if (mudou) await this.ctx.storage.put("amigos", todas);
       return json({ ok: true });
     }
 
@@ -139,27 +151,49 @@ export class Conta {
     const ns = this.env?.CONTA;
     if (!ns) return json({ ok: true, uids: [] });
     const candidatos = todas.filter((m) => !m.entregue && !bloqueado(m.uid));
-    const respostas = await Promise.all(candidatos.map(async (m) => {
-      if (m.confirmadaEm) return true;
+    const perguntar = async (m) => {
       let timer;
       try {
         const chamada = (async () => {
           const r = await ns.get(ns.idFromName(m.uid)).fetch(`https://conta/amigo-marca?uid=${encodeURIComponent(uid)}`, { method: "GET" });
-          return (await r.json()).marcou === true;
+          return await r.json();
         })();
         chamada.catch(() => {});
         const limite = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("prazo")), PRAZO_OUTRA_CONTA_MS); });
         return await Promise.race([chamada, limite]);
       } catch {
-        return false; // sem resposta: não confirma agora, a próxima consulta tenta de novo
+        return null; // sem resposta: não entrega agora (falha fechada), a próxima consulta tenta de novo
       } finally {
         clearTimeout(timer);
       }
+    };
+    // Toda entrega reconsulta o outro lado: bloqueio dele (mesmo que a gravação simétrica tenha falhado) barra
+    // até uma confirmação já guardada; sem confirmação guardada, ele precisa ter marca viva.
+    const respostas = await Promise.all(candidatos.map(perguntar));
+    const bloqueadosAgora = new Set();
+    const novas = [];
+    const vale = candidatos.map((m, i) => {
+      const r = respostas[i];
+      if (!r || r.ok !== true) return false;
+      if (r.bloqueado === true) { bloqueadosAgora.add(m.uid); return false; }
+      if (m.confirmadaEm) return true;
+      if (r.marcou === true) { novas.push(m); return true; }
+      return false;
+    });
+    let resto = todas;
+    if (bloqueadosAgora.size > 0) resto = todas.filter((m) => !bloqueadosAgora.has(m.uid)); // bloqueio apaga a pendente
+    for (const m of novas) m.confirmadaEm = agora;
+    if (novas.length > 0 || resto !== todas) await this.ctx.storage.put("amigos", resto);
+    // Grava a confirmação também na Conta do outro lado (melhor esforço; marca-r.marcou cobre a falha).
+    await Promise.all(novas.map(async (m) => {
+      try {
+        await ns.get(ns.idFromName(m.uid)).fetch(`https://conta/amigo-confirmar?uid=${encodeURIComponent(uid)}`, { method: "POST" });
+      } catch {
+        // a consulta do outro lado também enxerga a minha entrada confirmada
+      }
     }));
-    let mudou = false;
-    candidatos.forEach((m, i) => { if (respostas[i] && !m.confirmadaEm) { m.confirmadaEm = agora; mudou = true; } });
-    if (mudou) await this.ctx.storage.put("amigos", todas);
-    return json({ ok: true, uids: candidatos.filter((_, i) => respostas[i]).map((m) => m.uid) });
+    const uids = [...new Set(candidatos.filter((_, i) => vale[i]).map((m) => m.uid))];
+    return json({ ok: true, uids });
   }
 
   // --- bloqueios e denúncias (só a Celula alcança; os uids nunca saem do servidor) ---

@@ -206,7 +206,7 @@ export class Celula {
     } else if (msg.t === "amigo") {
       await this.amigo(ws, a, msg);
     } else if (msg.t === "amigo_ack") {
-      await this.chamarConta(a.uid, `/amigo-entregue?uid=${encodeURIComponent(msg.uid)}`, "POST", PRAZO_CONTA_MS).catch((e) => console.error("falha no ack de amigo", e?.message));
+      await this.ackAmigo(a, msg);
     }
   }
 
@@ -1082,6 +1082,18 @@ export class Celula {
     this.ok(ws, "amigo"); // antes de olhar a reciprocidade: a resposta nunca depende dela
     for (const uid of new Set([a.uid, alvo.uid])) {
       await this.entregarAmigos(uid).catch((e) => console.error("falha ao entregar amigos", e?.message));
+    }
+  }
+
+  // Ack só vale para um uid que ESTA conexão recebeu em amigo_confirmado (resto é descartado em silêncio).
+  async ackAmigo(a, msg) {
+    const enviados = this.enviadosAmigo.get(a.connId);
+    if (!enviados?.has(msg.uid)) return;
+    try {
+      const r = await this.chamarConta(a.uid, `/amigo-entregue?uid=${encodeURIComponent(msg.uid)}`, "POST", PRAZO_CONTA_MS);
+      if (r.status === 200) enviados.delete(msg.uid);
+    } catch (e) {
+      console.error("falha no ack de amigo", e?.message);
     }
   }
 

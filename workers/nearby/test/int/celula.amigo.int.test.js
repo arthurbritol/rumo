@@ -68,6 +68,8 @@ describe("marcas de amizade na Celula", { timeout: 25000 }, () => {
     expect(confirmados(b)).toEqual([]);
     expect(b.recebidas.some((m) => m.t === "ok" || m.t === "erro")).toBe(false); // B nem sabe que foi marcado
 
+    a.enviar({ t: "amigo_ack", uid: uB }); // ack de uid que nunca foi enviado: descartado
+    await dormir(200);
     await livre(stub);
     b.enviar({ t: "amigo", sessao: sA });
     expect(await esperar(() => ok(b, "amigo"))).toBe(true);

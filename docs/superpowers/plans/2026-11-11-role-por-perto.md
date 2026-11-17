@@ -313,6 +313,8 @@ Cada linha tem um teste na tarefa dona do código.
 **Interfaces:**
 - Fim do encontro: lista dos participantes **sem nome** ("Pessoa 1", "Pessoa 2"...) com "Quero ser amigo". Ao abrir o app, e ao fim de um encontro, consulta `amigo_confirmado`; ao receber, chama `SocialViewModel.invite(uid)` e mostra "Convite de amizade enviado". Uma pessoa já amiga ou bloqueada não gera convite.
 
+- **Contrato com o servidor (Tarefa 19):** o app manda `{t:"amigo", sessao}` pela conexão do quadrado (Celula) onde o encontro aconteceu, porque os pares de 24 h ficam naquela Celula. A cada `{t:"amigo_confirmado", uid}` o app chama `invite(uid)` e responde `{t:"amigo_ack", uid}`; sem ack o servidor reentrega a cada nova conexão por até 72 h (o convite deve tolerar repetição). A entrega imediata só acontece com a pessoa conectada na mesma Celula; fora dela, na próxima conexão.
+
 - [ ] **Passo 1: testes**: `amigo_confirmado` aciona `invite` uma vez; segunda mensagem igual não repete; amigo já existente é ignorado. **Passos 2 a 4:** implementar, suíte verde, commit.
 
 ### Tarefa 21: Publicar a Etapa 4
