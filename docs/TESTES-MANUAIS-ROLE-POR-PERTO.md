@@ -80,3 +80,17 @@ Precisa do servidor com as tarefas 15 e 16 publicadas e dois aparelhos (A e B), 
 - [ ] 8.8 Denunciar a mesma pessoa de novo em seguida não gasta cota nem dá erro; muitas denúncias seguidas mostram "Espere um instante…" ou "Muitas denúncias seguidas…".
 - [ ] 8.9 Conta suspensa (o dono usa a rota de suspensão do servidor): ao ligar a busca, ou quando for suspensa com ela ligada, a busca desliga e aparece "Recurso indisponível por denúncias. Fale com o dono do Rumo.".
 - [ ] 8.10 Sem internet, toque em **Bloquear**: a moto some, mas depois de ~15 s aparece "O servidor não respondeu. Tente de novo" e a moto volta (o bloqueio não chegou ao servidor).
+
+## Cenário 9: virar amigo (etapa 4)
+
+Precisa do servidor com a tarefa 19 publicada e dois aparelhos (A e B), com contas diferentes que ainda não são amigas e a busca ligada.
+
+- [ ] 9.1 Faça A e B participarem de um mesmo encontro e termine (chegaram, saiu ou cancelado). No cartão "Encontro encerrado" cada participante mostra **Quero ser amigo**.
+- [ ] 9.2 No A, toque em **Quero ser amigo** na pessoa do B: o botão vira "Marcado". Nada indica se o B já marcou. Em Amigos do A não aparece nada ainda.
+- [ ] 9.3 No B, toque em **Quero ser amigo** na pessoa do A: em até alguns segundos aparece "Convite de amizade enviado" (ou "Vocês agora são amigos" se um já tivesse convidado o outro). O A recebe o convite em Amigos.
+- [ ] 9.4 Aceite o convite no outro aparelho: viram amigos. Reabrir a busca não gera convite repetido.
+- [ ] 9.5 Marque só de um lado e espere 24 h: a marca expira e nada acontece. Quem marcou pode marcar de novo se o outro também marcar dentro do prazo do encontro.
+- [ ] 9.6 Se A bloqueou B (cenário 8) e depois tenta marcar B, ou B marca A, o app mostra o mesmo "Marcado" e nunca vira amizade; nenhum aviso revela o bloqueio.
+- [ ] 9.7 Quem já é amigo, ou foi bloqueado, não recebe convite novo mesmo que as duas marcas existam.
+- [ ] 9.8 Com a busca desligada no B ao marcar do A, a confirmação só chega ao ligar a busca do B (até 72 h).
+
