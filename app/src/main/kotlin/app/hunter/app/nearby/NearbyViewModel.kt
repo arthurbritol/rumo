@@ -123,6 +123,7 @@ class NearbyViewModel(
     private var pendente: Pendente? = null
     private var pendenteJob: Job? = null
     private var fimCell: String? = null
+    private var fecharExtraAoConcluir = false
 
     private var encId: String? = null
     private var encCell: String? = null
@@ -431,7 +432,7 @@ class NearbyViewModel(
                 state = NearbyState.reduce(state, m, e.celula)
                 zerarEncontro()
                 setEnc(EncontroUiState.Encerrado(m.motivo))
-                if (extra) link.disconnectEncounter()
+                if (extra) fecharConexaoExtra()
             }
             is ServerMessage.Ok -> {
                 val p = pendente
@@ -442,7 +443,7 @@ class NearbyViewModel(
             }
             is ServerMessage.Erro -> {
                 val p = pendente
-                if (p != null && m.codigo in ERROS_DE_MODERACAO && mesmoCanal(e, p)) {
+                if (p != null && m.codigo in ERROS_DE_MODERACAO && mesmoCanal(e, p) && !(propondo && !e.extra && e.celula == encCell)) {
                     erroDeModeracao(p, m)
                     refresh()
                     return
@@ -512,7 +513,7 @@ class NearbyViewModel(
     private fun sairSemServidor() {
         val id = encId ?: return
         encerrarLocal(id, MotivoFim.SAIU)
-        link.disconnectEncounter()
+        fecharConexaoExtra()
         refresh()
     }
 
@@ -580,7 +581,7 @@ class NearbyViewModel(
         }
         val extra = usandoExtra
         encerrarLocal(id, if (souProponente) MotivoFim.CANCELADO else MotivoFim.SAIU)
-        if (extra) link.disconnectEncounter() // entrega antes o que está na fila (o `sair`)
+        if (extra) fecharConexaoExtra() // entrega antes o que está na fila (o `sair`)
         refresh()
     }
 
@@ -666,6 +667,11 @@ class NearbyViewModel(
             _aviso.value = textoDaModeracao("inexistente", null, ref)
             return
         }
+        if (!destino.extra && destino.cell !in cells) {
+            // Sem conexão com o quadrado: o pedido nem sairia; avisa já em vez de esperar o tempo limite.
+            _aviso.value = textoDaModeracao("indisponivel", null, ref)
+            return
+        }
         _aviso.value = null
         if (ref == REF_BLOQUEIO) {
             bloqueadas += sessao
@@ -714,6 +720,16 @@ class NearbyViewModel(
         pendenteJob = null
         pendente = null
         _enviando.value = false
+        if (fecharExtraAoConcluir) {
+            fecharExtraAoConcluir = false
+            // Só fecha se não houver outro encontro usando a conexão extra nesse meio tempo.
+            if (!usandoExtra && encId == null) link.disconnectEncounter()
+        }
+    }
+
+    /** Fecha a conexão extra do encontro; se um bloqueio/denúncia dela ainda espera resposta, fecha só depois dela. */
+    private fun fecharConexaoExtra() {
+        if (pendente?.destino?.extra == true) fecharExtraAoConcluir = true else link.disconnectEncounter()
     }
 
     private fun erroDeModeracao(p: Pendente, m: ServerMessage.Erro) {
@@ -755,6 +771,7 @@ class NearbyViewModel(
     }
 
     private fun zerarModeracao() {
+        fecharExtraAoConcluir = false
         concluir()
         bloqueadas.clear()
         fimCell = null

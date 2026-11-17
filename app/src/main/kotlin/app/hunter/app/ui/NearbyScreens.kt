@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -229,6 +230,8 @@ fun ModeracaoBotoes(
     onBloquear: () -> Unit,
     onDenunciar: (MotivoDenuncia) -> Unit,
     modifier: Modifier = Modifier,
+    /** Quem é, para os diálogos ("Motociclista 2"); nulo quando o cartão já é de uma pessoa só. */
+    nome: String? = null,
 ) {
     var confirmando by remember { mutableStateOf(false) }
     var escolhendo by remember { mutableStateOf(false) }
@@ -239,7 +242,7 @@ fun ModeracaoBotoes(
     if (confirmando) {
         AlertDialog(
             onDismissRequest = { confirmando = false },
-            title = { Text("Bloquear") },
+            title = { Text(if (nome != null) "Bloquear $nome" else "Bloquear") },
             text = { Text(TEXTO_CONFIRMAR_BLOQUEIO) },
             confirmButton = { TextButton(onClick = { confirmando = false; onBloquear() }) { Text("Bloquear") } },
             dismissButton = { TextButton(onClick = { confirmando = false }) { Text("Cancelar") } },
@@ -248,7 +251,7 @@ fun ModeracaoBotoes(
     if (escolhendo) {
         AlertDialog(
             onDismissRequest = { escolhendo = false },
-            title = { Text("Denunciar: qual o motivo?") },
+            title = { Text(if (nome != null) "Denunciar $nome: qual o motivo?" else "Denunciar: qual o motivo?") },
             text = {
                 Column {
                     MotivoDenuncia.entries.forEach { m ->
@@ -351,6 +354,8 @@ fun NearbyEncounterCard(
         var outro = 0
         enc.participantes.forEach { p ->
             val nome = if (p.sessao == enc.eu) "Você" else "Motociclista ${++outro}"
+            // key: o estado dos diálogos fica preso à pessoa, não à posição na lista (que muda quando alguém sai).
+            key(p.sessao) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(nome, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, fontWeight = if (p.sessao == enc.eu) FontWeight.Bold else FontWeight.Normal)
                 Text(
@@ -360,7 +365,8 @@ fun NearbyEncounterCard(
                 )
             }
             if (p.sessao != enc.eu) {
-                ModeracaoBotoes(enviando, { onBloquear(p.sessao) }, { m -> onDenunciar(p.sessao, m) })
+                ModeracaoBotoes(enviando, { onBloquear(p.sessao) }, { m -> onDenunciar(p.sessao, m) }, nome = nome)
+            }
             }
         }
         SecondaryButton(if (ativo.souProponente) "Cancelar encontro" else "Sair do encontro", onSair)
@@ -420,9 +426,11 @@ fun NearbyEndCard(
         CardHeader("Encontro encerrado", onClose)
         Text(textoDoFim(motivo), style = MaterialTheme.typography.bodyLarge)
         pessoas.forEachIndexed { i, sessao ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Motociclista ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                ModeracaoBotoes(enviando, { onBloquear(sessao) }, { m -> onDenunciar(sessao, m) })
+            key(sessao) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Motociclista ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    ModeracaoBotoes(enviando, { onBloquear(sessao) }, { m -> onDenunciar(sessao, m) }, nome = "Motociclista ${i + 1}")
+                }
             }
         }
         PrimaryButton("Ok", onClose, Modifier.fillMaxWidth())

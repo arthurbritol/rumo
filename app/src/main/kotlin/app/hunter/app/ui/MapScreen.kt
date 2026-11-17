@@ -413,7 +413,10 @@ fun MapScreen(
                 onClose = { selectedRider = null },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
                 enviando = nearbyEnviando,
-                onBloquear = { nearbyVm.bloquear(rider.sessao) },
+                onBloquear = {
+                    nearbyVm.bloquear(rider.sessao)
+                    selectedRider = null
+                },
                 onDenunciar = { motivo -> nearbyVm.denunciar(rider.sessao, motivo) },
             )
         }

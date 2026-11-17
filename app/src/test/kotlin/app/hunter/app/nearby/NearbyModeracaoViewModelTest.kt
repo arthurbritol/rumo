@@ -233,6 +233,64 @@ class NearbyModeracaoViewModelTest {
     }
 
     @Test
+    fun `fim do encontro antes do ok nao fecha a conexao extra ate a resposta`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.entrar(idEnc)
+        r.link.openedEncFlow.tryEmit(idEnc)
+        r.emit(encontroMsg("p2"), extra = true)
+        r.vm.bloquear("p2")
+        r.emit(ServerMessage.Fim(idEnc, MotivoFim.CANCELADO), extra = true)
+        assertEquals(0, r.link.encDisconnects) // o pedido ainda espera resposta pela conexao extra
+        r.emit(ServerMessage.Ok("bloqueio"), extra = true)
+        assertEquals(1, r.link.encDisconnects)
+        assertEquals(false, r.vm.enviando.value)
+    }
+
+    @Test
+    fun `fim antes do erro tambem fecha a conexao extra depois`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.entrar(idEnc)
+        r.link.openedEncFlow.tryEmit(idEnc)
+        r.emit(encontroMsg("p2"), extra = true)
+        r.vm.denunciar("p2", MotivoDenuncia.OUTRO)
+        r.emit(ServerMessage.Fim(idEnc, MotivoFim.CANCELADO), extra = true)
+        r.emit(ServerMessage.Erro("limite"), extra = true)
+        assertEquals(1, r.link.encDisconnects)
+    }
+
+    @Test
+    fun `quadrado de destino fora da busca avisa na hora e nao envia`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.entrar(idEnc)
+        r.link.openedEncFlow.tryEmit(idEnc)
+        r.emit(encontroMsg("p2"), extra = true)
+        r.emit(ServerMessage.Fim(idEnc, MotivoFim.CHEGARAM), extra = true)
+        r.positions.tryEmit(TrackPoint(timeMs = 0, latitude = 10.5, longitude = 10.5)) // outros quadrados
+        r.link.sent.clear()
+        r.vm.bloquear("p2")
+        assertTrue(r.link.sent.isEmpty())
+        assertEquals("Não foi possível bloquear agora. Tente de novo daqui a pouco", r.vm.aviso.value)
+        assertEquals(false, r.vm.enviando.value)
+    }
+
+    @Test
+    fun `erro de espera durante a proposta no mesmo quadrado pertence a proposta`() = runTest {
+        val r = rig()
+        r.procurando()
+        r.vm.bloquear("a")
+        r.vm.proporPonto(-20.6, -40.5, 4)
+        r.emit(ServerMessage.Erro("espera", 120_000))
+        assertEquals(EncontroUiState.Nenhum, r.vm.encontro.value)
+        assertEquals(textoDoErro("espera", 120_000), r.vm.aviso.value)
+        assertTrue(r.vm.enviando.value) // a moderacao continua esperando a propria resposta
+        r.emit(ServerMessage.Ok("bloqueio"))
+        assertEquals(false, r.vm.enviando.value)
+    }
+
+    @Test
     fun `desligar esquece os bloqueios da sessao`() = runTest {
         val r = rig()
         r.procurando()
