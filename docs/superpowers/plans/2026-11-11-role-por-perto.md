@@ -285,7 +285,7 @@ Cada linha tem um teste na tarefa dona do código.
 **Interfaces:**
 - No cartão da moto e na tela de encontro: "Bloquear" (pede confirmação "Você não verá mais essa pessoa e ela não verá você") e "Denunciar" (lista curta de motivos). O app envia só `sessao`. Mensagem `erro suspenso` vira "Recurso indisponível por denúncias. Fale com o dono do Rumo." e desliga a busca.
 
-- [ ] **Passo 1: testes**: o ViewModel envia `bloquear` e `denunciar` só com `sessao`; a moto some da lista logo após o bloqueio (sem esperar o servidor); `erro suspenso` desliga a busca e mostra a mensagem. **Passos 2 a 4:** implementar, suíte verde, commit.
+- [x] **Passo 1: testes**: o ViewModel envia `bloquear` e `denunciar` só com `sessao`; a moto some da lista logo após o bloqueio (sem esperar o servidor); `erro suspenso` desliga a busca e mostra a mensagem. **Passos 2 a 4:** implementar, suíte verde, commit.
 
 ### Tarefa 18: Publicar a Etapa 3
 
