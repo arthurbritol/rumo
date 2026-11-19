@@ -49,6 +49,7 @@ Os dois aparelhos precisam estar a poucos quilômetros um do outro (ou use local
 - [ ] 6.1 Ligue o modo avião no A com a procura ligada: após alguns segundos a faixa vira "Rolê por perto indisponível agora" (sem piscar). Desligue o modo avião: volta a "Procurando rolê · …" sozinho.
 - [ ] 6.2 Com a procura desligada e sem internet, toque em **Procurar rolê**: a tela não trava; mostra "Ligando…" e depois a mensagem de indisponível.
 - [ ] 6.3 Revogue a localização do app e tente procurar: o app pede a permissão; sem ela, não liga.
+- [ ] 6.4 Com A e B procurando e se vendo, ligue o modo avião no A por mais de 2 minutos (ou perca o sinal): a moto de A **some** do mapa de B em até cerca de 2 min depois do último sinal. Desligue o modo avião: A volta sozinho e reaparece no B.
 
 ## Cenário 7: encontros (etapa 2, lado do app)
 

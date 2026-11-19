@@ -255,7 +255,12 @@ async function encontro(e, proponente, urlBase, fim) {
 
 // ---------- servidor local ----------
 async function sobeServidor() {
-  if (opt.url) return { url: opt.url, parar() {} };
+  if (opt.url) {
+    // Só servidor local: nunca a produção (que exige token real e tem cota diária).
+    const host = new URL(opt.url).hostname;
+    if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) throw new Error(`--url recusado: ${host} não é local (localhost, 127.0.0.1 ou [::1])`);
+    return { url: opt.url, parar() {} };
+  }
   writeFileSync(path.join(AQUI, ".dev.vars"), `LOADTEST_JWK=${JSON.stringify(jwk)}\n`);
   const persist = mkdtempSync(path.join(tmpdir(), "nearby-loadtest-"));
   const wrangler = path.join(RAIZ, "node_modules", "wrangler", "bin", "wrangler.js");

@@ -14,16 +14,7 @@
 
 App Android para motociclistas: mapa com busca de destino, rotas pensadas para moto, navegação curva a curva com
 voz, gravação de viagens, controle de abastecimento e manutenção, mapas offline, **amigos e rolê em grupo** e
-conexão com o painel da moto por Bluetooth. Funciona com qualquer moto; hoje o painel suportado é o **Rolê por perto (precisa de conta e do servidor `workers/nearby`)**
-- "Procurando rolê": escolha ritmo, distância e parada; outros motociclistas por perto aparecem no mapa como motos
-  anônimas (posição aproximada, sem nome nem modelo), com destaque para quem combina com você. Raio de 5 a 20 km.
-- Proponha um ponto de encontro (2 a 8 vagas), entre numa proposta, veja a distância e o tempo de cada um; a posição
-  real só aparece a menos de 1 km do ponto. Ao fim, "Quero ser amigo" (só vira convite se os dois marcarem).
-- Bloquear e denunciar sem saber quem é; 3 denúncias de pessoas que estiveram no mesmo encontro suspendem a busca
-  até o dono decidir. Documentação e custo medido: [docs/ROLE-POR-PERTO.md](docs/ROLE-POR-PERTO.md);
-  roteiro com dois aparelhos: [docs/TESTES-MANUAIS-ROLE-POR-PERTO.md](docs/TESTES-MANUAIS-ROLE-POR-PERTO.md).
-
-**Tripper Pod**
+conexão com o painel da moto por Bluetooth. Funciona com qualquer moto; hoje o painel suportado é o **Tripper Pod**
 da Royal Enfield, e outras marcas (como a conexão da Yamaha) entram no catálogo de conexões aos poucos. Funciona sem
 conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem. Não modifica o Waze.
 
@@ -74,6 +65,15 @@ conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem
   vai com o custo por km de cada um. O rolê some sozinho em 7 dias.
 - Exige publicar as regras e o TTL no Firebase: [docs/FIREBASE.md](docs/FIREBASE.md). Roteiro de teste com duas
   contas: [docs/TESTES-MANUAIS-AMIGOS.md](docs/TESTES-MANUAIS-AMIGOS.md).
+
+**Rolê por perto (precisa de conta e do servidor `workers/nearby`)**
+- "Procurando rolê": escolha ritmo, distância e parada; outros motociclistas por perto aparecem no mapa como motos
+  anônimas (posição aproximada, sem nome nem modelo), com destaque para quem combina com você. Raio de 5 a 20 km.
+- Proponha um ponto de encontro (2 a 8 vagas), entre numa proposta, veja a distância e o tempo de cada um; a posição
+  real só aparece a menos de 1 km do ponto. Ao fim, "Quero ser amigo" (só vira convite se os dois marcarem).
+- Bloquear e denunciar sem saber quem é; 3 denúncias de pessoas que estiveram no mesmo encontro suspendem a busca
+  até o dono decidir. Documentação e custo medido: [docs/ROLE-POR-PERTO.md](docs/ROLE-POR-PERTO.md);
+  roteiro com dois aparelhos: [docs/TESTES-MANUAIS-ROLE-POR-PERTO.md](docs/TESTES-MANUAIS-ROLE-POR-PERTO.md).
 
 **Tripper Pod**
 - Conexão Bluetooth, PIN no primeiro uso, reconexão automática e bússola.
