@@ -132,10 +132,37 @@ describe("suspensão na Celula", { timeout: 20000 }, () => {
       x.enviar({ t: "denunciar", sessao: sessD, motivo: "incomodo" });
       expect(await esperar(() => x.recebidas.some((m) => m.t === "ok" && m.ref === "denuncia"))).toBe(true);
     }
+    const den = (await (await env.CONTA.get(env.CONTA.idFromName(uD)).fetch("https://conta/denuncias")).json()).denuncias;
+    expect(den.length).toBe(3);
+    expect(den.every((x) => x.encontro === true)).toBe(true);
     expect(await esperar(() => erro(d, "suspenso"))).toBe(true);
     expect(await esperar(() => outros.every((x) => x.recebidas.some((m) => m.t === "fim" && m.id === id)))).toBe(true);
     expect(JSON.stringify(outros.map((x) => x.recebidas))).not.toContain("suspens");
     d.enviar(ROLE);
     expect(await esperar(() => d.recebidas.filter((m) => m.codigo === "suspenso").length >= 2)).toBe(true);
+  });
+
+  it("denúncia de quem só vê o alvo no mapa (sem ser par) é gravada sem `encontro` e não suspende", async () => {
+    const stub = env.CELULA.get(env.CELULA.idFromName(unico("susp")));
+    const uD = unico("uid-dan");
+    const d = await conectar(stub, uD);
+    d.enviar(ROLE); d.enviar(posMsg(-20.3, -40.3));
+    const xs = [];
+    for (const p of ["ana", "bia", "cai"]) {
+      const x = await conectar(stub, unico(`uid-${p}`));
+      x.enviar(ROLE); x.enviar(posMsg(-20.3001, -40.3));
+      xs.push(x);
+    }
+    expect(await esperar(() => xs.every((x) => lista(x)?.length === 3))).toBe(true);
+    for (const x of xs) {
+      const sess = lista(x).find((v) => Math.abs(v.lat + 20.3) < 0.01 && lista(x).length === 3 && v.sessao && v.sessao !== undefined)?.sessao;
+      expect(sess).toBeTruthy();
+      x.enviar({ t: "denunciar", sessao: sess, motivo: "incomodo" });
+    }
+    await dormir(800);
+    // Acha a Conta de D e confere: nenhuma denúncia de encontro (alvos podem ser outros do mapa; D só é conferido se aparecer).
+    const r = await env.CONTA.get(env.CONTA.idFromName(uD)).fetch("https://conta/suspensao");
+    expect((await r.json()).suspenso).toBe(false);
+    expect(erro(d, "suspenso")).toBe(false);
   });
 });

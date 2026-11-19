@@ -15,7 +15,9 @@
 //     nos últimos 7 dias. Decisão contra abuso (contas descartáveis suspenderem qualquer pessoa): só contam
 //     denúncias `encontro:true` (denunciante que esteve de fato num encontro com o denunciado, par de 24 h; a
 //     Celula manda encontro=1). Denúncia por presença no mapa fica registrada para o dono (encontro:false) mas
-//     não conta. Conta no máximo uma por denunciante e ignora quem o denunciado bloqueou. `tirar` grava `desde`:
+//     não conta (RULING do controlador: a regra "3 em 7 dias" vale só para denúncias de encontro; as do mapa seguem
+//     registradas para o dono). Conta no máximo uma por denunciante. Bloqueio do denunciado NÃO exclui denúncia
+//     (senão o denunciado teria veto bloqueando os companheiros de encontro). `tirar` grava `desde`:
 //     depois dele só contam denúncias posteriores (as antigas não re-suspendem na hora). A resposta a quem
 //     denuncia é a mesma de sempre; só a Celula (nunca o cliente) recebe `suspendeu:true` para tirar o
 //     denunciado conectado. Sem painel: o dono lista em /denuncias (`encontro:true` quando conta para a suspensão).
@@ -329,7 +331,7 @@ export class Conta {
     if (url.searchParams.get("encontro") === "1") lista.at(-1).encontro = true; // ausente = só presença no mapa
     if (lista.length > MAX_DENUNCIAS) lista.splice(0, lista.length - MAX_DENUNCIAS);
     await this.ctx.storage.put("denuncias", lista);
-    const suspendeu = await this.suspenderSeMerece(lista, agora);
+    const suspendeu = lista.at(-1).encontro === true && (await this.suspenderSeMerece(lista, agora));
     // Índice do dono (melhor esforço: falha aqui nunca derruba a denúncia).
     const uidAlvo = url.searchParams.get("uid");
     const ns = this.env?.CONTA;
@@ -352,11 +354,9 @@ export class Conta {
   async suspenderSeMerece(lista, agora) {
     const s = (await this.ctx.storage.get("suspensao")) ?? { suspenso: false, ate: null };
     if (s.suspenso && (s.ate == null || s.ate > agora)) return false;
-    const b = (await this.ctx.storage.get("bloqueios")) ?? { bloqueados: [], bloqueadoPor: [] };
     const quem = new Set();
     for (const d of lista) {
       if (d.encontro !== true || agora - d.em >= SUSPENSAO_JANELA_MS || d.em <= (s.desde ?? 0)) continue;
-      if (b.bloqueados.includes(d.por)) continue; // quem o denunciado bloqueou não conta
       quem.add(d.por);
     }
     if (quem.size < SUSPENSAO_DENUNCIAS) return false;

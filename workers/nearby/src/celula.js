@@ -791,7 +791,11 @@ export class Celula {
       const o = ws.deserializeAttachment();
       if (!o || o.uid !== uid) continue;
       this.susp.set(o.connId, { suspenso: true, em: this.now() });
-      if (await this.tirarSuspenso(ws, o)) this.erro(ws, "suspenso");
+      try {
+        if (await this.tirarSuspenso(ws, o)) this.erro(ws, "suspenso");
+      } catch (e) {
+        console.error("falha ao retirar suspenso", e?.message); // o alarme refaz; as outras conexões seguem
+      }
     }
   }
 
@@ -1035,6 +1039,7 @@ export class Celula {
     if (this.now() - (this.denLocal.get(chave) ?? -Infinity) < DENUNCIA_DEDUP_MS) return this.ok(ws, "denuncia"); // já coberta
     const ele = encodeURIComponent(alvo.uid);
     let reservou = false;
+    let suspender = null;
     try {
       // 1) reserva (provisória) a cota do denunciante: 5 por hora; repetir o mesmo alvo em 24 h não gasta cota
       const c = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}`, "POST", PRAZO_CONTA_MS);
@@ -1060,7 +1065,8 @@ export class Celula {
       );
       if (d.status !== 200 || d.corpo.ok !== true) throw new Error(`status ${d.status}`);
       // Suspensão automática disparou: mesma retirada da manual, na hora (resposta a quem denuncia não muda).
-      if (d.corpo.suspendeu === true) await this.aplicarSuspensao(alvo.uid).catch((e) => console.error("falha ao aplicar suspensão", e?.message));
+      // Feita depois do `ok` (ctx.waitUntil) para o tempo de resposta ser o de uma denúncia comum.
+      if (d.corpo.suspendeu === true) suspender = alvo.uid;
       // 3) só agora a reserva vira definitiva (24 h); sem confirmação ela expira sozinha em 30 s
       const conf = await this.chamarConta(a.uid, `/cota-denuncia?alvo=${ele}&confirmar=1`, "POST", PRAZO_CONTA_MS).catch(() => null);
       if (conf?.status === 200) this.denLocal.set(chave, this.now());
@@ -1070,6 +1076,11 @@ export class Celula {
       return this.erro(ws, "indisponivel");
     }
     this.ok(ws, "denuncia");
+    if (suspender) {
+      const p = this.aplicarSuspensao(suspender).catch((e) => console.error("falha ao aplicar suspensão", e?.message));
+      this.ctx.waitUntil?.(p);
+      await p; // sem waitUntil (testes) ainda espera; o `ok` já saiu
+    }
   }
 
   // "Quero ser amigo" (Tarefa 19). Só vale para quem esteve no mesmo encontro (par de 24 h). A resposta é
