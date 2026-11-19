@@ -27,6 +27,7 @@ A etapa 4 (T19 a T21) foi publicada em 2026-11-17: release v0.7.25, servidor com
 | 17 | App: bloquear e denunciar (cartão da moto, encontro e fim), `suspenso` desliga a busca | `3b3b983`, `92d84ff` | suíte do sync-core e do app verdes, `assembleDebug` ok |
 | 19 | Marcas "quero ser amigo" recíprocas no servidor (`amigo`, `amigo_confirmado`, `amigo_ack`) | `9e4f8b3`, `8de298a`, `a56ab0b` | 147 unitários + 73 de integração |
 | 20 | App: "Quero ser amigo" no cartão de fim, `amigo_confirmado` vira convite (uma vez por pessoa) e `amigo_ack` pela conexão de origem | `de094b3`, `ea0b68f` | suíte do sync-core e do app verdes, `assembleDebug` ok |
+| 22 | Suspensão automática por 3 denúncias de encontro (servidor; só na branch `feat/role-por-perto-etapa5`, não publicada) | `b5d430c`, `3dd0cee` | 156 unitários + 75 de integração |
 
 **Importante:** nada do lado do app foi visto rodando em tela (não há emulador funcionando); só compila e passa nos testes. O servidor também nunca foi publicado.
 
@@ -118,3 +119,8 @@ As etapas 1 a 3 são o mínimo; as 4 e 5 podem ficar para depois.
 - Quem já tem 50 amigos perde a amizade recíproca sem aviso; se a conta do Social não carregou, o convite só é refeito na próxima conexão; `convidarAmigo` é `var` pública ligando as duas ViewModels.
 - Rótulo mantido como "Motociclista N" (igual ao cartão da T17); a spec só exige "sem nome".
 - CHANGELOG e roteiro manual da etapa ficam para T21/T23.
+
+## Pendências registradas na Tarefa 22
+
+- Ruling: só denúncias de quem esteve em encontro com o denunciado contam (a spec não restringe; denúncias pelo mapa seguem registradas para o dono). Quem bloqueia o denunciante não anula a denúncia (sem veto).
+- Contas descartáveis que entrem juntas num encontro ainda suspendem a vítima (o dono reverte com `tirar`); `auto` não exposto ao dono; teto de 200 denúncias; conexões em outras Celulas retiradas em até 5 min; `indisponivel` ao denunciante se a Conta passar do prazo depois de suspender; teste int "só mapa" fraco (a regra está no unitário).
