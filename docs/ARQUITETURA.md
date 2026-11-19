@@ -251,6 +251,14 @@ um servidor GATT local. Handshake de retomada (`21 00` → hora → 2× ping) ou
 watchdog de ~5 s (ping após 2 s ocioso, tela reenviada a cada 2 s). O protocolo vem do
 [WazeTripper](https://github.com/jnsdias/wazetripper) (Apache-2.0) e foi validado apenas num Pod da Meteor 350.
 
+## Rolê por perto (servidor em tempo real)
+
+Único ponto do Rumo com servidor próprio de tempo real: `workers/nearby`, um Cloudflare Worker com Durable Objects
+(uma `Celula` por quadrado de 1° x 1° para presença e encontros, uma `Conta` por pessoa para espera, bloqueios,
+denúncias, marcas de amizade e suspensão). O app (pacote `app.hunter.nearby`, regras puras no `sync-core`) abre um
+WebSocket por quadrado tocado pelo raio, autenticado com o ID token do Firebase; o Firestore não participa da
+posição. Detalhes, protocolo, custo medido e modelo de ameaças em [ROLE-POR-PERTO.md](ROLE-POR-PERTO.md).
+
 ## Serviços externos
 
 | Serviço | Uso |
@@ -260,6 +268,7 @@ watchdog de ~5 s (ping após 2 s ocioso, tela reenviada a cada 2 s). O protocolo
 | Photon (photon.komoot.io) | Busca de endereços e lugares |
 | Overpass | Postos de combustível (`amenity=fuel`) para busca online sob demanda |
 | Dados Abertos ANP / GitHub Releases | Série histórica de preços de combustíveis compactada (`anp-fuel-latest.json.gz`) |
+| Cloudflare Workers + Durable Objects (plano gratuito), `workers/nearby` | Rolê por perto: posições aproximadas, encontros, bloqueios e denúncias em tempo real |
 | Firebase (Authentication + Firestore, plano gratuito) | Conta, sincronização e amigos/rolê, só quando o `google-services.json` está no build; sem Storage nem Functions |
 
 Todos são gratuitos e de uso justo; para uso intenso, hospede o seu próprio Valhalla e Photon.

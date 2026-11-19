@@ -55,3 +55,8 @@ fechada 300 s depois dele). O servidor nunca devolve `uid`, nome nem posição r
 
 A publicação é feita pelo workflow `.github/workflows/deploy-nearby.yml`. Passo a passo em
 `docs/ROLE-POR-PERTO.md`.
+
+## Teste de carga (local)
+
+`npm run loadtest` (ou `node loadtest/simulate.js --conexoes 100 --duracao 300`) sobe `wrangler dev` com `loadtest/worker.js` (o roteador de produção com chave de teste), abre N WebSockets e imprime mensagens por minuto, erros, tempo de resposta e o custo estimado (20 mensagens = 1 requisição). Nunca usa a produção. Resultados e limites do teste em `docs/ROLE-POR-PERTO.md`.
+

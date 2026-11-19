@@ -1,4 +1,4 @@
-# Roteiro de testes manuais: Rolê por perto (etapa 1, ver quem procura)
+# Roteiro de testes manuais: Rolê por perto (etapas 1 a 5)
 
 Para executar com **dois aparelhos, cada um com uma conta diferente** (Ana e Beto), com o app instalado de um build que tenha `NEARBY_URL` configurado (o servidor `workers/nearby` publicado; veja `docs/ROLE-POR-PERTO.md`) e o `google-services.json`. Os testes automatizados cobrem a lógica (quadrados, estado, ViewModel, mapeamento); este roteiro valida o que só o aparelho mostra: serviço em primeiro plano, notificação, marcadores no MapLibre e o desaparecimento de quem para.
 
@@ -93,4 +93,17 @@ Precisa do servidor com a tarefa 19 publicada e dois aparelhos (A e B), com cont
 - [ ] 9.6 Se A bloqueou B (cenário 8) e depois tenta marcar B, ou B marca A, o app mostra o mesmo "Marcado" e nunca vira amizade; nenhum aviso revela o bloqueio.
 - [ ] 9.7 Quem já é amigo, ou foi bloqueado, não recebe convite novo mesmo que as duas marcas existam.
 - [ ] 9.8 Com a busca desligada no B ao marcar do A, a confirmação só chega ao ligar a busca do B (até 72 h).
+
+## Cenário 10: suspensão automática por 3 denúncias (etapa 5)
+
+Precisa do servidor com a tarefa 22 publicada, quatro aparelhos ou contas (A, B, C e D; D é quem será denunciado), a rota `/admin` do dono e o `ADMIN_TOKEN`.
+
+- [ ] 10.1 Faça D participar de um mesmo encontro com A, B e C (todos entram e o encontro termina: chegaram, saiu ou cancelado). No cartão "Encontro encerrado" de cada um aparece D como "Motociclista N".
+- [ ] 10.2 No A, toque em **Denunciar** em D e escolha um motivo: "Denúncia enviada". Repita no B: "Denúncia enviada". D continua procurando normalmente (2 denúncias não bastam).
+- [ ] 10.3 Denuncie de novo com o A (mesma pessoa): nada muda. Só denúncias de pessoas diferentes contam.
+- [ ] 10.4 No C, denuncie D: a 3ª denúncia de pessoas diferentes suspende D. No aparelho de D, a busca desliga (ou, se estiver ligada, em segundos) e aparece "Recurso indisponível por denúncias. Fale com o dono do Rumo.". D sai do mapa e do encontro dos outros.
+- [ ] 10.5 D tenta ligar a busca de novo: a mesma mensagem, sem ligar.
+- [ ] 10.6 Denúncias feitas só pelo mapa (sem ter estado em encontro com D) são registradas para o dono mas **não** contam para a suspensão: repita com três contas que não estiveram em encontro com D e confirme que D não é suspenso.
+- [ ] 10.7 O dono lista as denúncias (`GET /admin/denuncias?uid=<uid de D>` com `Authorization: Bearer <ADMIN_TOKEN>`) e reverte com `POST /admin/suspensao?uid=<uid de D>&acao=tirar`: responde `{"uid":"...","suspenso":false}`. Em até 5 min (ou ao reconectar) D volta a poder procurar. As denúncias antigas deixam de contar: só novas denúncias podem suspender de novo.
+- [ ] 10.8 Sem o token ou com token errado, as rotas `/admin` respondem 401.
 

@@ -1,0 +1,22 @@
+# Config SÓ do teste de carga local (wrangler dev). Não é usada na publicação.
+# Os valores abaixo são de teste; a chave pública de teste entra por .dev.vars (gerado por simulate.js).
+name = "rumo-nearby-loadtest"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "projeto-de-teste"
+NEARBY_SECRET = "segredo-de-carga"
+ADMIN_TOKEN = "admin-de-carga"
+
+[[durable_objects.bindings]]
+name = "CELULA"
+class_name = "Celula"
+
+[[durable_objects.bindings]]
+name = "CONTA"
+class_name = "Conta"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Celula", "Conta"]

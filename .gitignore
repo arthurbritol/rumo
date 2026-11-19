@@ -22,3 +22,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+# Teste de carga do Worker nearby: chaves geradas a cada execução
+workers/nearby/loadtest/.dev.vars
+workers/nearby/loadtest/.wrangler/
