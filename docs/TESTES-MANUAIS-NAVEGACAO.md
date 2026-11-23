@@ -46,3 +46,18 @@ Teste em movimento real (moto ou carro), com a navegação ativa e rotação lig
 - [ ] **Mexer no mapa**: arrastar o mapa para de seguir (aparece **Centralizar**); tocar em **Centralizar** volta a seguir.
 - [ ] **Segundo plano**: ir para outro app e voltar não trava nem deixa a câmera presa; o app não consome CPU em segundo plano (o laço de quadros para).
 - [ ] **Desempenho e bateria**: em uma hora de navegação o aparelho não esquenta anormalmente, o mapa mantém ~60 fps e a bateria cai em ritmo parecido com o de outro app de navegação.
+
+## 5. Avisos de radar, lombada e travessia
+
+Fonte: OpenStreetMap. **No Brasil a cobertura é incompleta**: radar móvel/blitz nunca aparece, e muitas lombadas e travessias não estão mapeadas. Escolha um trecho onde você sabe que há radar fixo, lombada e passagem de nível; confirme no mapa se há ícone ali antes de contar com o aviso. Teste em movimento (moto ou carro), com internet, **voz ligada** e o volume audível.
+
+- [ ] **Navegando, em rota**: ao calcular uma rota que passa por um radar/lombada mapeados, o aviso aparece e fala na ordem: radar "à frente, 800 metros", "300 metros" e "Radar adiante" (~100 m); lombada a 300 e 100 m; travessia de trem a 400 m. Cada aviso uma vez só; passou, não repete.
+- [ ] **Cartão (retrato)**: aparece no canto inferior esquerdo, acima da barra fina, com ícone grande, distância (ex.: "300 m"), nome do tipo e, em radar com limite no mapa, "Limite 60 km/h". Não cobre o banner de manobra nem o botão Centralizar; some depois de passar.
+- [ ] **Cartão (paisagem)**: aparece ao lado do painel lateral, no canto inferior, sem cobrir o painel.
+- [ ] **Acima do limite**: em radar com limite, passar da velocidade (mais ~2 km/h) deixa a distância e o texto em vermelho ("acima") e a voz diz "Você está acima do limite". Abaixo, só informa o limite.
+- [ ] **Modo livre / gravando** (sem rota): com "Gravar trajeto" ligado, andando acima de ~11 km/h em direção ao radar/lombada, o aviso e o cartão aparecem a até ~600 m, só dos que estão à frente (±35° do rumo). Parado ou devagar (abaixo de ~11 km/h) não avisa. Passar por um radar na via paralela ou no sentido contrário (quando o mapa tem `direction`) não deve avisar.
+- [ ] **Sem internet**: com o modo avião, depois de ter rodado o trecho antes (cache de 30 dias), os avisos continuam. Em trecho nunca visto não há avisos e o app não trava nem fica tentando sem parar.
+- [ ] **Desligar categoria**: Perfil > Avisos na estrada: desligue "Lombadas"; as lombadas somem do mapa em até ~1 s, sem voz e sem cartão; radares seguem. Desligue todas: nenhum aviso. Religue: voltam. A escolha persiste ao fechar e abrir o app.
+- [ ] **Mapa com ícones**: com zoom 13 ou mais aparecem radar (câmera em disco vermelho), semáforo com câmera, lombada e faixa sonora (triângulo amarelo) e travessia (disco amarelo com X); abaixo do zoom 13 não aparecem. Tocar num posto, moto ou ponto de encontro continua funcionando com ícones por cima/perto.
+- [ ] **Sem consulta ao mexer no mapa**: arraste e dê zoom no mapa à vontade: não deve gerar consultas (só a mudança de quadrado da posição e o cálculo de rota consultam).
+- [ ] **Bateria**: uma hora de navegação com os avisos ligados não pesa mais que sem eles (a checagem roda a ~1 Hz no GPS que já existe).

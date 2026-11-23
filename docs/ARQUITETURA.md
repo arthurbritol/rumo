@@ -270,6 +270,18 @@ denúncias, marcas de amizade e suspensão). O app (pacote `app.hunter.nearby`, 
 WebSocket por quadrado tocado pelo raio, autenticado com o ID token do Firebase; o Firestore não participa da
 posição. Detalhes, protocolo, custo medido e modelo de ameaças em [ROLE-POR-PERTO.md](ROLE-POR-PERTO.md).
 
+## Avisos de radar, lombada e travessia
+
+Pacote `app.hunter.nav.perigos` (módulo `:navigation`, JVM puro, testado). Fonte: OpenStreetMap via Overpass (cobertura no Brasil
+incompleta; sem radar móvel). `PerigoTags` mapeia tags para o enum `Perigo`; `OverpassPerigoSource` consulta por quadrado fixo de
+0,1° (`TileId`) e `ArquivoPerigoCache` guarda um JSON versionado por quadrado (30 dias; vazio também; sem Room). O
+`PerigoRepositorio` serializa as consultas (1 por vez, 2 s entre elas, recuo exponencial, espelho alternativo) e é alimentado pela mudança de
+quadrado da posição (3x3) e pelo cálculo de rota (quadrados do traçado), nunca pelo movimento do mapa. A cada ~1 s o `PerigoMonitor`
+(dentro do `TrackingService`, no fluxo de GPS que já existe) usa `PerigosAdiante`/`AvisadorDePerigos` (com rota: ao longo do traçado até
+1,5 km a ≤30 m; sem rota: 600 m a ±35° do rumo) para falar pelo mesmo TTS e publicar o `AlertaPerigo` em `PerigoStatus` (cartão do mapa).
+O mapa desenha a camada `hazards` (zoom 13+) a partir de uma fonte GeoJSON atualizada só quando os quadrados mudam. Interruptores por categoria
+em Perfil (`PerigoPrefs`). Design completo: [spec](superpowers/specs/2026-11-24-radares-lombadas-design.md).
+
 ## Serviços externos
 
 | Serviço | Uso |
@@ -277,7 +289,7 @@ posição. Detalhes, protocolo, custo medido e modelo de ameaças em [ROLE-POR-P
 | OpenFreeMap | Tiles vetoriais e estilos (claro e escuro) |
 | Valhalla (valhalla1.openstreetmap.de) | Rotas para moto, com alternativas e paradas |
 | Photon (photon.komoot.io) | Busca de endereços e lugares |
-| Overpass | Postos de combustível (`amenity=fuel`) para busca online sob demanda |
+| Overpass | Postos de combustível (`amenity=fuel`) sob demanda e radares, lombadas e travessias de trem (cache por quadrado de 0,1°, 30 dias) |
 | Dados Abertos ANP / GitHub Releases | Série histórica de preços de combustíveis compactada (`anp-fuel-latest.json.gz`) |
 | Cloudflare Workers + Durable Objects (plano gratuito), `workers/nearby` | Rolê por perto: posições aproximadas, encontros, bloqueios e denúncias em tempo real |
 | Firebase (Authentication + Firestore, plano gratuito) | Conta, sincronização e amigos/rolê, só quando o `google-services.json` está no build; sem Storage nem Functions |
