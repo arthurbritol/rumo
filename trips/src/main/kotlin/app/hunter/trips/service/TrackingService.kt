@@ -18,6 +18,8 @@ import androidx.core.app.ServiceCompat
 import app.hunter.nav.NavServices
 import app.hunter.nav.NavSession
 import app.hunter.nav.NavStatus
+import app.hunter.nav.perigos.PerigoMonitor
+import app.hunter.nav.perigos.PerigoStatus
 import app.hunter.trips.R
 import app.hunter.trips.data.TripsGraph
 import app.hunter.trips.recording.AndroidLocationSource
@@ -110,6 +112,8 @@ class TrackingService : Service() {
             scope = scope,
             reroute = { from, to, profile, via -> NavServices.router.route(from, to.latLon, profile, via = via).firstOrNull() },
         )
+        // Avisos de radar/lombada: ~1 Hz, no mesmo fluxo de posição (sem outro listener de GPS).
+        val perigos = PerigoMonitor(PerigoStatus.repositorio)
         val source = locationSourceFactory(this)
 
         job = scope.launch {
@@ -118,12 +122,14 @@ class TrackingService : Service() {
                 source.updates().collect { p ->
                     recorder.onPoint(p)
                     nav.onPoint(p)?.forEach(::speak)
+                    perigos.onPoint(p, NavStatus.state.value).forEach(::speak)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SecurityException) {
                 Log.w(TAG, "permissão de localização revogada", e)
             } finally {
+                perigos.encerrar()
                 // Encerra e salva se o usuário parou ou o GPS falhou. Se o serviço está sendo destruído pelo
                 // sistema, deixa o trajeto aberto para ser retomado depois.
                 if (!destroyed) {
@@ -206,6 +212,7 @@ class TrackingService : Service() {
         scope.cancel()
         tts?.stop()
         tts?.shutdown()
+        PerigoStatus.publicar(null)
         TrackingStatus.publish(RecordingState())
         super.onDestroy()
     }

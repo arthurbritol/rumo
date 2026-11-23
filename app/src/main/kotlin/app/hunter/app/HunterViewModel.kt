@@ -44,6 +44,10 @@ import kotlinx.coroutines.Job
 import app.hunter.app.account.AuthState
 import app.hunter.app.account.SeedDecision
 import app.hunter.app.account.maintenanceSeedDecision
+import app.hunter.app.perigos.PerigoPrefs
+import app.hunter.nav.perigos.CategoriaPerigo
+import app.hunter.nav.perigos.PerigoPonto
+import app.hunter.nav.perigos.PerigoStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -132,6 +136,23 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     val pod = PodStatus.state
     val nav = NavStatus.state
     val voice = NavStatus.voice
+
+    // ---------- avisos de radar, lombada e travessia ----------
+
+    /** Próximo perigo à frente (cartão do mapa); vem do serviço de rastreio (~1 Hz). */
+    val alertaPerigo = PerigoStatus.alerta
+    val categoriasPerigo = PerigoStatus.categorias
+
+    /** Perigos dos quadrados carregados, só das categorias ligadas. O debounce evita redesenhar a cada quadrado de uma rota longa. */
+    val perigosNoMapa: StateFlow<List<PerigoPonto>> =
+        combine(PerigoStatus.repositorio?.perigos ?: MutableStateFlow(emptyList()), PerigoStatus.categorias) { todos, cats ->
+            todos.filter { it.tipo.categoria in cats }
+        }.debounce(1_000).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun definirCategoriaPerigo(c: CategoriaPerigo, ligada: Boolean) {
+        PerigoPrefs.gravar(prefs, c, ligada)
+        PerigoStatus.definirCategorias(PerigoPrefs.alternar(PerigoStatus.categorias.value, c, ligada))
+    }
 
     private fun <T> Flow<T>.hot(initial: T): StateFlow<T> =
         stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initial)
@@ -432,6 +453,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     // Depois da semente (o 1º ponto, mesmo velho), descarta leitura velha (>10 s) ou imprecisa.
                     if (app.hunter.app.ui.isLiveFixUsable(it.elapsedRealtimeNanos, it.accuracyM, android.os.SystemClock.elapsedRealtimeNanos(), hasCurrent = _live.value != null)) {
                         _live.value = it
+                        // Só pede quadrados quando muda de quadrado (0,1°); o mapa parado/arrastado nunca consulta.
+                        PerigoStatus.repositorio?.aoMudarPosicao(it.latitude, it.longitude)
                     }
                 }
             } catch (e: SecurityException) {
@@ -625,6 +648,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     if (cur == null || cur.place != p.place || cur.profile != p.profile || cur.via != p.via) cur
                     else cur.copy(routes = routes, selected = 0, loading = false, error = if (routes.isEmpty()) "Nenhuma rota encontrada." else null)
                 }
+                // Rota calculada: carrega os perigos dos quadrados tocados por ela (cache; nada de consulta no mapa).
+                routes.forEach { PerigoStatus.repositorio?.aoCalcularRota(it.shape) }
                 refreshFuelAdvice()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

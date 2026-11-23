@@ -232,6 +232,8 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             onSyncAnpPrices = { vmProvider().syncAnpPricesNow() },
                             searchable = socialState.searchVisible,
                             onSearchableChange = socialVm::answerSearchPrompt,
+                            avisosPerigo = vmProvider().categoriasPerigo.collectAsStateWithLifecycle().value,
+                            onAvisoPerigoChange = { c, on -> vmProvider().definirCategoriaPerigo(c, on) },
                         )
                     }
                     BackHandler { overlay = Overlay.NONE.name }

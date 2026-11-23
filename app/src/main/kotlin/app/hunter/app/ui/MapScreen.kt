@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.fillMaxSize
@@ -124,6 +126,8 @@ fun MapScreen(
     val live by vm.live.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
     val nav by vm.nav.collectAsStateWithLifecycle()
+    val alertaPerigo by vm.alertaPerigo.collectAsStateWithLifecycle()
+    val perigosNoMapa by vm.perigosNoMapa.collectAsStateWithLifecycle()
     val preview by vm.preview.collectAsStateWithLifecycle()
     val attention by vm.attention.collectAsStateWithLifecycle()
     val online by vm.online.collectAsStateWithLifecycle()
@@ -248,7 +252,7 @@ fun MapScreen(
     // Navegação enxuta: o que aparece depende de estar navegando e da orientação (ver NavLayout.kt).
     val landscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val el = navegacaoEnxuta(
-        EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow),
+        EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow, gravando = rec.isRecording),
         if (landscape) Orientacao.Paisagem else Orientacao.Retrato,
     )
     // Ao começar a navegar, nada fica selecionado: os cartões não reaparecem do nada ao encerrar.
@@ -283,6 +287,17 @@ fun MapScreen(
         preview?.let { p -> p.routes.filterIndexed { i, _ -> i != p.selected }.map { it.shape } } ?: emptyList()
     }
 
+    // Altura (a partir de baixo) dos botões flutuantes da direita; o cartão de perigo usa a mesma, do outro lado.
+    val controlsBottom = when {
+        navigating -> if (landscape) 16.dp else 104.dp
+        selectedFuelStation != null -> 340.dp
+        rider != null && !navigating -> 250.dp
+        nearbyCardShown && !navigating -> 300.dp
+        encounterCardShown && !navigating -> 430.dp
+        rec.isRecording -> 210.dp
+        else -> 190.dp
+    }
+
     Box(Modifier.fillMaxSize()) {
         HunterMap(
             modifier = Modifier.fillMaxSize(),
@@ -295,6 +310,7 @@ fun MapScreen(
             encounterRiders = encounterRiders,
             nearbySearching = nearbyState !is NearbyUiState.Desligado,
             fuelStations = if (fuelLayerEnabled) visibleFuelStations else emptyList(),
+            perigos = perigosNoMapa,
             stateAverages = if (fuelLayerEnabled) stateAverages else emptyList(),
             cityAverages = if (fuelLayerEnabled) cityAverages else emptyList(),
             trafficTileUrl = trafficTileUrl,
@@ -358,18 +374,7 @@ fun MapScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Bottom)) else Modifier)
-                    .padding(
-                        end = 16.dp,
-                        bottom = when {
-                            navigating -> if (landscape) 16.dp else 104.dp
-                            selectedFuelStation != null -> 340.dp
-                            rider != null && !navigating -> 250.dp
-                            nearbyCardShown && !navigating -> 300.dp
-                            encounterCardShown && !navigating -> 430.dp
-                            rec.isRecording -> 210.dp
-                            else -> 190.dp
-                        },
-                    ),
+                    .padding(end = 16.dp, bottom = controlsBottom),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 horizontalAlignment = Alignment.End,
             ) {
@@ -405,6 +410,21 @@ fun MapScreen(
                     )
                 }
             }
+        }
+
+        // ----- Aviso do próximo radar/lombada/travessia -----
+        // Navegando: sempre que houver (essencial). Só gravando: apenas com a tela livre de cartões (que ocupam a mesma faixa).
+        val alerta = alertaPerigo
+        val livreParaAviso = navigating || (!searching && preview == null && selectedFuelStation == null && rider == null &&
+            !nearbyCardShown && !encounterCardShown)
+        if (el.alertaPerigo && alerta != null && livreParaAviso) {
+            PerigoCard(
+                alerta,
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Bottom)) else Modifier)
+                    .padding(start = if (el.painelLateral) NAV_PANEL_WIDTH + 12.dp else 16.dp, bottom = controlsBottom),
+            )
         }
 
         // ----- Navegação -----
@@ -1039,6 +1059,37 @@ private fun NavBannerCompact(vm: HunterViewModel, modifier: Modifier) {
                             Text(next.streetName ?: "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Cartão compacto do próximo perigo: ícone, distância, nome e (radar) limite. Largura limitada (~210 dp) para caber ao lado dos
+ * botões da direita mesmo em telas estreitas; vermelho quando o radar tem limite e a velocidade está acima.
+ */
+@Composable
+private fun PerigoCard(a: app.hunter.nav.perigos.AlertaPerigo, modifier: Modifier) {
+    val density = LocalDensity.current.density
+    val icone = remember(a.perigo.tipo, density) { perigoBitmap(a.perigo.tipo, (48 * density).toInt()).asImageBitmap() }
+    val acima = a.acimaDoLimite
+    NavSurface(modifier.widthIn(max = 210.dp)) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            androidx.compose.foundation.Image(icone, contentDescription = a.perigo.tipo.nome, modifier = Modifier.size(48.dp))
+            Column {
+                Text(fmtDist(a.distanciaM.toDouble()), fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1, color = if (acima) Bad else MaterialTheme.colorScheme.onSurface)
+                Text(a.perigo.tipo.nome, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                a.limiteKmh?.let {
+                    Text(
+                        if (acima) "Limite $it km/h · acima" else "Limite $it km/h",
+                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (acima) Bad else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

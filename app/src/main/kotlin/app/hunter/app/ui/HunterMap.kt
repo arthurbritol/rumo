@@ -150,6 +150,10 @@ private const val SRC_NEARBY = "nearby-src"
 private const val SRC_PROPOSALS = "nearby-proposals-src"
 private const val SRC_FUEL_STATE = "fuel-state-src"
 private const val SRC_FUEL_CITY = "fuel-city-src"
+private const val SRC_PERIGOS = "perigos-src"
+
+/** Radares, lombadas e travessias só aparecem a partir deste zoom (abaixo, são pontos demais). */
+private const val PERIGO_MIN_ZOOM = 13f
 
 /** Abaixo deste zoom o mapa mostra a média do estado; entre este e [STATION_MIN_ZOOM], a do município. */
 private const val CITY_MIN_ZOOM = 6.5f
@@ -181,6 +185,8 @@ fun HunterMap(
     /** Procurando rolê: o próprio marcador vira a moto laranja ("rider-self"). */
     nearbySearching: Boolean = false,
     fuelStations: List<ResolvedFuelStation> = emptyList(),
+    /** Radares, lombadas e travessias (já filtrados pelas categorias ligadas); a lista só muda quando os quadrados carregam. */
+    perigos: List<app.hunter.nav.perigos.PerigoPonto> = emptyList(),
     stateAverages: List<app.hunter.app.fuel.StateAverage> = emptyList(),
     cityAverages: List<app.hunter.app.fuel.CityAverage> = emptyList(),
     /** Modelo de endereço das imagens de trânsito (null = sem camada) e se ela está ligada. */
@@ -366,6 +372,10 @@ fun HunterMap(
     }
     LaunchedEffect(style, nearbySearching) {
         style?.getLayer("me-symbol")?.setProperties(iconImage(ownMarkerIcon(nearbySearching)))
+    }
+    LaunchedEffect(style, perigos) {
+        val src = style?.getSourceAs<GeoJsonSource>(SRC_PERIGOS) ?: return@LaunchedEffect
+        src.setGeoJson(perigosFeatures(perigos))
     }
     LaunchedEffect(style, cityAverages) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_CITY) ?: return@LaunchedEffect
@@ -651,6 +661,12 @@ private fun trailFeatures(points: List<TrackPoint>?): FeatureCollection {
     return FeatureCollection.fromFeatures(out)
 }
 
+/** Um ponto por perigo, só com o id da imagem do tipo: sem texto (não depende de fonte) e sem dado de pessoa. */
+private fun perigosFeatures(perigos: List<app.hunter.nav.perigos.PerigoPonto>): FeatureCollection =
+    FeatureCollection.fromFeatures(perigos.map { p ->
+        Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).also { it.addStringProperty("icon", perigoIconId(p.tipo)) }
+    })
+
 /** Motos anônimas: só `id` (sessão aleatória), `rumo`, `destaque` e a imagem; nada que identifique a pessoa. */
 private fun nearbyFeatures(riders: List<Vizinho>, encounter: List<Participante>): FeatureCollection =
     FeatureCollection.fromFeatures(
@@ -718,6 +734,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
     st.addImage("fuel-station", fuelStationBitmap(density))
+    app.hunter.nav.perigos.Perigo.values().forEach { st.addImage(perigoIconId(it), perigoBitmap(it, (30 * density).toInt())) }
     // Uma imagem por variante (não por pessoa). A moto laranja do próprio usuário é o marcador "me".
     st.addImage(RIDER_ICON, riderBitmap(density, destaque = false, proprio = false))
     st.addImage(OWN_ICON_SEARCHING, riderBitmap(density, destaque = false, proprio = true))
@@ -725,7 +742,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addImage(PROPOSAL_ICON, encounterPinBitmap(density, PIN_NORMAL))
     st.addImage(PROPOSAL_ICON_COMBINA, encounterPinBitmap(density, PIN_COMBINA))
     st.addImage(ENCOUNTER_ICON, encounterPinBitmap(density, PIN_ENCONTRO))
-    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_NEARBY, SRC_PROPOSALS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY).forEach { st.addSource(GeoJsonSource(it)) }
+    listOf(SRC_ALT, SRC_ROUTE, SRC_TRAIL, SRC_DEST, SRC_FRIENDS, SRC_NEARBY, SRC_PROPOSALS, SRC_ME, SRC_FUEL, SRC_FUEL_STATE, SRC_FUEL_CITY, SRC_PERIGOS).forEach { st.addSource(GeoJsonSource(it)) }
 
     st.addLayer(
         LineLayer("alt-line", SRC_ALT).withProperties(
@@ -754,6 +771,14 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
         CircleLayer("dest-circle", SRC_DEST).withProperties(
             circleRadius(11f), circleColor("#FF7A1A"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(4f),
         ),
+    )
+    // Perigos (radar, lombada, travessia): abaixo dos pinos de posto e dos demais símbolos, e só os toques existentes valem.
+    st.addLayer(
+        SymbolLayer("hazards", SRC_PERIGOS).withProperties(
+            iconImage(Expression.get("icon")),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
+        ).also { it.minZoom = PERIGO_MIN_ZOOM },
     )
     // Marcador do posto: pino da bandeira + etiqueta de preço, uma imagem por posto (ver FuelMarkers.kt).
     st.addLayer(

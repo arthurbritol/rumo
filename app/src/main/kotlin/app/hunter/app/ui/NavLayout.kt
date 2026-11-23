@@ -8,6 +8,8 @@ data class EstadoDaTela(
     val encontroAtivo: Boolean = false,
     /** A câmera está seguindo a moto (false: o usuário mexeu no mapa). */
     val seguindo: Boolean = true,
+    /** Gravando uma viagem (mesmo sem rota): os avisos de radar e lombada também valem. */
+    val gravando: Boolean = false,
 )
 
 /** Quais blocos da tela do mapa aparecem (todos são lidos pela tela). Função pura, testável em JVM. */
@@ -22,11 +24,13 @@ data class ElementosDaTela(
     val painelLateral: Boolean,
     val pilulaEncontro: Boolean,
     val recentralizar: Boolean,
+    /** Cartão do próximo radar/lombada: faz parte do essencial, na navegação e na gravação. */
+    val alertaPerigo: Boolean,
 )
 
 /**
  * Modo de navegação enxuto: com o GPS ativo ficam só manobra, velocidade, ETA, encerrar e recentralizar
- * (mais a pílula do encontro, se houver). Em retrato, banner no topo + barra fina embaixo; em paisagem,
+ * (mais a pílula do encontro, se houver e o aviso do próximo radar/lombada, que também vale gravando). Em retrato, banner no topo + barra fina embaixo; em paisagem,
  * um painel lateral estreito. Fora da navegação nada muda.
  */
 fun navegacaoEnxuta(estado: EstadoDaTela, orientacao: Orientacao): ElementosDaTela {
@@ -37,5 +41,6 @@ fun navegacaoEnxuta(estado: EstadoDaTela, orientacao: Orientacao): ElementosDaTe
         bannerManobra = nav && !paisagem, barraInferior = nav && !paisagem, painelLateral = nav && paisagem,
         pilulaEncontro = nav && estado.encontroAtivo,
         recentralizar = !estado.seguindo,
+        alertaPerigo = nav || estado.gravando,
     )
 }

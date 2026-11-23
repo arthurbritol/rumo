@@ -8,7 +8,9 @@ import app.hunter.app.data.PlaceDao
 import app.hunter.app.data.SyncDao
 import app.hunter.app.fuel.FuelPriceRepository
 import app.hunter.app.fuel.FuelPriceSyncWorker
+import app.hunter.app.perigos.PerigoPrefs
 import app.hunter.maintenance.data.MaintenanceDao
+import app.hunter.nav.perigos.PerigoStatus
 import app.hunter.trips.data.RoomTripStore
 import app.hunter.trips.data.TripDao
 import app.hunter.trips.data.TripStore
@@ -50,6 +52,9 @@ class HunterApp : Application(), TripsGraph {
     override fun onCreate() {
         super.onCreate()
         ReminderWorker.schedule(this)
+        // Avisos de radar/lombada: cache em disco, interruptores salvos e (depois) o repositório já usável pelo serviço.
+        PerigoStatus.iniciar(filesDir)
+        PerigoStatus.definirCategorias(PerigoPrefs.ler(getSharedPreferences("app", MODE_PRIVATE)))
         if (AccountConfig.isAvailable(this)) account.start()
         FuelPriceSyncWorker.scheduleWeeklySync(this)
         CoroutineScope(Dispatchers.IO).launch {

@@ -58,4 +58,13 @@ class NavLayoutTest {
             assertFalse(nav(o, seguindo = true).recentralizar)
         }
     }
+
+    @Test
+    fun `aviso de perigo faz parte do essencial na navegacao e vale gravando sem rota`() {
+        for (o in Orientacao.entries) {
+            assertTrue(nav(o).alertaPerigo)
+            assertTrue(navegacaoEnxuta(EstadoDaTela(navegando = false, gravando = true), o).alertaPerigo)
+            assertFalse(fora(o).alertaPerigo)
+        }
+    }
 }

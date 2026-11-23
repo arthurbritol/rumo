@@ -1,5 +1,6 @@
 package app.hunter.app.ui
 
+import app.hunter.nav.perigos.CategoriaPerigo
 import android.app.Activity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -92,6 +93,9 @@ fun ProfileRoute(
     /** Logado: se a pessoa aparece na busca por nome; nulo esconde a opção. */
     searchable: Boolean? = null,
     onSearchableChange: (Boolean) -> Unit = {},
+    /** Avisos de radar, lombada e travessia ligados; nulo esconde a seção. */
+    avisosPerigo: Set<CategoriaPerigo>? = null,
+    onAvisoPerigoChange: (CategoriaPerigo, Boolean) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val versionName = remember {
@@ -150,6 +154,8 @@ fun ProfileRoute(
         onSyncAnpPrices = onSyncAnpPrices,
         searchable = searchable.takeIf { state is AuthState.SignedIn },
         onSearchableChange = onSearchableChange,
+        avisosPerigo = avisosPerigo,
+        onAvisoPerigoChange = onAvisoPerigoChange,
     )
 }
 
@@ -221,6 +227,8 @@ fun ProfileScreen(
     onSyncAnpPrices: () -> Unit = {},
     searchable: Boolean? = null,
     onSearchableChange: (Boolean) -> Unit = {},
+    avisosPerigo: Set<CategoriaPerigo>? = null,
+    onAvisoPerigoChange: (CategoriaPerigo, Boolean) -> Unit = { _, _ -> },
     profile: UserProfile? = null,
 ) {
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
@@ -597,6 +605,47 @@ fun ProfileScreen(
                 }
                 Text(
                     text = "Permite que outros motociclistas encontrem você pelo nome de exibição para mandar convites de amizade e rolês em grupo.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        // 4b. Seção: Avisos na estrada (radar, lombada, travessia de trem)
+        if (avisosPerigo != null) {
+            SectionTitle("Avisos na estrada")
+            HCard {
+                CategoriaPerigo.values().forEach { c ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SquircleIcon(
+                            iconRes = R.drawable.fa_traffic_light,
+                            backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
+                            tintColor = MaterialTheme.colorScheme.primary,
+                            contentDescription = c.rotulo,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = c.rotulo,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = c.explicacao,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = c in avisosPerigo, onCheckedChange = { onAvisoPerigoChange(c, it) })
+                    }
+                }
+                Text(
+                    text = "Voz, cartão e ícones no mapa durante a navegação e a gravação. Os dados vêm do OpenStreetMap, que no Brasil " +
+                        "ainda é incompleto: radar móvel, blitz e muitas lombadas não aparecem. Não deixe de olhar a via.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
