@@ -429,8 +429,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         locationJob = viewModelScope.launch {
             try {
                 AndroidLocationSource(getApplication(), includeNetwork = true).updates().collect {
-                    // Descarta o lastKnownLocation velho (>10 s) ou impreciso: o mapa não pula para onde você estava.
-                    if (app.hunter.app.ui.isLiveFixUsable(it.elapsedRealtimeNanos, it.accuracyM, android.os.SystemClock.elapsedRealtimeNanos())) {
+                    // Depois da semente (o 1º ponto, mesmo velho), descarta leitura velha (>10 s) ou imprecisa.
+                    if (app.hunter.app.ui.isLiveFixUsable(it.elapsedRealtimeNanos, it.accuracyM, android.os.SystemClock.elapsedRealtimeNanos(), hasCurrent = _live.value != null)) {
                         _live.value = it
                     }
                 }

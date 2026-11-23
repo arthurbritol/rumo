@@ -10,7 +10,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -226,6 +230,11 @@ fun HunterMap(
     val latestNearbyClick by rememberUpdatedState(onNearbyClick)
     val latestProposalClick by rememberUpdatedState(onProposalClick)
     val latestBoxChanged by rememberUpdatedState(onBoundingBoxChanged)
+    val smoother = remember { MotionSmoother() }
+    // Verdadeiro enquanto o laço por quadro roda: o onCameraIdle (que dispararia 60x/s) é ignorado.
+    val loopActive = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // Acorda o laço quando chega fix ou progresso novo (ele dorme parado e convergido).
+    var wake by remember { mutableIntStateOf(0) }
 
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -233,7 +242,7 @@ fun HunterMap(
                 Lifecycle.Event.ON_START -> mapView.onStart()
                 Lifecycle.Event.ON_RESUME -> mapView.onResume()
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_STOP -> { mapView.onStop(); smoother.reset() } // volta do 2º plano começa limpo
                 else -> {}
             }
         }
@@ -287,14 +296,7 @@ fun HunterMap(
                 false
             }
             m.addOnCameraIdleListener {
-                val region = m.projection.visibleRegion.latLngBounds
-                val box = GeoBox(
-                    minLat = minOf(region.latitudeSouth, region.latitudeNorth),
-                    minLon = minOf(region.longitudeWest, region.longitudeEast),
-                    maxLat = maxOf(region.latitudeSouth, region.latitudeNorth),
-                    maxLon = maxOf(region.longitudeWest, region.longitudeEast),
-                )
-                latestBoxChanged(box)
+                if (!loopActive.get()) latestBoxChanged(visibleBox(m))
             }
             m.addOnCameraMoveStartedListener { reason -> if (reason == REASON_API_GESTURE) latestGesture() }
             val startTarget = me?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(-23.5505, -46.6333)
@@ -404,10 +406,11 @@ fun HunterMap(
     }
     // Movimento estilo Waze: o suavizador recebe os fixes (já filtrados por idade/precisão) e o progresso da
     // navegação; o laço por quadro (abaixo) lê dele a posição, o rumo e o zoom a desenhar.
-    val smoother = remember { MotionSmoother() }
-    val following = camera is MapCamera.Follow && me != null
+    val following = (camera as? MapCamera.Follow)?.adaptive == true && me != null
+    loopActive.set(following)
     LaunchedEffect(me) {
         me?.let { smoother.onFix(it.toMotionFix(), SystemClock.elapsedRealtimeNanos()) }
+        wake++
     }
     val routePath = remember(route) { route?.takeIf { it.size >= 2 }?.let { RoutePath(it) } }
     LaunchedEffect(navProgress, routePath) {
@@ -416,6 +419,7 @@ fun HunterMap(
             routePath, pr?.alongM, pr?.deviationM ?: Double.MAX_VALUE, pr?.offRoute ?: true,
             SystemClock.elapsedRealtimeNanos(), pr?.let { LatLon(it.snapLat, it.snapLon) },
         )
+        wake++
     }
 
     // Marcador "eu" a 1 Hz (câmera livre): o laço por quadro cuida dele enquanto segue.
@@ -448,8 +452,9 @@ fun HunterMap(
         m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 700)
     }
 
-    // Seguir o motociclista: câmera e marcador atualizados a cada quadro (30-60 fps) a partir do suavizador.
-    // O laço só roda com a tela visível (repeatOnLifecycle) e é cancelado ao sair da composição ou do modo seguir.
+    // Câmera e marcador por quadro SÓ na navegação (Follow adaptativo). IDLE/REC mantêm o comportamento de antes
+    // (1 Hz com ease curto, 30 fps). O laço só roda com a tela visível (repeatOnLifecycle), é cancelado ao sair
+    // da composição ou do modo, e dorme quando tudo convergiu (parado) até chegar fix/progresso novo.
     val latestCamera by rememberUpdatedState(camera)
     val latestMe by rememberUpdatedState(me)
     val latestPadding by rememberUpdatedState(Pair(paddingTopDp, paddingBottomDp))
@@ -461,10 +466,57 @@ fun HunterMap(
         val st = style ?: return@LaunchedEffect
         if (!following) return@LaunchedEffect
         val meSrc = st.getSourceAs<GeoJsonSource>(SRC_ME)
+
+        fun cameraFor(fr: MotionFrame, c: MapCamera.Follow): CameraPosition {
+            val frBearing = fr.bearingDeg
+            val bearing = when {
+                !c.rotate -> 0.0
+                frBearing != null -> frBearing
+                else -> m.cameraPosition.bearing
+            }
+            var target = LatLng(fr.lat, fr.lon)
+            if (c.rotate && fr.aheadFraction > 0.0 && frBearing != null) {
+                // Marcador no terço inferior: a câmera mira à frente, mais quanto mais rápido.
+                // O MapLibre trabalha em dp: altura útil = (pixels ÷ densidade) − padding (dp).
+                val usableDp = mapView.height / density.toDouble() - (latestPadding.first + latestPadding.second)
+                if (usableDp > 0.0) {
+                    val o = offsetLatLon(LatLon(fr.lat, fr.lon), bearing, aheadMeters(fr.aheadFraction, usableDp, fr.zoom, fr.lat, c.tilt))
+                    target = LatLng(o.lat, o.lon)
+                }
+            }
+            return CameraPosition.Builder().target(target).zoom(fr.zoom).tilt(c.tilt).bearing(bearing).build()
+        }
+
+        fun drawMarker(lat: Double, lon: Double, bearing: Double) {
+            meSrc?.setGeoJson(FeatureCollection.fromFeature(ownFeature(lat, lon, bearing)))
+        }
+
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            // Volta do segundo plano: realimenta o suavizador (foi zerado no ON_STOP) com o último fix.
+            latestMe?.let { smoother.onFix(it.toMotionFix(), SystemClock.elapsedRealtimeNanos()) }
+            // Um ease curto único para chegar ao enquadramento (Centralizar, prévia/IDLE -> navegação); depois, por quadro.
+            val c0 = latestCamera as? MapCamera.Follow
+            val f0 = c0?.let { smoother.frame(SystemClock.elapsedRealtimeNanos(), it.adaptive, it.zoom) }
+            if (c0 != null && f0 != null) {
+                m.animateCamera(CameraUpdateFactory.newCameraPosition(cameraFor(f0, c0)), ENTRY_EASE_MS.toInt())
+                drawMarker(f0.lat, f0.lon, f0.bearingDeg ?: smoother.lastBearing ?: 0.0)
+                delay(ENTRY_EASE_MS)
+            }
             var lastFrame = 0L
+            var lastBoxAt = 0L
+            var lastBoxCenter: LatLng? = null
             var shown: Triple<Double, Double, Double>? = null
+            var applied: DoubleArray? = null
+            var quiet = 0
+            var seenWake = -1
             while (currentCoroutineContext().isActive) {
+                if (quiet >= 3) {
+                    // Parado e convergido: não pede mais quadros até chegar fix ou progresso novo.
+                    val seen = seenWake
+                    snapshotFlow { wake }.first { it != seen }
+                    quiet = 0
+                }
+                seenWake = wake
                 withFrameNanos { frameNanos ->
                     // Telas de 90/120 Hz: pula quadros para ficar em ~60 fps (a câmera não precisa de mais).
                     if (frameNanos - lastFrame < MIN_FRAME_INTERVAL_NS) return@withFrameNanos
@@ -472,44 +524,63 @@ fun HunterMap(
                     val c = latestCamera as? MapCamera.Follow ?: return@withFrameNanos
                     val fr = smoother.frame(SystemClock.elapsedRealtimeNanos(), c.adaptive, c.zoom)
                     if (fr == null) {
-                        // Nenhum fix passou nos filtros (ex.: só impreciso): segue o ponto bruto, como antes.
+                        // Nenhum fix passou nos filtros (ex.: só impreciso/velho): segue e desenha o ponto bruto.
                         val p = latestMe ?: return@withFrameNanos
                         val raw = CameraPosition.Builder().target(LatLng(p.latitude, p.longitude)).zoom(c.zoom).tilt(c.tilt)
                             .bearing(if (c.rotate) m.cameraPosition.bearing else 0.0).build()
                         m.moveCamera(CameraUpdateFactory.newCameraPosition(raw))
+                        drawMarker(p.latitude, p.longitude, smoother.lastBearing ?: p.bearingDeg?.toDouble() ?: 0.0)
                         return@withFrameNanos
                     }
-                    val frBearing = fr.bearingDeg
-                    val bearing = when {
-                        !c.rotate -> 0.0
-                        frBearing != null -> frBearing
-                        else -> m.cameraPosition.bearing
-                    }
-                    var target = LatLng(fr.lat, fr.lon)
-                    if (c.rotate && fr.aheadFraction > 0.0 && frBearing != null) {
-                        // Marcador no terço inferior: a câmera mira à frente, mais quanto mais rápido.
-                        val usablePx = (mapView.height - (latestPadding.first + latestPadding.second) * density).toDouble()
-                        if (usablePx > 0.0) {
-                            val ahead = aheadMeters(fr.aheadFraction, usablePx, fr.zoom, fr.lat, c.tilt)
-                            val o = offsetLatLon(LatLon(fr.lat, fr.lon), bearing, ahead)
-                            target = LatLng(o.lat, o.lon)
-                        }
-                    }
-                    val pos = CameraPosition.Builder().target(target).zoom(fr.zoom).tilt(c.tilt).bearing(bearing).build()
-                    m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
+                    m.moveCamera(CameraUpdateFactory.newCameraPosition(cameraFor(fr, c)))
 
                     // Marcador: só reenvia o GeoJSON se mudou de forma visível (barato).
-                    val mb = frBearing ?: smoother.lastBearing ?: 0.0
+                    val mb = fr.bearingDeg ?: smoother.lastBearing ?: 0.0
                     val prev = shown
-                    if (meSrc != null && (prev == null || kotlin.math.abs(prev.first - fr.lat) > 1e-7 ||
-                            kotlin.math.abs(prev.second - fr.lon) > 1e-7 || angleDistance(prev.third, mb) > 0.5)
+                    if (prev == null || kotlin.math.abs(prev.first - fr.lat) > 1e-7 ||
+                        kotlin.math.abs(prev.second - fr.lon) > 1e-7 || angleDistance(prev.third, mb) > 0.5
                     ) {
-                        meSrc.setGeoJson(FeatureCollection.fromFeature(ownFeature(fr.lat, fr.lon, mb)))
+                        drawMarker(fr.lat, fr.lon, mb)
                         shown = Triple(fr.lat, fr.lon, mb)
                     }
+
+                    // Os postos visíveis seguem atualizando em movimento: o onCameraIdle é ignorado enquanto o laço
+                    // roda, então avisa a caixa visível a ≤1 Hz e só se a câmera andou >300 m desde o último aviso.
+                    if (frameNanos - lastBoxAt > 1_000_000_000L) {
+                        lastBoxAt = frameNanos
+                        val ctr = m.cameraPosition.target
+                        val lc = lastBoxCenter
+                        if (ctr != null && (lc == null || distanceM(LatLon(ctr.latitude, ctr.longitude), LatLon(lc.latitude, lc.longitude)) > 300.0)) {
+                            lastBoxCenter = ctr
+                            latestBoxChanged(visibleBox(m))
+                        }
+                    }
+
+                    val now = doubleArrayOf(fr.lat, fr.lon, mb, fr.zoom)
+                    val a = applied
+                    quiet = if (a != null && kotlin.math.abs(a[0] - now[0]) < 2e-8 && kotlin.math.abs(a[1] - now[1]) < 2e-8 &&
+                        angleDistance(a[2], now[2]) < 0.01 && kotlin.math.abs(a[3] - now[3]) < 1e-4
+                    ) quiet + 1 else 0
+                    applied = now
                 }
             }
         }
+    }
+
+    // IDLE/REC: como antes (um ease de 1 s por fix, ponto e rumo brutos).
+    LaunchedEffect(map, style, camera, cameraNonce, me?.timeMs) {
+        val m = map ?: return@LaunchedEffect
+        val c = camera as? MapCamera.Follow ?: return@LaunchedEffect
+        if (c.adaptive) return@LaunchedEffect
+        val p = me ?: return@LaunchedEffect
+        val moving = (p.speedMps ?: 0f) > 1.5f && p.bearingDeg != null
+        val bearing = when {
+            !c.rotate -> 0.0
+            moving -> p.bearingDeg!!.toDouble()
+            else -> m.cameraPosition.bearing
+        }
+        val pos = CameraPosition.Builder().target(LatLng(p.latitude, p.longitude)).zoom(c.zoom).tilt(c.tilt).bearing(bearing).build()
+        m.easeCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
     }
 
     AndroidView(factory = { mapView }, modifier = modifier)
@@ -517,6 +588,19 @@ fun HunterMap(
 
 /** ~60 fps: ignora quadros mais próximos que isto (telas de 90/120 Hz). */
 private const val MIN_FRAME_INTERVAL_NS = 14_000_000L
+
+/** Ease curto e único ao entrar no modo seguir da navegação (Centralizar, prévia/IDLE -> navegação). */
+private const val ENTRY_EASE_MS = 700L
+
+private fun visibleBox(m: MapLibreMap): GeoBox {
+    val r = m.projection.visibleRegion.latLngBounds
+    return GeoBox(
+        minLat = minOf(r.latitudeSouth, r.latitudeNorth),
+        minLon = minOf(r.longitudeWest, r.longitudeEast),
+        maxLat = maxOf(r.latitudeSouth, r.latitudeNorth),
+        maxLon = maxOf(r.longitudeWest, r.longitudeEast),
+    )
+}
 
 private fun ownFeature(lat: Double, lon: Double, bearingDeg: Double): Feature =
     Feature.fromGeometry(Point.fromLngLat(lon, lat)).also { it.addNumberProperty("b", bearingDeg) }

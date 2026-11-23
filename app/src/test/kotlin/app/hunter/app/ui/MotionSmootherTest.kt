@@ -143,9 +143,19 @@ class MotionSmootherTest {
         assertTrue(aheadFractionForSpeed(0.0) < aheadFractionForSpeed(25.0))
         near(MOTION_AHEAD_MIN_FRACTION, aheadFractionForSpeed(0.0), 1e-9)
         near(MOTION_AHEAD_MAX_FRACTION, aheadFractionForSpeed(99.0), 1e-9)
-        val parado = aheadMeters(aheadFractionForSpeed(0.0), 1000.0, 18.0, -8.0, 50.0)
-        assertTrue(parado > 0.0)
         assertTrue(aheadMeters(0.2, 1000.0, 16.0, -8.0, 50.0) > aheadMeters(0.2, 1000.0, 18.0, -8.0, 50.0))
+    }
+
+    @Test
+    fun `camera a frente em metros tem valor absoluto esperado (dp, nao pixels)`() {
+        // Equador, zoom 17: 78271,516 / 2^17 = 0,59716 m por dp. Altura útil 800 dp, fração 0,2 -> 160 dp -> 95,55 m.
+        near(95.5456, aheadMeters(0.2, 800.0, 17.0, 0.0, 0.0), 0.05)
+        // Inclinação de 60 graus: cos = 0,5 -> o dobro.
+        near(191.0912, aheadMeters(0.2, 800.0, 17.0, 0.0, 60.0), 0.1)
+        // Latitude -60: cos = 0,5 -> metade.
+        near(47.7728, aheadMeters(0.2, 800.0, 17.0, -60.0, 0.0), 0.05)
+        // Um telefone de densidade 3 com 2400 px de altura = 800 dp: o chamador converte px -> dp antes de chamar.
+        near(aheadMeters(0.2, 800.0, 17.0, 0.0, 0.0), aheadMeters(0.2, 2400.0 / 3.0, 17.0, 0.0, 0.0), 1e-9)
     }
 
     // ---------- filtros de fix ----------
@@ -205,7 +215,8 @@ class MotionSmootherTest {
         }
         assertTrue(maxStep < 1.0, "salto de $maxStep m num quadro (esperado ~0,33 m)")
         // ao fim de 3 s, perto da posição real (atraso do alcance exponencial de poucos metros)
-        near(0.0, distanceM(LatLon(prev.lat, prev.lon), LatLon(-8.0, lon + 10.0 / 111_194.9 * 0.0)), 8.0)
+        // lag estacionário do alcance exponencial ~ v*tau = 2,5 m
+        near(2.5, distanceM(LatLon(prev.lat, prev.lon), LatLon(-8.0, lon)), 2.0)
     }
 
     @Test
@@ -301,15 +312,116 @@ class MotionSmootherTest {
     fun `na rota a predicao segue a curva do traco`() {
         val s = MotionSmoother()
         val path = eastRoute()
-        // 1,5 s antes da curva (a 20 m/s: along 970 m, curva em 1000 m)
-        s.onFix(fix(speed = 20f, bearing = 90f, nanos = 0L, lat = 0.0, lon = 970.0 / 111_194.9), 0L)
-        s.onSnap(path, 970.0, 0.0, false, 0L)
+        // a 20 m/s, 20 m antes da curva (along 980; a curva está em 1000)
+        s.onFix(fix(speed = 20f, bearing = 90f, nanos = 0L, lat = 0.0, lon = 980.0 / 111_194.9), 0L)
+        s.onSnap(path, 980.0, 0.0, false, 0L)
         var now = 0L
-        var f = s.frame(now, true, 17.0)!!
-        repeat(45) { now += sec / 30; f = s.frame(now, true, 17.0)!! } // 1,5 s: along ≈ 1000 m (na curva)
-        // Passou da curva: já está subindo (lat > 0) e sobre a coluna da curva (lon ≈ 1000 m), nunca cortando por fora
-        assertTrue(f.lat >= 0.0)
+        val start = s.frame(now, true, 17.0)!!
+        var f = start
+        repeat(45) { now += sec / 30; f = s.frame(now, true, 17.0)!! } // 1,5 s: alvo em along 1010 (10 m depois da curva)
+        val moved = distanceM(LatLon(start.lat, start.lon), LatLon(f.lat, f.lon))
+        assertTrue(moved > 20.0, "andou só $moved m")
+        // Depois da curva: subiu para o norte (>3 m) e continua na coluna da curva (sem cortar por fora).
+        assertTrue(f.lat * 111_194.9 > 3.0, "norte=${f.lat * 111_194.9}")
         assertTrue(f.lon <= 1000.0 / 111_194.9 + 1e-7)
+        assertTrue(angleDistance(0.0, f.bearingDeg!!) < 45.0, "já girando para o norte: ${f.bearingDeg}")
+        repeat(25) { now += sec / 30; f = s.frame(now, true, 17.0)!! } // (antes de o snap expirar, 3 s) a predição parou no limite; o rumo converge
+        near(0.0, angleDistance(0.0, f.bearingDeg!!), 5.0, "rumo do trecho norte")
+    }
+
+    @Test
+    fun `quadro com dt zero ou negativo nao quebra nem anda`() {
+        val s = MotionSmoother()
+        s.onFix(fix(speed = 10f, bearing = 90f, nanos = 10 * sec), 10 * sec)
+        val a = s.frame(10 * sec, true, 17.0)!!
+        val b = s.frame(10 * sec, true, 17.0)!! // dt zero
+        val c = s.frame(9 * sec, true, 17.0)!! // relógio voltou: dt negativo
+        for (f in listOf(b, c)) {
+            assertFalse(f.lat.isNaN() || f.lon.isNaN() || f.zoom.isNaN() || f.bearingDeg!!.isNaN())
+            near(a.lat, f.lat, 1e-6); near(a.lon, f.lon, 1e-6)
+            near(a.zoom, f.zoom, 1e-9)
+        }
+    }
+
+    @Test
+    fun `passa-baixa de 359 para 1 gira 2 graus para a frente`() {
+        val n = lowPassBearing(359.0, 1.0, 10.0) // tempo longo: converge
+        near(1.0, n, 0.01)
+        val step = lowPassBearing(359.0, 1.0, 1.0 / 30)
+        assertTrue(shortestAngleDelta(359.0, step) in 0.0..2.0, "passo=$step")
+    }
+
+    @Test
+    fun `ao parar sobre a rota mantem o rumo desenhado e nao o do GPS`() {
+        val s = MotionSmoother()
+        val path = eastRoute()
+        var now = 0L
+        // andando: o GPS diz 80, a rota diz 90
+        s.onFix(fix(speed = 10f, bearing = 80f, nanos = now, lat = 0.0, lon = 500.0 / 111_194.9), now)
+        s.onSnap(path, 500.0, 2.0, false, now)
+        var f = s.frame(now, true, 17.0)!!
+        repeat(90) { now += sec / 30; f = s.frame(now, true, 17.0)!! }
+        near(90.0, f.bearingDeg!!, 1.0)
+        // para: o último rumo do GPS (80) não pode puxar a seta de volta
+        now += sec / 30
+        s.onFix(fix(speed = 0f, bearing = 80f, nanos = now, lat = 0.0, lon = 500.0 / 111_194.9), now)
+        repeat(30) { now += sec / 30; f = s.frame(now, true, 17.0)!! }
+        assertFalse(f.moving)
+        near(90.0, f.bearingDeg!!, 1.0)
+    }
+
+    @Test
+    fun `zoom ao trocar de modo comeca no alvo e nao se arrasta`() {
+        val s = MotionSmoother()
+        var now = 0L
+        s.onFix(fix(speed = 0f, bearing = null, nanos = now), now)
+        repeat(10) { now += sec / 30; near(15.0, s.frame(now, false, 15.0)!!.zoom, 1e-9) }
+        // entra na navegação: o zoom já é o alvo (18 parado), não 15 -> 18 a 0,25/s (12 s)
+        now += sec / 30
+        near(18.0, s.frame(now, true, 15.0)!!.zoom, 1e-9)
+        // sai e volta: de novo no alvo
+        now += sec / 30
+        near(16.0, s.frame(now, false, 16.0)!!.zoom, 1e-9)
+        now += sec / 30
+        near(18.0, s.frame(now, true, 16.0)!!.zoom, 1e-9)
+    }
+
+    @Test
+    fun `snap expira sem progresso novo e com fix longe do ponto`() {
+        val path = eastRoute()
+        val s = MotionSmoother()
+        s.onFix(fix(speed = 10f, bearing = 90f, nanos = 0L, lat = 0.0, lon = 500.0 / 111_194.9), 0L)
+        s.onSnap(path, 500.0, 2.0, false, 0L)
+        assertTrue(s.frame(1 * sec, true, 17.0)!!.snapped)
+        assertFalse(s.frame(4 * sec, true, 17.0)!!.snapped, "sem atualização há 4 s")
+
+        val t = MotionSmoother()
+        // fix a ~100 m do ponto do snap (progresso atrasado em relação ao GPS)
+        t.onFix(fix(speed = 10f, bearing = 90f, nanos = 0L, lat = 0.0, lon = 600.0 / 111_194.9), 0L)
+        t.onSnap(path, 500.0, 2.0, false, 0L)
+        assertFalse(t.frame(0L, true, 17.0)!!.snapped)
+    }
+
+    @Test
+    fun `snap tem histerese de desvio (entra abaixo de 25, sai acima de 40)`() {
+        val path = eastRoute()
+        val s = MotionSmoother()
+        s.onFix(fix(speed = 10f, bearing = 90f, nanos = 0L, lat = 0.0, lon = 500.0 / 111_194.9), 0L)
+        s.onSnap(path, 500.0, 30.0, false, 0L)
+        assertFalse(s.frame(0L, true, 17.0)!!.snapped, "30 m não entra")
+        s.onSnap(path, 500.0, 20.0, false, 0L)
+        assertTrue(s.frame(0L, true, 17.0)!!.snapped)
+        s.onSnap(path, 500.0, 35.0, false, 0L)
+        assertTrue(s.frame(0L, true, 17.0)!!.snapped, "35 m mantém")
+        s.onSnap(path, 500.0, 45.0, false, 0L)
+        assertFalse(s.frame(0L, true, 17.0)!!.snapped, "45 m sai")
+    }
+
+    @Test
+    fun `semente do mapa aceita fix velho ou impreciso e depois filtra`() {
+        val now = 100 * sec
+        assertTrue(isLiveFixUsable(now - 60 * sec, 900f, now, hasCurrent = false))
+        assertFalse(isLiveFixUsable(now - 60 * sec, 10f, now, hasCurrent = true))
     }
 
     @Test

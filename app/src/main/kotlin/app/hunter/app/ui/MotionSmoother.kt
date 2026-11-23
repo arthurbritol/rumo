@@ -61,6 +61,13 @@ const val MOTION_SNAP_MAX_DEVIATION_M = 25.0
 /** O progresso da navegação deve cair a no máximo isto do ponto do traçado: senão é de outra rota (recalculada) e é ignorado. */
 const val MOTION_SNAP_CONSISTENCY_M = 15.0
 
+/** Histerese: já sobre o traçado, só sai quando o desvio passa disto (entra abaixo de [MOTION_SNAP_MAX_DEVIATION_M]). */
+const val MOTION_SNAP_EXIT_DEVIATION_M = 40.0
+
+/** O snap expira: sem progresso novo há mais que isto (s), ou com o fix atual a mais que [MOTION_SNAP_MAX_FIX_DISTANCE_M] do ponto, é ignorado. */
+const val MOTION_SNAP_MAX_AGE_S = 3.0
+const val MOTION_SNAP_MAX_FIX_DISTANCE_M = 40.0
+
 /** Zoom adaptativo: [MOTION_ZOOM_NEAR] até [MOTION_ZOOM_SLOW_MPS]; [MOTION_ZOOM_FAR] a partir de [MOTION_ZOOM_FAST_MPS] (~90 km/h). */
 const val MOTION_ZOOM_NEAR = 18.0
 const val MOTION_ZOOM_FAR = 16.0
@@ -116,10 +123,11 @@ data class MotionFrame(
 fun fixAgeMs(nowNanos: Long, fixNanos: Long): Long = (nowNanos - fixNanos) / 1_000_000L
 
 /**
- * Filtro de entrada do mapa: descarta o fix velho (relógio monotônico; sem carimbo, passa) ou pior que
+ * Filtro de entrada do mapa (depois da semente, [hasCurrent]): descarta o fix velho (relógio monotônico; sem carimbo, passa) ou pior que
  * [MOTION_FALLBACK_ACCURACY_M]. O refinamento por quadro (50 m, GPS mudo) fica no [MotionSmoother].
  */
-fun isLiveFixUsable(elapsedNanos: Long?, accuracyM: Float?, nowNanos: Long): Boolean {
+fun isLiveFixUsable(elapsedNanos: Long?, accuracyM: Float?, nowNanos: Long, hasCurrent: Boolean = true): Boolean {
+    if (!hasCurrent) return true // semente (lastKnownLocation): serve de posição inicial/prévia até chegar um fix melhor
     if (elapsedNanos != null && fixAgeMs(nowNanos, elapsedNanos) > LIVE_MAX_AGE_MS) return false
     if (accuracyM != null && accuracyM > MOTION_FALLBACK_ACCURACY_M) return false
     return true
@@ -196,13 +204,14 @@ fun aheadFractionForSpeed(speedMps: Double): Double {
 }
 
 /**
- * Converte a fração da altura útil em metros no chão. 512 px por tile (MapLibre): m/px = 78271.5·cos(lat)/2^zoom.
+ * Converte a fração da altura útil em metros no chão. O MapLibre usa tiles de 512 unidades LÓGICAS (dp), não
+ * pixels físicos: m/dp = 78271.5·cos(lat)/2^zoom. Por isso a altura útil entra em **dp** (pixels ÷ densidade).
  * Com inclinação, o chão aparece encurtado na vertical: divide por cos(tilt) (limitado para não explodir).
  */
-fun aheadMeters(fraction: Double, usableHeightPx: Double, zoom: Double, lat: Double, tiltDeg: Double): Double {
-    val mPerPx = 78_271.516 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom)
+fun aheadMeters(fraction: Double, usableHeightDp: Double, zoom: Double, lat: Double, tiltDeg: Double): Double {
+    val mPerDp = 78_271.516 * cos(Math.toRadians(lat)) / Math.pow(2.0, zoom)
     val foreshortening = 1.0 / max(0.5, cos(Math.toRadians(tiltDeg)))
-    return fraction * usableHeightPx * mPerPx * foreshortening
+    return fraction * usableHeightDp * mPerDp * foreshortening
 }
 
 /** Histerese do "está andando": liga acima de [MOTION_MOVING_ON_MPS], desliga abaixo de [MOTION_MOVING_OFF_MPS]. */
@@ -283,6 +292,7 @@ class MotionSmoother {
     private var drawn: LatLon? = null
     private var drawnBearing: Double? = null
     private var zoom: Double? = null
+    private var zoomWasAdaptive = false
     private var lastFrameNanos: Long? = null
 
     /** @return true se o fix foi aceito para o desenho. */
@@ -317,7 +327,8 @@ class MotionSmoother {
         /** Ponto projetado informado pela navegação; se não coincide com [path] em [alongM], o progresso é de outra rota. */
         snapPoint: LatLon? = null,
     ) {
-        if (path == null || alongM == null || !path.isUsable || offRoute || deviationM >= MOTION_SNAP_MAX_DEVIATION_M) {
+        val limit = if (snapPath != null) MOTION_SNAP_EXIT_DEVIATION_M else MOTION_SNAP_MAX_DEVIATION_M
+        if (path == null || alongM == null || !path.isUsable || offRoute || deviationM >= limit) {
             snapPath = null
             return
         }
@@ -337,6 +348,7 @@ class MotionSmoother {
         drawn = null
         drawnBearing = null
         zoom = null
+        zoomWasAdaptive = false
         lastFrameNanos = null
         hysteresis.reset()
     }
@@ -354,9 +366,16 @@ class MotionSmoother {
         val speed = if (moving) (fix.speedMps ?: 0f).toDouble() else 0.0
 
         // Alvo de posição e de rumo.
-        val path = snapPath
+        var path = snapPath
+        if (path != null) {
+            // O snap expira: progresso velho (sem GPS/progresso novo) ou fix longe do ponto projetado não vale.
+            val stale = (nowNanos - snapStamp) / 1e9 > MOTION_SNAP_MAX_AGE_S
+            val far = distanceM(LatLon(fix.lat, fix.lon), path.pointAt(snapAlong)) > MOTION_SNAP_MAX_FIX_DISTANCE_M
+            if (stale || far) { snapPath = null; path = null }
+        }
         val target: LatLon
-        var targetBearing: Double? = heldBearing
+        // Parado, segura o rumo já desenhado (não troca pelo rumo cru do GPS); só andando o alvo muda.
+        var targetBearing: Double? = if (moving) heldBearing else (drawnBearing ?: heldBearing)
         if (path != null) {
             val ageS = ((nowNanos - snapStamp) / 1e9).coerceIn(0.0, MOTION_PREDICT_MAX_S)
             val ahead = if (speed >= MOTION_PREDICT_MIN_SPEED_MPS) min(speed, MOTION_MAX_PLAUSIBLE_SPEED_MPS) * ageS else 0.0
@@ -391,12 +410,14 @@ class MotionSmoother {
         drawnBearing = b
 
         // Zoom adaptativo (só na navegação); nos demais modos, o fixo.
+        // Ao entrar no modo adaptativo (vindo de zoom fixo) começa direto no alvo; a câmera faz a transição.
         val z = if (!adaptiveZoom) fixedZoom else {
             val zTarget = zoomForSpeed(speed)
             val curZ = zoom
-            if (curZ == null) zTarget else stepZoom(curZ, zTarget, dt)
+            if (curZ == null || !zoomWasAdaptive) zTarget else stepZoom(curZ, zTarget, dt)
         }
-        zoom = z
+        zoom = if (adaptiveZoom) z else null
+        zoomWasAdaptive = adaptiveZoom
 
         return MotionFrame(
             lat = pos.lat,
