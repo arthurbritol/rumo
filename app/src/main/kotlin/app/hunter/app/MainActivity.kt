@@ -70,7 +70,10 @@ import app.hunter.app.ui.HunterTheme
 import app.hunter.app.ui.MapScreen
 import app.hunter.app.ui.PodScreen
 import app.hunter.app.ui.ProfileRoute
+import app.hunter.app.ui.EstadoDaTela
+import app.hunter.app.ui.Orientacao
 import app.hunter.app.ui.Tab
+import app.hunter.app.ui.navegacaoEnxuta
 import app.hunter.app.ui.TripsScreen
 import app.hunter.app.ui.UpdateBanner
 import app.hunter.app.ui.formatFriendElapsed
@@ -320,7 +323,9 @@ private fun HunterRoot(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             // Durante a navegação a barra some: mais mapa e nenhum toque acidental com a moto andando.
-            if (!(nav.active && tab == Tab.Map)) {
+            val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val showTabs = navegacaoEnxuta(EstadoDaTela(navegando = nav.active), if (landscape) Orientacao.Paisagem else Orientacao.Retrato).abas
+            if (showTabs || tab != Tab.Map) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),

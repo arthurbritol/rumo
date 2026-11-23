@@ -180,6 +180,8 @@ fun HunterMap(
     cameraNonce: Int = 0,
     paddingTopDp: Int = 0,
     paddingBottomDp: Int = 0,
+    /** Faixa coberta à esquerda (painel lateral da navegação em paisagem). */
+    paddingStartDp: Int = 0,
     interactive: Boolean = true,
     onLongPress: ((LatLon) -> Unit)? = null,
     onFuelStationClick: (ResolvedFuelStation) -> Unit = {},
@@ -315,8 +317,8 @@ fun HunterMap(
         }
     }
 
-    LaunchedEffect(map, paddingTopDp, paddingBottomDp) {
-        map?.setPadding(0, (paddingTopDp * density).toInt(), 0, (paddingBottomDp * density).toInt())
+    LaunchedEffect(map, paddingTopDp, paddingBottomDp, paddingStartDp) {
+        map?.setPadding((paddingStartDp * density).toInt(), (paddingTopDp * density).toInt(), 0, (paddingBottomDp * density).toInt())
     }
 
     LaunchedEffect(style, route) {
@@ -398,7 +400,7 @@ fun HunterMap(
     }
 
     // Enquadramento (rota inteira / viagem).
-    LaunchedEffect(map, style, camera, cameraNonce, paddingTopDp, paddingBottomDp) {
+    LaunchedEffect(map, style, camera, cameraNonce, paddingTopDp, paddingBottomDp, paddingStartDp) {
         val m = map ?: return@LaunchedEffect
         if (style == null) return@LaunchedEffect
         val c = camera

@@ -16,6 +16,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -233,6 +245,14 @@ fun MapScreen(
     }
 
     val navigating = nav.active
+    // Navegação enxuta: o que aparece depende de estar navegando e da orientação (ver NavLayout.kt).
+    val landscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val el = navegacaoEnxuta(
+        EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow),
+        if (landscape) Orientacao.Paisagem else Orientacao.Retrato,
+    )
+    val leftInset = WindowInsets.safeDrawing.asPaddingValues().calculateLeftPadding(LayoutDirection.Ltr)
+    val sidePanelDp = if (el.painelLateral) NAV_PANEL_WIDTH.value.toInt() + leftInset.value.toInt() + 8 else 0
     // Estes valores são lembrados: sem isso a lista era recriada a cada fix de GPS (1 Hz) e o mapa
     // reenviava as rotas inteiras ao motor de renderização a cada segundo.
     val previewRoute = preview?.route
@@ -276,8 +296,20 @@ fun MapScreen(
             destination = if (navigating) nav.destination?.latLon else preview?.place?.latLon,
             camera = camera,
             cameraNonce = nonce,
-            paddingTopDp = if (navigating) 200 else if (preview != null) 110 else 0,
-            paddingBottomDp = if (navigating) 120 else if (preview != null) 440 else if (selectedFuelStation != null) 360 else 0,
+            paddingTopDp = when {
+                el.bannerManobra -> 150
+                navigating -> 24
+                preview != null -> 110
+                else -> 0
+            },
+            paddingBottomDp = when {
+                el.barraInferior -> 100
+                navigating -> 24
+                preview != null -> 440
+                selectedFuelStation != null -> 360
+                else -> 0
+            },
+            paddingStartDp = sidePanelDp,
             onLongPress = {
                 if (!navigating) {
                     // Procurando rolê e fora de um encontro, segurar no mapa marca o ponto de uma proposta.
@@ -291,7 +323,7 @@ fun MapScreen(
                     }
                 }
             },
-            onFuelStationClick = { vm.selectFuelStation(it) },
+            onFuelStationClick = { if (!navigating) vm.selectFuelStation(it) },
             onNearbyClick = { selectedRider = it; selectedProposal = null },
             onProposalClick = {
                 // Em encontro (ou esperando resposta) as propostas dos outros não abrem cartão.
@@ -312,18 +344,19 @@ fun MapScreen(
         )
 
         // Controles flutuantes na lateral do mapa (Camada de postos + Centralizar)
-        if (!searching && preview == null) {
+        if (!searching && preview == null && (el.camadas || el.recentralizar)) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End)) else Modifier)
                     .padding(
                         end = 16.dp,
                         bottom = when {
+                            navigating -> if (landscape) 16.dp else 104.dp
                             selectedFuelStation != null -> 340.dp
                             rider != null && !navigating -> 250.dp
                             nearbyCardShown && !navigating -> 300.dp
                             encounterCardShown && !navigating -> 430.dp
-                            navigating -> 190.dp
                             rec.isRecording -> 210.dp
                             else -> 190.dp
                         },
@@ -331,13 +364,13 @@ fun MapScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 horizontalAlignment = Alignment.End,
             ) {
-                SquircleIconButton(
+                if (el.camadas) SquircleIconButton(
                     iconRes = R.drawable.fa_gas_pump,
                     description = "Camada de postos de combustível",
                     selected = fuelLayerEnabled,
                     onClick = { vm.toggleFuelLayer() },
                 )
-                if (trafficTileUrl != null) {
+                if (el.camadas && trafficTileUrl != null) {
                     SquircleIconButton(
                         iconRes = R.drawable.fa_traffic_light,
                         description = "Camada de trânsito",
@@ -345,7 +378,7 @@ fun MapScreen(
                         onClick = { vm.toggleTraffic() },
                     )
                 }
-                if (nearbyAvailable) {
+                if (el.camadas && nearbyAvailable) {
                     SquircleIconButton(
                         iconRes = R.drawable.fa_motorcycle,
                         description = "Procurar rolê",
@@ -353,7 +386,7 @@ fun MapScreen(
                         onClick = { showNearbySheet = true },
                     )
                 }
-                if (!follow) {
+                if (el.recentralizar) {
                     CircleButton(
                         icon = Icons.Default.LocationOn,
                         description = "Centralizar",
@@ -367,8 +400,10 @@ fun MapScreen(
 
         // ----- Navegação -----
         if (navigating) {
-            NavBanner(vm, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp))
-            NavBottom(vm, Modifier.align(Alignment.BottomCenter).padding(12.dp), onStop = { TrackingService.stop(context); vm.stopNavigationNow() })
+            val stopNav = { TrackingService.stop(context); vm.stopNavigationNow() }
+            if (el.bannerManobra) NavBannerCompact(vm, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp))
+            if (el.barraInferior) NavBarCompact(vm, onStop = stopNav, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp))
+            if (el.painelLateral) NavSidePanel(vm, onStop = stopNav, leftInset = leftInset, modifier = Modifier.align(Alignment.CenterStart))
             if (nav.arrived) {
                 AlertDialog(
                     onDismissRequest = {},
@@ -387,7 +422,7 @@ fun MapScreen(
 
         // ----- Card de Detalhes do Posto -----
         AnimatedVisibility(
-            visible = selectedFuelStation != null,
+            visible = selectedFuelStation != null && !navigating,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier
@@ -426,13 +461,22 @@ fun MapScreen(
             )
         }
         // O cartão do encontro fica acima do painel inferior (que continua lá); com navegação ativa, só a pílula de resumo.
-        if (pv == null && selectedFuelStation == null && rider == null) {
+        // Navegando: só a pílula de resumo, compacta (retrato: acima da barra; paisagem: canto superior direito).
+        if (el.pilulaEncontro) {
+            (encontro as? EncontroUiState.Ativo)?.let { e ->
+                val chipMod = if (landscape) {
+                    Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.End)).padding(8.dp)
+                } else {
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp)
+                }
+                NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = chipMod)
+            }
+        }
+        if (!navigating && pv == null && selectedFuelStation == null && rider == null) {
             val acima = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 200.dp)
             val e = encontro
             if (e is EncontroUiState.Ativo) {
-                if (navigating) {
-                    NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 136.dp))
-                } else if (encounterCardShown) {
+                if (encounterCardShown) {
                     NearbyEncounterCard(
                         e,
                         onSair = nearbyVm::sair,
@@ -507,7 +551,7 @@ fun MapScreen(
         }
 
         // ----- Ocioso / gravando -----
-        if (!navigating && pv == null && selectedFuelStation == null) {
+        if (el.busca && pv == null && selectedFuelStation == null) {
             Column(
                 Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).fillMaxWidth(),
             ) {
@@ -888,43 +932,106 @@ private fun FuelAdviceBlock(vm: HunterViewModel, pv: PreviewUi) {
 
 // ---------------------------------------------------------------- navegação
 
+
+/** Largura do painel lateral da navegação em paisagem (sem contar a área segura à esquerda). */
+private val NAV_PANEL_WIDTH = 224.dp
+
+private val NAV_SHAPE = RoundedCornerShape(22.dp)
+
 @Composable
-private fun NavBanner(vm: HunterViewModel, modifier: Modifier) {
+private fun NavSurface(modifier: Modifier, shape: androidx.compose.ui.graphics.Shape = NAV_SHAPE, content: @Composable () -> Unit) {
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        shadowElevation = 12.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+        content = content,
+    )
+}
+
+/** Estado de "recalculando" / "preparando" no lugar da manobra. */
+@Composable
+private fun NavWaiting(rerouting: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+        Text(if (rerouting) "Recalculando rota…" else "Preparando navegação…", style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+@Composable
+private fun NavSpeed(kmh: Int) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("$kmh", fontSize = 32.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+        Text("km/h", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun NavVoiceToggle(voice: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (voice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.size(48.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                if (voice) "Voz" else "Mudo",
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                color = if (voice) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavStopButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(16.dp), color = Bad, modifier = modifier) {
+        Box(Modifier.height(48.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+            Text("Encerrar", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun ConfirmStopDialog(show: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    if (!show) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Encerrar navegação?") },
+        text = { Text("A viagem gravada até aqui será salva no histórico.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Encerrar", color = Bad) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Continuar") } },
+    )
+}
+
+/** Retrato: banner de manobra compacto no topo (ícone, distância e via). */
+@Composable
+private fun NavBannerCompact(vm: HunterViewModel, modifier: Modifier) {
     val nav by vm.nav.collectAsStateWithLifecycle()
     val p = nav.progress
-    FloatingCard(modifier) {
+    NavSurface(modifier.fillMaxWidth()) {
         if (nav.rerouting || p == null) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
-                Text(if (nav.rerouting) "Recalculando rota…" else "Preparando navegação…", style = MaterialTheme.typography.titleMedium)
-            }
+            Box(Modifier.padding(16.dp)) { NavWaiting(nav.rerouting) }
         } else {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(
-                    Modifier.size(84.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(22.dp)),
+                    Modifier.size(64.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center,
-                ) { ManeuverGlyph(p.upcoming.type, 58.dp, MaterialTheme.colorScheme.onPrimary) }
+                ) { ManeuverGlyph(p.upcoming.type, 44.dp, MaterialTheme.colorScheme.onPrimary) }
                 Column(Modifier.weight(1f)) {
-                    Text(fmtDist(p.distanceToUpcomingM), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black)
-                    Text(
-                        p.upcoming.instruction,
-                        style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            p.then?.takeIf { !it.isDestination }?.let { next ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Depois", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ManeuverGlyph(next.type, 22.dp, MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(next.streetName ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(fmtDist(p.distanceToUpcomingM), fontSize = 30.sp, fontWeight = FontWeight.Black)
+                    Text(p.upcoming.instruction, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
     }
 }
 
+/** Retrato: barra fina embaixo (velocidade, chegada/tempo/distância, voz, encerrar). */
 @Composable
-private fun NavBottom(vm: HunterViewModel, modifier: Modifier, onStop: () -> Unit) {
+private fun NavBarCompact(vm: HunterViewModel, onStop: () -> Unit, modifier: Modifier) {
     val nav by vm.nav.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
     val voice by vm.voice.collectAsStateWithLifecycle()
@@ -932,48 +1039,74 @@ private fun NavBottom(vm: HunterViewModel, modifier: Modifier, onStop: () -> Uni
     val p = nav.progress
     val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f), shadowElevation = 12.dp, modifier = Modifier.size(84.dp)) {
-                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Text("$kmh", fontSize = 30.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    Text("km/h", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+    NavSurface(modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NavSpeed(kmh)
+            Column(Modifier.weight(1f)) {
+                Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                Text(
+                    p?.let { "${fmtEta(it.remainingS)} · ${fmtDist(it.remainingM)}" } ?: "Calculando…",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
-            SelectChip(if (voice) "Voz ligada" else "Voz desligada", voice, vm::toggleVoice)
+            NavVoiceToggle(voice, vm::toggleVoice)
+            NavStopButton({ confirm = true })
         }
-        FloatingCard {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    }
+    ConfirmStopDialog(confirm, onConfirm = { confirm = false; onStop() }, onDismiss = { confirm = false })
+}
+
+/** Paisagem: coluna estreita à esquerda (manobra, velocidade, chegada, voz e encerrar); o mapa fica com o resto. */
+@Composable
+private fun NavSidePanel(vm: HunterViewModel, onStop: () -> Unit, leftInset: Dp, modifier: Modifier) {
+    val nav by vm.nav.collectAsStateWithLifecycle()
+    val rec by vm.recording.collectAsStateWithLifecycle()
+    val voice by vm.voice.collectAsStateWithLifecycle()
+    var confirm by remember { mutableStateOf(false) }
+    val p = nav.progress
+    val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
+
+    NavSurface(
+        modifier.fillMaxHeight().width(NAV_PANEL_WIDTH + leftInset),
+        shape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(start = leftInset + 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (nav.rerouting || p == null) {
+                NavWaiting(nav.rerouting)
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) { ManeuverGlyph(p.upcoming.type, 40.dp, MaterialTheme.colorScheme.onPrimary) }
+                    Text(fmtDist(p.distanceToUpcomingM), fontSize = 28.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                }
+                Text(p.upcoming.instruction, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NavSpeed(kmh)
                 Column(Modifier.weight(1f)) {
-                    Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black)
+                    Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1)
                     Text(
                         p?.let { "${fmtEta(it.remainingS)} · ${fmtDist(it.remainingM)}" } ?: "Calculando…",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
-                    nav.destination?.let {
-                        Text(it.name, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
                 }
-                Surface(
-                    onClick = { confirm = true },
-                    shape = RoundedCornerShape(18.dp),
-                    color = Bad,
-                ) {
-                    Box(Modifier.height(56.dp).padding(horizontal = 22.dp), contentAlignment = Alignment.Center) {
-                        Text("Encerrar", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                    }
-                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NavVoiceToggle(voice, vm::toggleVoice)
+                NavStopButton({ confirm = true }, Modifier.weight(1f))
             }
         }
     }
-
-    if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("Encerrar navegação?") },
-            text = { Text("A viagem gravada até aqui será salva no histórico.") },
-            confirmButton = { TextButton(onClick = { confirm = false; onStop() }) { Text("Encerrar", color = Bad) } },
-            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Continuar") } },
-        )
-    }
+    ConfirmStopDialog(confirm, onConfirm = { confirm = false; onStop() }, onDismiss = { confirm = false })
 }

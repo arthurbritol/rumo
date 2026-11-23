@@ -19,6 +19,9 @@ undefined
 - **Amigos: reciprocidade e explicação**: a aba Amigos explica quando a localização é publicada e cada amigo mostra "Você compartilha com X" e "X compartilha com você" / "X ainda não compartilha com você".
 - **"Visto por último"**: quem recebeu autorização de localização vê "online agora" ou "Visto há N min/h/dias" no cartão do amigo (novo documento `presenca/{uid}`). **Requer publicar as regras** (`firebase deploy --only firestore:rules`); sem isso o app só não mostra o texto.
 
+### Alterado
+- **Navegação enxuta**: com o GPS ativo a tela mostra só o essencial. Em retrato: banner baixo de manobra no topo (ícone, distância e via) e barra fina embaixo (velocidade, chegada, tempo e distância restantes, Voz/Mudo e Encerrar). Em paisagem: uma coluna estreita à esquerda com a mesma informação e o mapa ocupando o resto da tela. Busca, faixas, botões de postos/trânsito/rolê, cartões e a barra de abas ficam ocultos e voltam ao encerrar; só o botão Centralizar (quando o mapa é movido) e a pílula do encontro, se houver, permanecem. Respeita as áreas seguras do sistema. Roteiro em `docs/TESTES-MANUAIS-NAVEGACAO.md`.
+
 ### Corrigido
 - **Amigo não aparecia no mapa mesmo com o compartilhamento ligado**: a posição só era publicada com o Pod conectado; agora também com o app aberto.
 - **Robustez da localização compartilhada**: erro ao observar um amigo ou as permissões era engolido e nunca refeito; agora é registrado e tentado de novo com recuo (até 60 s). GPS sem permissão concedida na hora volta a tentar depois.
