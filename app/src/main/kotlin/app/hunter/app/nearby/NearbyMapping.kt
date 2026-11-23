@@ -139,6 +139,18 @@ fun textoDoErro(codigo: String, restanteMs: Long?): String? = when (codigo) {
 }
 
 const val TEXTO_FORA_DA_AREA = "Escolha um ponto dentro da sua área de busca"
+/**
+ * Aviso ao propor um ponto longe de quem propõe: o servidor só mostra a proposta a quem está a até [raioKm] do PONTO,
+ * então, se o ponto fica além do raio de quem propõe, ele mesmo pode não ser visto por ninguém por perto. Não bloqueia.
+ * `null` quando a posição é desconhecida ou o ponto está dentro do raio.
+ */
+fun avisoPontoLonge(meLat: Double?, meLon: Double?, ptLat: Double, ptLon: Double, raioKm: Int): String? {
+    if (meLat == null || meLon == null) return null
+    val km = Geo.distanceM(meLat, meLon, ptLat, ptLon) / 1000.0
+    if (km <= raioKm) return null
+    return "Esse ponto fica a " + String.format(PT_BR, "%.0f", km) + " km de você. Só quem estiver a até $raioKm km do ponto vê o encontro."
+}
+
 const val TEXTO_SEM_RESPOSTA = "O servidor não respondeu. Tente de novo"
 
 fun textoDoFim(motivo: MotivoFim): String = when (motivo) {

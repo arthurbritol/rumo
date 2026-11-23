@@ -56,7 +56,7 @@ import app.hunter.nearby.Proposta
 import app.hunter.nearby.Ritmo
 import app.hunter.nearby.Vizinho
 
-private const val RAIO_PADRAO_KM = 5
+internal const val RAIO_PADRAO_KM = 5
 
 /** Folha "Procurando rolê": três escolhas, o raio (5 a 20 km) e o botão de ligar/desligar. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -313,7 +313,14 @@ fun NearbyProposalCard(proposta: Proposta, aguardando: Boolean, onEntrar: () -> 
 /** Ponto marcado com o dedo: escolhe as vagas (2 a 8, com você) e propõe. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NearbyCreateProposalCard(aguardando: Boolean, onPropor: (vagas: Int) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun NearbyCreateProposalCard(
+    aguardando: Boolean,
+    onPropor: (vagas: Int) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Aviso (não bloqueia) quando o ponto fica além do raio de quem propõe; ver `avisoPontoLonge`. */
+    aviso: String? = null,
+) {
     var vagas by rememberSaveable { mutableStateOf(4) }
     FloatingCard(modifier) {
         CardHeader("Propor encontro neste ponto", onClose)
@@ -325,6 +332,7 @@ fun NearbyCreateProposalCard(aguardando: Boolean, onPropor: (vagas: Int) -> Unit
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             (2..8).forEach { n -> SelectChip(n.toString(), vagas == n, { vagas = n }) }
         }
+        if (aviso != null) Text(aviso, style = MaterialTheme.typography.bodyMedium, color = Warn)
         PrimaryButton(if (aguardando) "Propondo…" else "Propor encontro", { onPropor(vagas) }, Modifier.fillMaxWidth(), enabled = !aguardando)
     }
 }
@@ -342,6 +350,8 @@ fun NearbyEncounterCard(
     enviando: Boolean = false,
     onBloquear: (String) -> Unit = {},
     onDenunciar: (String, MotivoDenuncia) -> Unit = { _, _ -> },
+    /** Abre a prévia de rota até o ponto do encontro; o cartão só aparece fora da navegação (na navegação vai a pílula). */
+    onIrAtePonto: (() -> Unit)? = null,
 ) {
     val enc = ativo.encontro
     FloatingCard(modifier, scrollable = true) {
@@ -369,6 +379,7 @@ fun NearbyEncounterCard(
             }
             }
         }
+        if (onIrAtePonto != null) PrimaryButton("Ir até o ponto", onIrAtePonto, Modifier.fillMaxWidth())
         SecondaryButton(if (ativo.souProponente) "Cancelar encontro" else "Sair do encontro", onSair)
     }
 }

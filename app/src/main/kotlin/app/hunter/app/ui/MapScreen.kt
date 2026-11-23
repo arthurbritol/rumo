@@ -80,6 +80,7 @@ import app.hunter.app.fuel.ResolvedFuelStation
 import app.hunter.app.nearby.EncontroUiState
 import app.hunter.app.nearby.NearbyUiState
 import app.hunter.app.nearby.NearbyViewModel
+import app.hunter.app.nearby.avisoPontoLonge
 import app.hunter.app.nearby.distanciaAproximada
 import app.hunter.app.nearby.nearbyViewModelFactory
 import app.hunter.nearby.Ponto
@@ -440,6 +441,7 @@ fun MapScreen(
                         enviando = nearbyEnviando,
                         onBloquear = nearbyVm::bloquear,
                         onDenunciar = nearbyVm::denunciar,
+                        onIrAtePonto = { vm.previewAt(app.hunter.nav.LatLon(e.encontro.ponto.lat, e.encontro.ponto.lon)) },
                     )
                 }
             } else if (e is EncontroUiState.Encerrado && encounterCardShown && !navigating) {
@@ -466,6 +468,7 @@ fun MapScreen(
                         onPropor = { vagas -> nearbyVm.proporPonto(ponto.lat, ponto.lon, vagas) },
                         onClose = { proposalPoint = null },
                         modifier = cardModifier,
+                        aviso = avisoPontoLonge(live?.latitude, live?.longitude, ponto.lat, ponto.lon, nearbyPref?.raioKm ?: RAIO_PADRAO_KM),
                     )
                 } else if (proposal != null) {
                     NearbyProposalCard(

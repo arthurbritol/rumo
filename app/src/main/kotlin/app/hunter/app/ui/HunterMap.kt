@@ -627,6 +627,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addLayer(
         SymbolLayer("friends-label", SRC_FRIENDS).withProperties(
             textField(Expression.get("label")),
+            textFont(arrayOf("Noto Sans Bold")),
             textSize(11f),
             textColor(if (dark) "#FFFFFF" else "#0F172A"),
             textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),
@@ -652,6 +653,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
             textField(Expression.get("label")),
+            textFont(arrayOf("Noto Sans Bold")),
             textSize(12f),
             textColor(if (dark) "#FFFFFF" else "#0F172A"),
             textHaloColor(if (dark) "#0B0D10" else "#FFFFFF"),

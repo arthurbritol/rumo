@@ -108,3 +108,10 @@ Precisa do servidor com a tarefa 22 publicada, quatro aparelhos ou contas (A, B,
 - [ ] 10.7 O dono lista as denúncias (`GET /admin/denuncias?uid=<uid de D>` com `Authorization: Bearer <ADMIN_TOKEN>`) e reverte com `POST /admin/suspensao?uid=<uid de D>&acao=tirar`: responde `{"uid":"...","suspenso":false}`. Em até 5 min (ou ao reconectar) D volta a poder procurar. As denúncias antigas deixam de contar: só novas denúncias podem suspender de novo.
 - [ ] 10.8 Sem o token ou com token errado, as rotas `/admin` respondem 401.
 
+## Cenário 11: proposta visível, aviso ao propor longe e ir até o ponto (pacote 1 pós-campo)
+
+Dois aparelhos (A e B), contas diferentes, os dois procurando, a menos de 5 km um do outro.
+
+- [ ] 11.1 O A segura no mapa perto dele e propõe: no B aparece o pino da proposta **com o rótulo "1 de N"** (ícone e texto). Se o rótulo não aparecer, anote o modelo e a versão do Android.
+- [ ] 11.2 O A segura num ponto a mais de 5 km dele (raio padrão): o cartão mostra "Esse ponto fica a X km de você. Só quem estiver a até 5 km do ponto vê o encontro.", e ainda deixa propor. Num ponto a menos de 5 km, sem aviso.
+- [ ] 11.3 Com o encontro em andamento, no cartão há **Ir até o ponto**: toque e a prévia de rota até o ponto abre; "Iniciar" começa a navegação e o cartão vira a pílula "Encontro · X km · Y min".

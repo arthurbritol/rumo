@@ -104,3 +104,30 @@ class NearbyEncounterMappingTest {
         assertEquals(RiderFeature("s", -20.0, -40.0, 0.0, false, RIDER_ICON), com.toRiderFeatureOrNull())
     }
 }
+
+class AvisoPontoLongeTest {
+    @Test
+    fun pontoDentroDoRaioNaoAvisa() {
+        // ~1,1 km ao norte
+        assertEquals(null, avisoPontoLonge(-20.0, -40.0, -19.99, -40.0, 5))
+    }
+
+    @Test
+    fun pontoForaDoRaioAvisaComDistanciaERaio() {
+        // 0,1 grau de latitude = ~11,1 km
+        assertEquals(
+            "Esse ponto fica a 11 km de você. Só quem estiver a até 5 km do ponto vê o encontro.",
+            avisoPontoLonge(-20.0, -40.0, -19.9, -40.0, 5),
+        )
+    }
+
+    @Test
+    fun semPosicaoNaoAvisa() {
+        assertEquals(null, avisoPontoLonge(null, null, -19.9, -40.0, 5))
+    }
+
+    @Test
+    fun raioMaiorQueADistanciaNaoAvisa() {
+        assertEquals(null, avisoPontoLonge(-20.0, -40.0, -19.9, -40.0, 12))
+    }
+}

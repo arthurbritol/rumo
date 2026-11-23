@@ -13,6 +13,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - **Rolê por perto, etapa 4 (virar amigo, lado do app e servidor)**: no cartão "Encontro encerrado", cada participante ("Motociclista N") tem "Quero ser amigo"; vira "Marcado" depois que o servidor confirma. O servidor só revela a identidade quando as duas pessoas marcam (a marca vale 24 h e uma confirmação pendente fica 72 h); então o app envia o convite de amizade uma vez, mostra "Convite de amizade enviado" (ou "Vocês agora são amigos" se a outra pessoa já tinha convidado) e confirma o recebimento. Quem já é amigo ou está bloqueado é ignorado sem aviso. A confirmação chega com a busca ligada.
 
 undefined
+- **Rolê por perto: aviso ao propor longe** e **"Ir até o ponto"**: ao marcar um ponto a mais que o seu raio de busca de você, o cartão avisa "Esse ponto fica a X km de você. Só quem estiver a até R km do ponto vê o encontro." (sem bloquear). No cartão do encontro em andamento, o botão "Ir até o ponto" abre a prévia de rota do app até o ponto (durante a navegação o cartão vira a pílula de resumo, então o botão não aparece).
+
+### Corrigido
+- **Rolê por perto: proposta não aparecia no outro aparelho**: os rótulos do ponto da proposta ("N de M") e dos amigos no mapa não tinham fonte definida; o estilo do mapa (OpenFreeMap) não serve a fonte padrão, então o símbolo (ícone e texto) podia nem ser desenhado. Agora essas camadas usam "Noto Sans Bold", como as de combustível.
 
 ## [0.7.19]
 
