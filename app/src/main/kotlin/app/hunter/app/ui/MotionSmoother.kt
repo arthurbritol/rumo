@@ -78,6 +78,9 @@ const val MOTION_AHEAD_MAX_FRACTION = 0.22
 /** Intervalo máximo entre quadros considerado nos cálculos (um quadro travado não pode "teleportar" nada). */
 private const val MOTION_MAX_DT_S = 0.25
 
+/** No ViewModel: leitura mais velha que isto (típico do `lastKnownLocation` na partida) não vai para o mapa. */
+const val LIVE_MAX_AGE_MS = 10_000L
+
 private const val M_PER_DEG = 111_194.9
 
 // ---------- Entrada / saída ----------
@@ -111,6 +114,16 @@ data class MotionFrame(
 
 /** Idade (ms) de um fix pelo relógio monotônico. */
 fun fixAgeMs(nowNanos: Long, fixNanos: Long): Long = (nowNanos - fixNanos) / 1_000_000L
+
+/**
+ * Filtro de entrada do mapa: descarta o fix velho (relógio monotônico; sem carimbo, passa) ou pior que
+ * [MOTION_FALLBACK_ACCURACY_M]. O refinamento por quadro (50 m, GPS mudo) fica no [MotionSmoother].
+ */
+fun isLiveFixUsable(elapsedNanos: Long?, accuracyM: Float?, nowNanos: Long): Boolean {
+    if (elapsedNanos != null && fixAgeMs(nowNanos, elapsedNanos) > LIVE_MAX_AGE_MS) return false
+    if (accuracyM != null && accuracyM > MOTION_FALLBACK_ACCURACY_M) return false
+    return true
+}
 
 /** Menor diferença angular alvo − atual, em (−180, 180]. */
 fun shortestAngleDelta(from: Double, to: Double): Double {

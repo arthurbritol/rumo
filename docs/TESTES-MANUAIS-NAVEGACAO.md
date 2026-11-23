@@ -30,3 +30,19 @@ Preparação: Rumo instalado, localização permitida; se possível, conta logad
 
 - [ ] Gire de retrato para paisagem e de volta no meio de uma navegação: ela continua (rota, voz, gravação); o layout troca entre banner+barra e coluna lateral sem travar.
 - [ ] Ao chegar ao destino aparece "Você chegou!" com **Concluir viagem**, nas duas orientações.
+
+## 4. Movimento do mapa (estilo Waze)
+
+Teste em movimento real (moto ou carro), com a navegação ativa e rotação ligada.
+
+- [ ] **Fluidez**: a moto e o mapa deslizam continuamente (sem "pulinhos" de 1 em 1 segundo); o mapa não fica atrás da moto nem a moto "corre" à frente do mapa.
+- [ ] **Curva fechada** (retorno, cotovelo de 90° ou rotatória): o mapa gira pelo caminho curto, sem dar a volta longa e sem estalo; a seta fica sobre o traçado da rota e aponta no sentido da rota.
+- [ ] **Parar no semáforo e voltar**: parado, o mapa e a seta ficam quietos (não giram nem andam com a deriva do GPS); ao arrancar, voltam a andar e girar sem solavanco.
+- [ ] **Zoom**: devagar ou parado o mapa fica mais perto (cerca de zoom 18); a ~90 km/h fica mais aberto (cerca de zoom 16), mudando devagar. A moto fica no terço inferior da tela, mais à frente quanto mais rápido; banner e barra não a cobrem.
+- [ ] **Túnel / sem GPS**: ao perder o sinal o marcador anda no máximo ~1,5 s à frente e para (não "voa"); ao voltar o sinal, ele retoma sem atravessar o mapa em disparada.
+- [ ] **Rumo ausente**: ao sair de um estacionamento ou parado a seta mantém a última direção (não vira para o norte).
+- [ ] **Rotação desligada**: com a rotação do mapa desligada, o norte fica para cima, o mapa só desloca (sem girar) e a seta gira sozinha.
+- [ ] **Longe da rota** (mais de ~25 m, ou fora da rota): a seta segue o GPS suavizado e não fica "grudada" no traçado; ao recalcular a rota ela volta a seguir o novo traçado.
+- [ ] **Mexer no mapa**: arrastar o mapa para de seguir (aparece **Centralizar**); tocar em **Centralizar** volta a seguir.
+- [ ] **Segundo plano**: ir para outro app e voltar não trava nem deixa a câmera presa; o app não consome CPU em segundo plano (o laço de quadros para).
+- [ ] **Desempenho e bateria**: em uma hora de navegação o aparelho não esquenta anormalmente, o mapa mantém ~60 fps e a bateria cai em ritmo parecido com o de outro app de navegação.

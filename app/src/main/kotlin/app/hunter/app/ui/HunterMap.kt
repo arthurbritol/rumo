@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.SystemClock
 import android.view.Gravity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -19,6 +20,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.hunter.app.fuel.PriceSource
 import app.hunter.app.fuel.ResolvedFuelStation
@@ -110,7 +115,13 @@ sealed interface MapCamera {
     data object Free : MapCamera
 
     /** Segue a posição; [rotate] gira o mapa com o rumo (modo navegação), [tilt] inclina. */
-    data class Follow(val zoom: Double = 16.0, val tilt: Double = 0.0, val rotate: Boolean = false) : MapCamera
+    data class Follow(
+        val zoom: Double = 16.0,
+        val tilt: Double = 0.0,
+        val rotate: Boolean = false,
+        /** Zoom que varia com a velocidade (modo navegação); [zoom] vira só o ponto de partida. */
+        val adaptive: Boolean = false,
+    ) : MapCamera
 
     /** Enquadra todos os [points] (pré-visualização de rota, detalhe de viagem). */
     data class Fit(val points: List<LatLon>) : MapCamera
@@ -175,6 +186,8 @@ fun HunterMap(
     altRoutes: List<List<LatLon>> = emptyList(),
     trail: List<TrackPoint>? = null,
     destination: LatLon? = null,
+    /** Progresso da navegação (só durante a navegação): permite desenhar o marcador sobre o traçado. */
+    navProgress: app.hunter.nav.NavProgress? = null,
     camera: MapCamera = MapCamera.Free,
     /** Muda para reaplicar a câmera (ex.: botão "centralizar"). */
     cameraNonce: Int = 0,
@@ -200,7 +213,7 @@ fun HunterMap(
         MapLibre.getInstance(context)
         MapView(context).also {
             it.onCreate(null)
-            it.setMaximumFps(30) // menos GPU/bateria; a câmera já é suavizada
+            it.setMaximumFps(30) // fora do modo seguir: menos GPU/bateria (sobe a 60 enquanto segue; ver abaixo)
         }
     }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -389,12 +402,31 @@ fun HunterMap(
         }
         src.setGeoJson(fuelStationsFeatures(fuelStations))
     }
-    LaunchedEffect(style, me?.timeMs, me?.latitude, me?.longitude) {
+    // Movimento estilo Waze: o suavizador recebe os fixes (já filtrados por idade/precisão) e o progresso da
+    // navegação; o laço por quadro (abaixo) lê dele a posição, o rumo e o zoom a desenhar.
+    val smoother = remember { MotionSmoother() }
+    val following = camera is MapCamera.Follow && me != null
+    LaunchedEffect(me) {
+        me?.let { smoother.onFix(it.toMotionFix(), SystemClock.elapsedRealtimeNanos()) }
+    }
+    val routePath = remember(route) { route?.takeIf { it.size >= 2 }?.let { RoutePath(it) } }
+    LaunchedEffect(navProgress, routePath) {
+        val pr = navProgress
+        smoother.onSnap(
+            routePath, pr?.alongM, pr?.deviationM ?: Double.MAX_VALUE, pr?.offRoute ?: true,
+            SystemClock.elapsedRealtimeNanos(), pr?.let { LatLon(it.snapLat, it.snapLon) },
+        )
+    }
+
+    // Marcador "eu" a 1 Hz (câmera livre): o laço por quadro cuida dele enquanto segue.
+    // O rumo nunca vira 0° por falta de rumo: usa o último válido.
+    LaunchedEffect(style, me?.timeMs, me?.latitude, me?.longitude, following) {
+        if (following) return@LaunchedEffect
         val src = style?.getSourceAs<GeoJsonSource>(SRC_ME) ?: return@LaunchedEffect
         val f = me?.let {
-            Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)).also { ft ->
-                ft.addNumberProperty("b", (it.bearingDeg ?: 0f).toDouble())
-            }
+            val b = if ((it.speedMps ?: 0f) > MOTION_MOVING_ON_MPS && it.bearingDeg != null) it.bearingDeg!!.toDouble()
+            else smoother.lastBearing ?: it.bearingDeg?.toDouble() ?: 0.0
+            ownFeature(it.latitude, it.longitude, b)
         }
         src.setGeoJson(f?.let { FeatureCollection.fromFeature(it) } ?: FeatureCollection.fromFeatures(emptyList<Feature>()))
     }
@@ -416,23 +448,80 @@ fun HunterMap(
         m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 700)
     }
 
-    // Seguir o motociclista.
-    LaunchedEffect(map, style, camera, cameraNonce, me?.timeMs) {
+    // Seguir o motociclista: câmera e marcador atualizados a cada quadro (30-60 fps) a partir do suavizador.
+    // O laço só roda com a tela visível (repeatOnLifecycle) e é cancelado ao sair da composição ou do modo seguir.
+    val latestCamera by rememberUpdatedState(camera)
+    val latestMe by rememberUpdatedState(me)
+    val latestPadding by rememberUpdatedState(Pair(paddingTopDp, paddingBottomDp))
+    LaunchedEffect(following) {
+        mapView.setMaximumFps(if (following) 60 else 30)
+    }
+    LaunchedEffect(map, style, following, cameraNonce) {
         val m = map ?: return@LaunchedEffect
-        val c = camera as? MapCamera.Follow ?: return@LaunchedEffect
-        val p = me ?: return@LaunchedEffect
-        val moving = (p.speedMps ?: 0f) > 1.5f && p.bearingDeg != null
-        val bearing = when {
-            !c.rotate -> 0.0
-            moving -> p.bearingDeg!!.toDouble()
-            else -> m.cameraPosition.bearing
+        val st = style ?: return@LaunchedEffect
+        if (!following) return@LaunchedEffect
+        val meSrc = st.getSourceAs<GeoJsonSource>(SRC_ME)
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            var lastFrame = 0L
+            var shown: Triple<Double, Double, Double>? = null
+            while (currentCoroutineContext().isActive) {
+                withFrameNanos { frameNanos ->
+                    // Telas de 90/120 Hz: pula quadros para ficar em ~60 fps (a câmera não precisa de mais).
+                    if (frameNanos - lastFrame < MIN_FRAME_INTERVAL_NS) return@withFrameNanos
+                    lastFrame = frameNanos
+                    val c = latestCamera as? MapCamera.Follow ?: return@withFrameNanos
+                    val fr = smoother.frame(SystemClock.elapsedRealtimeNanos(), c.adaptive, c.zoom)
+                    if (fr == null) {
+                        // Nenhum fix passou nos filtros (ex.: só impreciso): segue o ponto bruto, como antes.
+                        val p = latestMe ?: return@withFrameNanos
+                        val raw = CameraPosition.Builder().target(LatLng(p.latitude, p.longitude)).zoom(c.zoom).tilt(c.tilt)
+                            .bearing(if (c.rotate) m.cameraPosition.bearing else 0.0).build()
+                        m.moveCamera(CameraUpdateFactory.newCameraPosition(raw))
+                        return@withFrameNanos
+                    }
+                    val frBearing = fr.bearingDeg
+                    val bearing = when {
+                        !c.rotate -> 0.0
+                        frBearing != null -> frBearing
+                        else -> m.cameraPosition.bearing
+                    }
+                    var target = LatLng(fr.lat, fr.lon)
+                    if (c.rotate && fr.aheadFraction > 0.0 && frBearing != null) {
+                        // Marcador no terço inferior: a câmera mira à frente, mais quanto mais rápido.
+                        val usablePx = (mapView.height - (latestPadding.first + latestPadding.second) * density).toDouble()
+                        if (usablePx > 0.0) {
+                            val ahead = aheadMeters(fr.aheadFraction, usablePx, fr.zoom, fr.lat, c.tilt)
+                            val o = offsetLatLon(LatLon(fr.lat, fr.lon), bearing, ahead)
+                            target = LatLng(o.lat, o.lon)
+                        }
+                    }
+                    val pos = CameraPosition.Builder().target(target).zoom(fr.zoom).tilt(c.tilt).bearing(bearing).build()
+                    m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
+
+                    // Marcador: só reenvia o GeoJSON se mudou de forma visível (barato).
+                    val mb = frBearing ?: smoother.lastBearing ?: 0.0
+                    val prev = shown
+                    if (meSrc != null && (prev == null || kotlin.math.abs(prev.first - fr.lat) > 1e-7 ||
+                            kotlin.math.abs(prev.second - fr.lon) > 1e-7 || angleDistance(prev.third, mb) > 0.5)
+                    ) {
+                        meSrc.setGeoJson(FeatureCollection.fromFeature(ownFeature(fr.lat, fr.lon, mb)))
+                        shown = Triple(fr.lat, fr.lon, mb)
+                    }
+                }
+            }
         }
-        val pos = CameraPosition.Builder().target(LatLng(p.latitude, p.longitude)).zoom(c.zoom).tilt(c.tilt).bearing(bearing).build()
-        m.easeCamera(CameraUpdateFactory.newCameraPosition(pos), 1000)
     }
 
     AndroidView(factory = { mapView }, modifier = modifier)
 }
+
+/** ~60 fps: ignora quadros mais próximos que isto (telas de 90/120 Hz). */
+private const val MIN_FRAME_INTERVAL_NS = 14_000_000L
+
+private fun ownFeature(lat: Double, lon: Double, bearingDeg: Double): Feature =
+    Feature.fromGeometry(Point.fromLngLat(lon, lat)).also { it.addNumberProperty("b", bearingDeg) }
+
+private fun TrackPoint.toMotionFix() = MotionFix(latitude, longitude, speedMps, bearingDeg, accuracyM, elapsedRealtimeNanos)
 
 private fun fit(m: MapLibreMap, pts: List<LatLon>, density: Float) {
     try {

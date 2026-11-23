@@ -323,4 +323,13 @@ class MotionSmootherTest {
         s.onSnap(path, 500.0, 5.0, false, 0L, LatLon(0.0, 500.0 / 111_194.9))
         assertTrue(s.frame(0L, true, 17.0)!!.snapped)
     }
+
+    @Test
+    fun `filtro de entrada do mapa descarta velho e impreciso`() {
+        val now = 100 * sec
+        assertTrue(isLiveFixUsable(now - 2 * sec, 10f, now))
+        assertTrue(isLiveFixUsable(null, null, now))
+        assertFalse(isLiveFixUsable(now - 30 * sec, 10f, now), "lastKnown velho")
+        assertFalse(isLiveFixUsable(now - 1 * sec, 900f, now), "impreciso")
+    }
 }

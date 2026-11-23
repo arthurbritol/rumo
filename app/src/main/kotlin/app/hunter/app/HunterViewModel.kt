@@ -428,7 +428,12 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         if (locationJob?.isActive == true) return
         locationJob = viewModelScope.launch {
             try {
-                AndroidLocationSource(getApplication(), includeNetwork = true).updates().collect { _live.value = it }
+                AndroidLocationSource(getApplication(), includeNetwork = true).updates().collect {
+                    // Descarta o lastKnownLocation velho (>10 s) ou impreciso: o mapa não pula para onde você estava.
+                    if (app.hunter.app.ui.isLiveFixUsable(it.elapsedRealtimeNanos, it.accuracyM, android.os.SystemClock.elapsedRealtimeNanos())) {
+                        _live.value = it
+                    }
+                }
             } catch (e: SecurityException) {
                 // sem permissão: o mapa fica sem a posição até o usuário permitir
             }

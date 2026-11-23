@@ -107,7 +107,7 @@ private fun ridePerms() = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
 }
 
-private val NAV_CAMERA = MapCamera.Follow(zoom = 17.0, tilt = 50.0, rotate = true)
+private val NAV_CAMERA = MapCamera.Follow(zoom = 17.0, tilt = 50.0, rotate = true, adaptive = true)
 private val REC_CAMERA = MapCamera.Follow(zoom = 16.0)
 private val IDLE_CAMERA = MapCamera.Follow(zoom = 15.0)
 
@@ -302,6 +302,7 @@ fun MapScreen(
             route = if (navigating) nav.route?.shape else preview?.route?.shape,
             altRoutes = altRoutes,
             destination = if (navigating) nav.destination?.latLon else preview?.place?.latLon,
+            navProgress = if (navigating) nav.progress else null,
             camera = camera,
             cameraNonce = nonce,
             paddingTopDp = when {
