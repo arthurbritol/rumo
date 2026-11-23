@@ -466,9 +466,10 @@ private fun HunterRoot(
                         Column(
                             Modifier
                                 .align(Alignment.BottomStart)
-                                .widthIn(max = 380.dp)
                                 .windowInsetsPadding(seguros.only(WindowInsetsSides.End + WindowInsetsSides.Bottom))
-                                .padding(start = inicio, end = 76.dp, bottom = 8.dp),
+                                .padding(start = inicio, end = 76.dp, bottom = 8.dp)
+                                // O teto vale para o conteúdo, depois dos recuos (senão 312 + 76 dp zerariam a largura).
+                                .widthIn(max = 380.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             avisoDeVersao?.let { UpdateBanner(it, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate) }
