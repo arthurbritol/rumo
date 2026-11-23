@@ -13,7 +13,8 @@ interface Http {
     suspend fun postJson(url: String, body: String): String
 }
 
-class HttpFailure(val code: Int, message: String) : IOException(message)
+/** [retryAfterMs]: o servidor pediu para esperar (cabeçalho Retry-After em segundos), se veio. */
+class HttpFailure(val code: Int, message: String, val retryAfterMs: Long? = null) : IOException(message)
 
 /**
  * [HttpURLConnection] com User-Agent identificado (exigido pelo Nominatim/Photon). Conexão falha rápido (8 s) e a
@@ -64,7 +65,10 @@ class UrlConnectionHttp(
             val code = c.responseCode
             val stream = if (code in 200..299) c.inputStream else c.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) throw HttpFailure(code, "HTTP $code: ${text.take(200)}")
+            if (code !in 200..299) {
+                val espera = c.getHeaderField("Retry-After")?.trim()?.toLongOrNull()?.takeIf { it in 0..3_600 }?.times(1000)
+                throw HttpFailure(code, "HTTP $code: ${text.take(200)}", espera)
+            }
             ok = true
             return text
         } finally {

@@ -2,6 +2,7 @@ package app.hunter.nav.perigos
 
 import app.hunter.nav.LatLon
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -57,6 +58,19 @@ class TileIdTest {
         val shape = listOf(LatLon(-10.0, -40.0), LatLon(-10.0, -30.0))
         assertEquals(80, TileId.aoLongoDe(shape).size)
         assertEquals(10, TileId.aoLongoDe(shape, limite = 10).size)
+    }
+
+    @Test fun `janela de 25 km so inclui os quadrados da frente`() {
+        val rota = rotaLeste(100)
+        val ts = TileId.daJanela(rota, 40_000.0)
+        val ix = ts.map { it.ix }.toSet()
+        assertEquals(TileId.de(0.0, 40_000.0 / 111_194.9), ts.first())
+        assertTrue(ix.containsAll(listOf(1803, 1804, 1805)), ix.toString())
+        assertTrue(ix.none { it < 1802 || it > 1806 }, ix.toString())
+        // no começo e no fim da rota a janela é cortada
+        assertTrue(TileId.daJanela(rota, 0.0).map { it.ix }.max() <= 1803)
+        assertTrue(TileId.daJanela(rota, 99_000.0).map { it.ix }.min() >= 1807)
+        assertTrue(TileId.daJanela(rota, 40_000.0, limite = 2).size == 2)
     }
 
     @Test fun `recuo exponencial com teto de 30 min`() {
@@ -134,6 +148,7 @@ class PerigoRepositorioTest {
         var falha = false
         var simultaneas = 0
         var maxSimultaneas = 0
+        var erro: Exception? = null
         var porTile: (TileId) -> List<PerigoPonto> = { listOf(PerigoPonto("n${it.ix}_${it.iy}", Perigo.LOMBADA, it.sul + 0.05, it.oeste + 0.05)) }
         override suspend fun buscar(tile: TileId): List<PerigoPonto> {
             buscados += tile
@@ -142,6 +157,7 @@ class PerigoRepositorioTest {
             maxSimultaneas = maxOf(maxSimultaneas, simultaneas)
             try {
                 delay(300)
+                erro?.let { throw it }
                 if (falha) throw IOException("sem rede")
                 return porTile(tile)
             } finally { simultaneas-- }
@@ -249,7 +265,7 @@ class PerigoRepositorioTest {
         val src = FakeSource { this }
         val r = repo(src, intervalo = 2_000)
         r.aoMudarPosicao(-8.05, -34.95)
-        r.aoCalcularRota(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.2)))
+        r.aoPreviaDeRota(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.2)))
         advanceUntilIdle()
         assertEquals(1, src.maxSimultaneas)
         assertTrue(src.buscados.size > 9)
@@ -260,19 +276,171 @@ class PerigoRepositorioTest {
     @Test fun `quadrados da posicao furam a fila da rota`() = runTest {
         val src = FakeSource { this }
         val r = repo(src)
-        r.aoCalcularRota(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.2)))
+        r.aoPreviaDeRota(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.2)))
         r.aoMudarPosicao(-8.05, -34.95)
         advanceUntilIdle()
         assertEquals(TileId.de(-8.05, -34.95), src.buscados.first())
     }
 
-    @Test fun `nao deixa o numero de quadrados em memoria passar do limite`() = runTest {
+    @Test fun `teto de memoria nao descarta os quadrados da posicao nem da janela ativa`() = runTest {
         val src = FakeSource { this }
-        val r = PerigoRepositorio(src, MemCache(), CoroutineScope(StandardTestDispatcher(testScheduler)), agora = { base + currentTime }, intervaloMinMs = 0, maxQuadrados = 12, io = StandardTestDispatcher(testScheduler))
+        val r = PerigoRepositorio(src, MemCache(), CoroutineScope(StandardTestDispatcher(testScheduler)), agora = { base + currentTime }, intervaloMinMs = 0, maxQuadrados = 14, io = StandardTestDispatcher(testScheduler))
         r.aoMudarPosicao(-8.05, -34.95)
-        r.aoCalcularRota(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.4)))
+        r.aoPreviaDeRota(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.60)), limite = 3)
         advanceUntilIdle()
-        assertTrue(r.perigos.value.size <= 12)
-        assertNotNull(r.perigos.value.firstOrNull { it.id == "n${TileId.de(-8.05, -34.95).ix}_${TileId.de(-8.05, -34.95).iy}" })
+        val protegidos = TileId.aoRedor(-8.05, -34.95) + TileId.aoLongoDe(listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.60)), 3)
+        // muitos outros quadrados longe (ex.: o usuário olhou outra região): entram, mas o excesso sai dos NÃO protegidos
+        r.pedir((0 until 10).map { TileId(100 + it, 100) }, urgente = false)
+        advanceUntilIdle()
+        assertTrue(r.quadradosEmMemoria() <= 14)
+        val ids = r.perigos.value.map { it.id }.toSet()
+        for (t in protegidos.toSet()) assertTrue("n${t.ix}_${t.iy}" in ids, "protegido $t foi descartado")
+    }
+
+    @Test fun `remark do Overpass e falha, nada vai para o cache e entra em recuo`() = runTest {
+        val src = FakeSource { this }
+        src.erro = OverpassRemark("runtime error: Query timed out")
+        val cache = MemCache()
+        val r = repo(src, cache)
+        r.aoMudarPosicao(-8.05, -34.95)
+        advanceUntilIdle()
+        assertTrue(cache.dados.isEmpty())
+        assertTrue(r.perigos.value.isEmpty())
+        assertEquals(1, src.buscados.size)
+        r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size) // em recuo
+    }
+
+    @Test fun `Retry-After maior que o recuo prevalece`() = runTest {
+        val src = FakeSource { this }
+        src.erro = app.hunter.nav.HttpFailure(429, "HTTP 429", 300_000)
+        val r = repo(src)
+        r.aoMudarPosicao(-8.05, -34.95)
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size)
+        advanceTimeBy(120_000) // já passou o recuo de 1 min, mas não os 5 min pedidos
+        src.erro = null
+        r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size)
+        advanceTimeBy(200_000)
+        r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
+        advanceUntilIdle()
+        assertEquals(10, src.buscados.size)
+    }
+
+    @Test fun `cenario A B C com o trabalhador terminando entre os pedidos mantem uma consulta por vez`() = runTest {
+        val src = FakeSource { this }
+        val r = repo(src, intervalo = 0)
+        val a = TileId(10, 10); val b = TileId(11, 10); val c = TileId(12, 10)
+        r.pedir(listOf(a), urgente = false)
+        advanceTimeBy(100) // trabalhador no meio da consulta de A
+        r.pedir(listOf(b), urgente = false) // chega com o trabalhador ocupado
+        advanceTimeBy(250) // A termina e B começa (o trabalhador não esvaziou a fila ao sair)
+        r.pedir(listOf(c), urgente = false)
+        advanceUntilIdle()
+        assertEquals(listOf(a, b, c), src.buscados)
+        assertEquals(1, src.maxSimultaneas)
+        assertTrue(r.ocioso())
+        // depois de ocioso, um novo pedido reinicia o trabalhador
+        r.pedir(listOf(TileId(13, 10)), urgente = false)
+        advanceUntilIdle()
+        assertEquals(4, src.buscados.size)
+        assertEquals(1, src.maxSimultaneas)
+    }
+
+    @Test fun `janela da navegacao carrega so os proximos 25 km e e reposta ao avancar`() = runTest {
+        val src = FakeSource { this }
+        val r = repo(src, intervalo = 0)
+        val rota = rotaLeste(100)
+        r.aoNavegar(rota, 40_000.0)
+        advanceUntilIdle()
+        val ix = src.buscados.map { it.ix }.toSet()
+        assertTrue(ix.containsAll(listOf(1803, 1804, 1805)), ix.toString())
+        assertTrue(ix.none { it < 1802 || it > 1806 }, ix.toString())
+        val n = src.buscados.size
+        r.aoNavegar(rota, 52_000.0) // avançou: repõe só o que falta
+        advanceUntilIdle()
+        assertTrue(src.buscados.size > n && src.buscados.size == src.buscados.toSet().size)
+        assertTrue(src.buscados.map { it.ix }.max() >= 1806)
+    }
+
+    @Test fun `previa carrega no maximo 10 quadrados`() = runTest {
+        val src = FakeSource { this }
+        val r = repo(src, intervalo = 0)
+        r.aoPreviaDeRota(rotaLeste(100).shape)
+        advanceUntilIdle()
+        assertEquals(10, src.buscados.size)
+    }
+}
+
+/** Corrida de verdade: várias threads pedindo, uma thread lendo, trabalhador em dispatcher multi-thread. */
+class PerigoRepositorioConcorrenciaTest {
+    private class MemCache : PerigoCacheStore {
+        val dados = java.util.concurrent.ConcurrentHashMap<TileId, QuadradoEmCache>()
+        override fun ler(tile: TileId) = dados[tile]
+        override fun gravar(tile: TileId, q: QuadradoEmCache) { dados[tile] = q }
+    }
+
+    private class Fonte : PerigoSource {
+        val simultaneas = java.util.concurrent.atomic.AtomicInteger()
+        val maxSimultaneas = java.util.concurrent.atomic.AtomicInteger()
+        val buscados = java.util.concurrent.ConcurrentLinkedQueue<TileId>()
+        override suspend fun buscar(tile: TileId): List<PerigoPonto> {
+            val n = simultaneas.incrementAndGet()
+            maxSimultaneas.accumulateAndGet(n) { x, y -> maxOf(x, y) }
+            buscados += tile
+            try {
+                delay(1)
+                return listOf(PerigoPonto("n${tile.ix}_${tile.iy}", Perigo.LOMBADA, tile.sul + 0.05, tile.oeste + 0.05))
+            } finally { simultaneas.decrementAndGet() }
+        }
+    }
+
+    @Test fun `pedidos simultaneos de varias threads, uma consulta por vez, sem repetir e sem perder quadrado`() {
+        val fonte = Fonte()
+        val repo = PerigoRepositorio(fonte, MemCache(), CoroutineScope(Dispatchers.Default), intervaloMinMs = 0, maxQuadrados = 500)
+        val pedidos = java.util.concurrent.ConcurrentHashMap.newKeySet<TileId>()
+        val erro = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val parar = java.util.concurrent.atomic.AtomicBoolean(false)
+        val leitor = Thread {
+            try { while (!parar.get()) { repo.quadradosEmMemoria(); repo.perigos.value.size; repo.ocioso() } } catch (e: Throwable) { erro.set(e) }
+        }
+        leitor.start()
+        val threads = (0 until 8).map { k ->
+            Thread {
+                try {
+                    val rnd = java.util.Random(k.toLong())
+                    repeat(60) {
+                        val ts = (0 until 3).map { TileId(rnd.nextInt(25), rnd.nextInt(2)) }
+                        pedidos += ts
+                        if (rnd.nextBoolean()) repo.pedir(ts, urgente = rnd.nextBoolean())
+                        else repo.aoMudarPosicao(ts[0].sul + 0.05, ts[0].oeste + 0.05).also { pedidos += TileId.aoRedor(ts[0].sul + 0.05, ts[0].oeste + 0.05) }
+                        if (it % 10 == 0) Thread.sleep(2) // deixa o trabalhador esvaziar a fila de vez em quando
+                    }
+                } catch (e: Throwable) { erro.set(e) }
+            }.also { it.start() }
+        }
+        threads.forEach { it.join() }
+        val limite = System.currentTimeMillis() + 20_000
+        while (!repo.ocioso() && System.currentTimeMillis() < limite) Thread.sleep(5)
+        parar.set(true); leitor.join()
+        assertNull(erro.get())
+        assertTrue(repo.ocioso(), "trabalhador travado: ${repo.estado()}")
+        assertEquals(1, fonte.maxSimultaneas.get(), "mais de uma consulta ao mesmo tempo")
+        val buscados = fonte.buscados.toList()
+        assertEquals(buscados.size, buscados.toSet().size, "quadrado buscado mais de uma vez")
+        assertEquals(pedidos.toSet(), buscados.toSet(), "quadrado pedido e nunca carregado")
+        assertEquals(pedidos.size, repo.perigos.value.size)
+    }
+
+    @Test fun `primeira consulta com relogio real e intervalo padrao nao espera (regressao do estouro de Long)`() {
+        val fonte = Fonte()
+        val repo = PerigoRepositorio(fonte, MemCache(), CoroutineScope(Dispatchers.Default)) // intervalo de 2 s, relógio do sistema
+        repo.pedir(listOf(TileId(5, 5)), urgente = true)
+        val limite = System.currentTimeMillis() + 1_500
+        while (fonte.buscados.isEmpty() && System.currentTimeMillis() < limite) Thread.sleep(5)
+        assertEquals(1, fonte.buscados.size, "a 1ª consulta deveria sair na hora")
     }
 }

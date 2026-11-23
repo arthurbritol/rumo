@@ -31,6 +31,22 @@ data class TileId(val ix: Int, val iy: Int) {
         }
 
         /**
+         * Quadrados dos próximos [comprimentoM] m da rota a partir de [alongM] (a janela que fica carregada na navegação),
+         * na ordem em que a rota passa. Limitado a [limite].
+         */
+        fun daJanela(rota: app.hunter.nav.Route, alongM: Double, comprimentoM: Double = 25_000.0, limite: Int = 40): List<TileId> {
+            val cum = rota.cumulativeM
+            if (rota.shape.size < 2) return emptyList()
+            val ini = alongM.coerceIn(0.0, cum.last())
+            val fim = (ini + comprimentoM).coerceAtMost(cum.last())
+            val pts = ArrayList<LatLon>()
+            pts += rota.pointAt(ini)
+            for (i in rota.shape.indices) if (cum[i] > ini && cum[i] < fim) pts += rota.shape[i]
+            pts += rota.pointAt(fim)
+            return aoLongoDe(pts, limite)
+        }
+
+        /**
          * Quadrados tocados pelo traçado, na ordem em que a rota passa (os do começo primeiro). Cada ponto amostrado
          * (a cada ~4 km no máximo) também inclui os vizinhos a ~65 m, para pegar perigos colados na divisa.
          * Limitado a [limite] quadrados (rotas enormes: só o começo).

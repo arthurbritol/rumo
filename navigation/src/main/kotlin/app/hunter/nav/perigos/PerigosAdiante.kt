@@ -1,5 +1,6 @@
 package app.hunter.nav.perigos
 
+import app.hunter.model.Geo
 import app.hunter.nav.LatLon
 import app.hunter.nav.Route
 import kotlin.math.abs
@@ -53,7 +54,13 @@ object PerigosAdiante {
         else livre(aqui, rumoGraus, velocidadeMps, perigos, alvoAtualId)
 
     private fun livre(aqui: LatLon, rumo: Double?, vel: Double, perigos: List<PerigoPonto>, alvoAtualId: String?): List<AlvoPerigo> {
-        if (rumo == null || vel <= VELOCIDADE_MIN_MPS) return emptyList()
+        if (rumo == null || vel <= VELOCIDADE_MIN_MPS) {
+            // Parado/devagar (sinal, trânsito) ou sem rumo: não dá para escolher um alvo novo, mas o que já era o alvo
+            // continua adiante enquanto estiver perto (o cartão não some no semáforo a 100 m da lombada).
+            val atual = perigos.firstOrNull { it.id == alvoAtualId } ?: return emptyList()
+            val d = Geo.distanceM(aqui.lat, aqui.lon, atual.lat, atual.lon)
+            return if (d <= LIVRE_ALCANCE_HISTERESE_M) listOf(AlvoPerigo(atual, d)) else emptyList()
+        }
         val kx = cos(Math.toRadians(aqui.lat))
         val out = ArrayList<AlvoPerigo>()
         for (p in perigos) {
@@ -121,6 +128,44 @@ object PerigosAdiante {
             if (cum[mid] < alvoM) lo = mid + 1 else hi = mid
         }
         return max(0, lo - 1)
+    }
+
+    /**
+     * O perigo ficou ATRÁS de quem anda? Com rota: o ponto dele no traçado (o mais perto de [alongM], até 40 m do traçado) está antes.
+     * Sem rota: só com rumo e velocidade confiáveis (acima de [VELOCIDADE_MIN_MPS]), e o perigo a mais de 90º do rumo.
+     * Parado, sem rumo ou sem projeção: false (não se sabe, e "não sei" nunca marca como ultrapassado).
+     */
+    fun ultrapassou(p: PerigoPonto, aqui: LatLon, rumoGraus: Double?, velocidadeMps: Double, rota: Route?, alongM: Double?): Boolean {
+        if (rota != null && alongM != null) {
+            val shape = rota.shape
+            val cum = rota.cumulativeM
+            if (shape.size < 2) return false
+            val kx = cos(Math.toRadians(aqui.lat))
+            val ini = max(0, primeiroSegmentoApos(cum, alongM - 400.0))
+            val fim = min(shape.size - 2, primeiroSegmentoApos(cum, alongM + 100.0))
+            var melhor: Double? = null
+            for (i in ini..fim) {
+                val a = shape[i]
+                val b = shape[i + 1]
+                val ax = (a.lon - p.lon) * kx * M_POR_GRAU
+                val ay = (a.lat - p.lat) * M_POR_GRAU
+                val dx = (b.lon - a.lon) * kx * M_POR_GRAU
+                val dy = (b.lat - a.lat) * M_POR_GRAU
+                val len2 = dx * dx + dy * dy
+                val t = if (len2 <= 1e-9) 0.0 else ((-ax * dx) + (-ay * dy)).div(len2).coerceIn(0.0, 1.0)
+                val px = ax + t * dx
+                val py = ay + t * dy
+                if (sqrt(px * px + py * py) > ROTA_DESVIO_HISTERESE_M) continue
+                val d = cum[i] + t * (cum[i + 1] - cum[i]) - alongM
+                if (melhor == null || abs(d) < abs(melhor)) melhor = d
+            }
+            return melhor != null && melhor < 0.0
+        }
+        if (rumoGraus == null || velocidadeMps <= VELOCIDADE_MIN_MPS) return false
+        val dx = (p.lon - aqui.lon) * cos(Math.toRadians(aqui.lat)) * M_POR_GRAU
+        val dy = (p.lat - aqui.lat) * M_POR_GRAU
+        val rumoAoPerigo = (Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0
+        return difAngular(rumoGraus, rumoAoPerigo) > 90.0
     }
 
     /** O perigo vale para quem anda com [rumoViaGraus]? Sem `direction` ou sem rumo, vale. */

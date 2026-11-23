@@ -1,11 +1,12 @@
 package app.hunter.nav.perigos
 
+import app.hunter.nav.HttpFailure
 import app.hunter.nav.LatLon
+import app.hunter.nav.Route
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,9 +19,11 @@ import kotlinx.coroutines.withContext
  * ou venceu, consulta ao [source].
  *
  * - No máximo UMA consulta de rede por vez (um único trabalhador esvazia a fila) e pelo menos [intervaloMinMs] entre elas.
- * - Falha de rede: recuo exponencial global ([recuoMs]); enquanto isso só o cache (mesmo vencido) é usado.
- * - Quadrado vazio também é cacheado. Nunca é chamado pelo movimento do mapa: só por mudança de quadrado da posição
- *   e pelo cálculo de rota.
+ * - Falha de rede (inclusive `remark`, 429, 502, 504): recuo exponencial global ([recuoMs], ou o Retry-After do servidor se maior)
+ *   e nada é gravado no cache; enquanto isso só o cache (mesmo vencido) é usado.
+ * - Quadrado vazio também é cacheado. Nunca é chamado pelo movimento do mapa: só por mudança de quadrado da posição,
+ *   prévia de rota (primeiros quadrados da rota escolhida) e janela de ~25 km à frente na navegação.
+ * - Fila e quadrados em memória são protegidos pela mesma trava ([lock]); só o trabalhador mexe na rede.
  */
 class PerigoRepositorio(
     private val source: PerigoSource,
@@ -31,46 +34,72 @@ class PerigoRepositorio(
     private val maxQuadrados: Int = 150,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
+    private val lock = Any()
+
+    // Tudo abaixo (até [ultimaRede]) só é lido/escrito dentro de synchronized(lock).
     private val fila = ArrayDeque<TileId>()
     private val naFila = HashSet<TileId>()
-    private var trabalhador: Job? = null
-
-    // Só o trabalhador escreve; ordem de inserção = ordem de saída quando passa de [maxQuadrados].
+    private var rodando = false
     private val carregados = LinkedHashMap<TileId, QuadradoEmCache>()
-    @Volatile private var protegidos: Set<TileId> = emptySet()
+    private var protegidosPosicao: Set<TileId> = emptySet()
+    private var protegidosJanela: Set<TileId> = emptySet()
+    private var ultimoCentro: TileId? = null
+
+    // Só o trabalhador (uma coroutine por vez) mexe nestes.
     private var falhasSeguidas = 0
-    private var bloqueadoAte = Long.MIN_VALUE
-    private var ultimaRede = Long.MIN_VALUE
+    private var bloqueadoAte = Long.MIN_VALUE / 2
+    // /2: evita estouro ao somar o intervalo e subtrair o relógio (com MIN_VALUE puro o 1º `delay` seria de ~292 milhões de anos).
+    private var ultimaRede = Long.MIN_VALUE / 2
 
     private val _perigos = MutableStateFlow<List<PerigoPonto>>(emptyList())
     /** Todos os perigos dos quadrados carregados (as categorias desligadas são filtradas por quem usa). */
     val perigos: StateFlow<List<PerigoPonto>> = _perigos.asStateFlow()
 
-    @Volatile private var ultimoCentro: TileId? = null
+    /** Fila vazia e trabalhador parado (útil em testes). */
+    fun ocioso(): Boolean = synchronized(lock) { !rodando && fila.isEmpty() }
+
+    internal fun estado(): String = synchronized(lock) { "rodando=$rodando fila=${fila.size} naFila=${naFila.size} mem=${carregados.size}" }
+
+    /** Quantos quadrados estão em memória. */
+    fun quadradosEmMemoria(): Int = synchronized(lock) { carregados.size }
 
     /** Posição mudou: se o quadrado é outro, carrega os 3x3 ao redor (na frente da fila). */
     fun aoMudarPosicao(lat: Double, lon: Double) {
         val c = TileId.de(lat, lon)
-        if (c == ultimoCentro) return
-        ultimoCentro = c
         val ao = TileId.aoRedor(lat, lon)
-        protegidos = ao.toSet()
+        synchronized(lock) {
+            if (c == ultimoCentro) return
+            ultimoCentro = c
+            protegidosPosicao = ao.toSet()
+        }
         pedir(ao, urgente = true)
     }
 
-    /** Rota calculada: carrega os quadrados tocados pelo traçado (atrás dos da posição atual). */
-    fun aoCalcularRota(shape: List<LatLon>) = pedir(TileId.aoLongoDe(shape), urgente = false)
+    /** Prévia da rota escolhida: só os primeiros [limite] quadrados dela (as alternativas não carregam nada). */
+    fun aoPreviaDeRota(shape: List<LatLon>, limite: Int = QUADRADOS_PREVIA) {
+        val tiles = TileId.aoLongoDe(shape, limite)
+        synchronized(lock) { protegidosJanela = tiles.toSet() }
+        pedir(tiles, urgente = false)
+    }
+
+    /** Navegando: carrega os quadrados dos próximos [JANELA_M] m à frente de [alongM] (chamar de novo ao avançar). */
+    fun aoNavegar(rota: Route, alongM: Double) {
+        val tiles = TileId.daJanela(rota, alongM)
+        synchronized(lock) { protegidosJanela = tiles.toSet() }
+        pedir(tiles, urgente = false)
+    }
 
     /** Tenta de novo os quadrados ao redor da última posição (o recuo de falha ainda vale). */
     fun tentarDeNovo() {
-        val c = ultimoCentro ?: return
+        val c = synchronized(lock) { ultimoCentro } ?: return
         pedir(TileId.aoRedor(c.sul + TileId.TAMANHO_GRAUS / 2, c.oeste + TileId.TAMANHO_GRAUS / 2), urgente = true)
     }
 
     /** Insere na fila ([urgente] vai para a frente, mantendo a ordem). Quadrados já carregados e válidos são ignorados. */
     fun pedir(tiles: List<TileId>, urgente: Boolean) {
-        synchronized(fila) {
-            val precisam = tiles.filter { !(carregados[it]?.valido(agora()) ?: false) }
+        synchronized(lock) {
+            val t = agora()
+            val precisam = tiles.filter { !(carregados[it]?.valido(t) ?: false) }
             if (urgente) {
                 // Os que já esperavam atrás (rota) passam para a frente.
                 val set = precisam.toSet()
@@ -80,23 +109,25 @@ class PerigoRepositorio(
                 fila.addAll(precisam.filter { it !in naFila })
             }
             naFila.addAll(precisam)
-            if (fila.isEmpty() || trabalhador?.isActive == true) return
-            trabalhador = scope.launch { processar() }
+            if (fila.isEmpty() || rodando) return
+            rodando = true
         }
+        // Só uma chamada chega aqui por vez (quem virou `rodando`); o trabalhador solta a marca ao esvaziar a fila.
+        scope.launch { processar() }
     }
 
-    /** Próximo da fila; ao esvaziar, solta o trabalhador na mesma seção crítica (evita perder um pedido que chega agora). */
-    private fun proximo(): TileId? = synchronized(fila) {
+    /** Próximo da fila; ao esvaziar, solta o trabalhador na mesma seção crítica (não perde um pedido que chega agora). */
+    private fun proximo(): TileId? = synchronized(lock) {
         val t = fila.removeFirstOrNull()
-        if (t == null) trabalhador = null else naFila.remove(t)
+        if (t == null) rodando = false else naFila.remove(t)
         t
     }
 
     private suspend fun processar() {
         try {
             while (true) {
-                val tile = proximo() ?: break
-                var q = carregados[tile]
+                val tile = proximo() ?: return
+                var q = synchronized(lock) { carregados[tile] }
                 if (q == null) {
                     q = withContext(io) { cache.ler(tile) }
                     if (q != null) guardar(tile, q)
@@ -116,24 +147,38 @@ class PerigoRepositorio(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    // Nada vai para o cache; o recuo vale o maior entre o exponencial e o Retry-After do servidor.
                     falhasSeguidas++
-                    bloqueadoAte = agora() + recuoMs(falhasSeguidas)
+                    bloqueadoAte = agora() + maxOf(recuoMs(falhasSeguidas), (e as? HttpFailure)?.retryAfterMs ?: 0L)
                 }
             }
-        } finally {
-            synchronized(fila) { trabalhador = null }
+        } catch (e: Throwable) {
+            // Saída anormal (cancelamento, erro inesperado): solta o trabalhador para um próximo pedido poder reiniciar.
+            synchronized(lock) { rodando = false }
+            throw e
         }
     }
 
     private fun guardar(tile: TileId, q: QuadradoEmCache) {
-        carregados.remove(tile)
-        carregados[tile] = q
-        if (carregados.size > maxQuadrados) {
-            val it = carregados.keys.iterator()
-            while (carregados.size > maxQuadrados && it.hasNext()) {
-                if (it.next() !in protegidos) it.remove()
+        val lista = synchronized(lock) {
+            carregados.remove(tile)
+            carregados[tile] = q
+            if (carregados.size > maxQuadrados) {
+                val it = carregados.keys.iterator()
+                while (carregados.size > maxQuadrados && it.hasNext()) {
+                    val k = it.next()
+                    if (k !in protegidosPosicao && k !in protegidosJanela) it.remove()
+                }
             }
+            carregados.values.flatMap { it.perigos }
         }
-        _perigos.value = carregados.values.flatMap { it.perigos }
+        _perigos.value = lista
+    }
+
+    companion object {
+        /** Na prévia: no máximo os primeiros quadrados da rota escolhida. */
+        const val QUADRADOS_PREVIA = 10
+        /** Navegando: quanto da rota à frente fica carregado (m). */
+        const val JANELA_M = 25_000.0
     }
 }

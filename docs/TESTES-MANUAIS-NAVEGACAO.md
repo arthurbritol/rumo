@@ -59,5 +59,6 @@ Fonte: OpenStreetMap. **No Brasil a cobertura é incompleta**: radar móvel/blit
 - [ ] **Sem internet**: com o modo avião, depois de ter rodado o trecho antes (cache de 30 dias), os avisos continuam. Em trecho nunca visto não há avisos e o app não trava nem fica tentando sem parar.
 - [ ] **Desligar categoria**: Perfil > Avisos na estrada: desligue "Lombadas"; as lombadas somem do mapa em até ~1 s, sem voz e sem cartão; radares seguem. Desligue todas: nenhum aviso. Religue: voltam. A escolha persiste ao fechar e abrir o app.
 - [ ] **Mapa com ícones**: com zoom 13 ou mais aparecem radar (câmera em disco vermelho), semáforo com câmera, lombada e faixa sonora (triângulo amarelo) e travessia (disco amarelo com X); abaixo do zoom 13 não aparecem. Tocar num posto, moto ou ponto de encontro continua funcionando com ícones por cima/perto.
+- [ ] **Parar no sinal**: parado a ~100 m de uma lombada ou semáforo com câmera, o cartão continua; ao arrancar ele segue até passar e some só depois. Em pista dupla o aviso pode vir da pista contrária (limitação conhecida).
 - [ ] **Sem consulta ao mexer no mapa**: arraste e dê zoom no mapa à vontade: não deve gerar consultas (só a mudança de quadrado da posição e o cálculo de rota consultam).
 - [ ] **Bateria**: uma hora de navegação com os avisos ligados não pesa mais que sem eles (a checagem roda a ~1 Hz no GPS que já existe).

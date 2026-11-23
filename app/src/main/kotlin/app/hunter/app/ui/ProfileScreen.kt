@@ -621,7 +621,11 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         SquircleIcon(
-                            iconRes = R.drawable.fa_traffic_light,
+                            iconRes = when (c) {
+                                CategoriaPerigo.RADARES -> R.drawable.fa_gauge_high
+                                CategoriaPerigo.LOMBADAS -> R.drawable.fa_route
+                                CategoriaPerigo.TRAVESSIAS -> R.drawable.fa_traffic_light
+                            },
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
                             tintColor = MaterialTheme.colorScheme.primary,
                             contentDescription = c.rotulo,
@@ -645,7 +649,7 @@ fun ProfileScreen(
                 }
                 Text(
                     text = "Voz, cartão e ícones no mapa durante a navegação e a gravação. Os dados vêm do OpenStreetMap, que no Brasil " +
-                        "ainda é incompleto: radar móvel, blitz e muitas lombadas não aparecem. Não deixe de olhar a via.",
+                        "ainda é incompleto: radar móvel, blitz e muitas lombadas não aparecem, e em pista dupla o aviso pode vir da pista contrária. Não deixe de olhar a via.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

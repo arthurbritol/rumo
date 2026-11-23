@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** Estado dos avisos visível para a UI e o serviço (mesmo processo → singleton, como o [app.hunter.nav.NavStatus]). */
@@ -29,16 +30,23 @@ object PerigoStatus {
     val repositorio: PerigoRepositorio? get() = repo
 
     /** Cria o repositório com cache em [dirCache] e o Overpass como fonte. Chamar uma vez, na Application. */
-    fun iniciar(dirCache: File) {
+    fun iniciar(dirCache: File, versaoApp: String = "0") {
         if (repo != null) return
         val cache = ArquivoPerigoCache(dirCache)
-        runCatching { cache.limpar(System.currentTimeMillis()) }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        // Limpeza de arquivos antigos fora da thread principal.
+        scope.launch(Dispatchers.IO) { runCatching { cache.limpar(System.currentTimeMillis()) } }
         repo = PerigoRepositorio(
-            source = OverpassPerigoSource(UrlConnectionHttp(connectTimeoutMs = 6_000, readTimeoutMs = 30_000, attempts = 1)),
+            source = OverpassPerigoSource(
+                UrlConnectionHttp(userAgent = userAgent(versaoApp), connectTimeoutMs = 6_000, readTimeoutMs = 25_000, attempts = 1),
+            ),
             cache = cache,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            scope = scope,
         )
     }
+
+    /** Identificação para os servidores públicos do Overpass (política de uso justo pede um contato). */
+    fun userAgent(versaoApp: String) = "Rumo/$versaoApp (app de navegação para motos; https://github.com/arthurbritol/rumo)"
 }
 
 /**
@@ -56,6 +64,7 @@ class PerigoMonitor(
     private var ultimoCalculo = Long.MIN_VALUE / 2
     private var ultimaTentativa = agora()
     private var versaoRota = -1
+    private var alongDaJanela = 0.0
     private var estavaAtivo = false
 
     private var listaOrigem: List<PerigoPonto>? = null
@@ -71,9 +80,14 @@ class PerigoMonitor(
         repo?.aoMudarPosicao(p.latitude, p.longitude)
         if (t - ultimaTentativa >= RETENTAR_MS) { ultimaTentativa = t; repo?.tentarDeNovo() }
         val route = nav.route
-        if (nav.active && route != null && nav.routeVersion != versaoRota) {
-            versaoRota = nav.routeVersion
-            repo?.aoCalcularRota(route.shape)
+        // Janela de ~25 km à frente: ao iniciar/recalcular a rota e de novo a cada 10 km andados.
+        if (nav.active && route != null) {
+            val along = nav.progress?.alongM ?: 0.0
+            if (nav.routeVersion != versaoRota || along - alongDaJanela >= REPOR_JANELA_M) {
+                versaoRota = nav.routeVersion
+                alongDaJanela = along
+                repo?.aoNavegar(route, along)
+            }
         }
         if (nav.active != estavaAtivo) { estavaAtivo = nav.active; avisador.reset() }
 
@@ -116,6 +130,7 @@ class PerigoMonitor(
     private companion object {
         const val INTERVALO_MS = 900L
         const val RETENTAR_MS = 5 * 60_000L
+        const val REPOR_JANELA_M = 10_000.0
         const val PRECISAO_MAX_M = 100f
     }
 }

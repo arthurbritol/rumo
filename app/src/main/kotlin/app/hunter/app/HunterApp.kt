@@ -53,7 +53,7 @@ class HunterApp : Application(), TripsGraph {
         super.onCreate()
         ReminderWorker.schedule(this)
         // Avisos de radar/lombada: cache em disco, interruptores salvos e (depois) o repositório já usável pelo serviço.
-        PerigoStatus.iniciar(filesDir)
+        PerigoStatus.iniciar(filesDir, BuildConfig.VERSION_NAME)
         PerigoStatus.definirCategorias(PerigoPrefs.ler(getSharedPreferences("app", MODE_PRIVATE)))
         if (AccountConfig.isAvailable(this)) account.start()
         FuelPriceSyncWorker.scheduleWeeklySync(this)

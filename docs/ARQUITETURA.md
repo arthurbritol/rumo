@@ -276,7 +276,7 @@ Pacote `app.hunter.nav.perigos` (módulo `:navigation`, JVM puro, testado). Font
 incompleta; sem radar móvel). `PerigoTags` mapeia tags para o enum `Perigo`; `OverpassPerigoSource` consulta por quadrado fixo de
 0,1° (`TileId`) e `ArquivoPerigoCache` guarda um JSON versionado por quadrado (30 dias; vazio também; sem Room). O
 `PerigoRepositorio` serializa as consultas (1 por vez, 2 s entre elas, recuo exponencial, espelho alternativo) e é alimentado pela mudança de
-quadrado da posição (3x3) e pelo cálculo de rota (quadrados do traçado), nunca pelo movimento do mapa. A cada ~1 s o `PerigoMonitor`
+quadrado da posição (3x3) pela prévia de rota (10 primeiros quadrados da rota escolhida) e pela janela de ~25 km à frente na navegação, nunca pelo movimento do mapa. Espelhos: overpass-api.de, maps.mail.ru e kumi.systems, com pausa de 10 min para o que falhou; `remark` do Overpass é falha e não vai ao cache. A cada ~1 s o `PerigoMonitor`
 (dentro do `TrackingService`, no fluxo de GPS que já existe) usa `PerigosAdiante`/`AvisadorDePerigos` (com rota: ao longo do traçado até
 1,5 km a ≤30 m; sem rota: 600 m a ±35° do rumo) para falar pelo mesmo TTS e publicar o `AlertaPerigo` em `PerigoStatus` (cartão do mapa).
 O mapa desenha a camada `hazards` (zoom 13+) a partir de uma fonte GeoJSON atualizada só quando os quadrados mudam. Interruptores por categoria

@@ -375,7 +375,9 @@ fun HunterMap(
     }
     LaunchedEffect(style, perigos) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_PERIGOS) ?: return@LaunchedEffect
-        src.setGeoJson(perigosFeatures(perigos))
+        // Monta os pontos fora da thread principal; só o setGeoJson volta a ela (a lista já vem filtrada por raio e com teto).
+        val fc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { perigosFeatures(perigos) }
+        src.setGeoJson(fc)
     }
     LaunchedEffect(style, cityAverages) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FUEL_CITY) ?: return@LaunchedEffect

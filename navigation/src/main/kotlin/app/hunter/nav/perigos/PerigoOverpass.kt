@@ -10,6 +10,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import app.hunter.nav.HttpFailure
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.Locale
 
@@ -18,36 +20,55 @@ interface PerigoSource {
     suspend fun buscar(tile: TileId): List<PerigoPonto>
 }
 
+/** O Overpass respondeu 200 mas com `remark` (ex.: "runtime error: Query timed out"): resultado incompleto, não vale. */
+class OverpassRemark(message: String) : IOException(message)
+
 /**
  * Consulta o Overpass (OpenStreetMap) por quadrado. Dados abertos e gratuitos, mas a cobertura no Brasil é incompleta:
- * o que ninguém mapeou não aparece. Tenta cada espelho de [espelhos] em ordem até um responder.
- * Não manda nada além do retângulo arredondado do quadrado (sem identificação de pessoa ou posição exata).
+ * o que ninguém mapeou não aparece. Tenta os [espelhos] em ordem; um espelho que falhou fica de lado por [PAUSA_ESPELHO_MS]
+ * (10 min) e depois volta. Se todos estão de lado, tenta todos mesmo assim (o recuo do repositório evita martelar).
+ * 429/502/504, timeout e `remark` contam como falha. Não manda nada além do retângulo arredondado do quadrado.
  */
 class OverpassPerigoSource(
     private val http: Http,
     private val espelhos: List<String> = ESPELHOS,
+    private val agora: () -> Long = System::currentTimeMillis,
 ) : PerigoSource {
+    private val falhouAte = HashMap<String, Long>()
 
     override suspend fun buscar(tile: TileId): List<PerigoPonto> {
         val query = consulta(tile)
+        val t = agora()
+        val bons = synchronized(falhouAte) { espelhos.filter { (falhouAte[it] ?: 0L) <= t } }
+        val ordem = bons.ifEmpty { espelhos }
         var ultimo: Exception? = null
-        for (base in espelhos) {
+        var espera: Long? = null
+        for (base in ordem) {
             try {
-                return parse(http.get("$base?data=${URLEncoder.encode(query, "UTF-8")}"))
+                val lista = parse(http.get("$base?data=${URLEncoder.encode(query, "UTF-8")}"))
+                synchronized(falhouAte) { falhouAte.remove(base) }
+                return lista
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 ultimo = e
+                synchronized(falhouAte) { falhouAte[base] = agora() + PAUSA_ESPELHO_MS }
+                (e as? HttpFailure)?.retryAfterMs?.let { espera = maxOf(espera ?: 0L, it) }
             }
         }
-        throw ultimo ?: IllegalStateException("sem espelho do Overpass")
+        val e = ultimo ?: IllegalStateException("sem espelho do Overpass")
+        // O servidor pediu para esperar: repassa ao recuo do repositório.
+        throw if (espera != null && e !is HttpFailure) HttpFailure(0, e.message.orEmpty(), espera) else e
     }
 
     companion object {
+        /** Na prática (2026-11): overpass-api.de responde rápido mas às vezes 502; o do mail.ru é estável; o kumi costuma segurar até estourar o tempo. */
         val ESPELHOS = listOf(
-            "https://overpass.kumi.systems/api/interpreter",
             "https://overpass-api.de/api/interpreter",
+            "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
         )
+        const val PAUSA_ESPELHO_MS = 10 * 60_000L
         private val json = Json { ignoreUnknownKeys = true }
 
         /** Consulta OverpassQL de um quadrado (sul,oeste,norte,leste, com 4 casas = ~11 m). */
@@ -61,9 +82,11 @@ class OverpassPerigoSource(
                 ");out center tags;"
         }
 
-        /** Resposta do Overpass -> pontos. Ignora elementos sem coordenada ou sem tipo conhecido; junta repetidos a < 25 m. */
+        /** Resposta do Overpass -> pontos. Lança [OverpassRemark] se veio `remark` (incompleta) e exceção se não for JSON. Ignora elementos sem coordenada ou sem tipo conhecido; junta repetidos a < 25 m. */
         fun parse(texto: String): List<PerigoPonto> {
-            val elementos = json.parseToJsonElement(texto).jsonObject["elements"] as? JsonArray ?: return emptyList()
+            val raiz = json.parseToJsonElement(texto).jsonObject
+            raiz["remark"]?.let { throw OverpassRemark(it.jsonPrimitive.contentOrNull ?: "remark") }
+            val elementos = raiz["elements"] as? JsonArray ?: return emptyList()
             val out = ArrayList<PerigoPonto>()
             // Grade de ~33 m para achar repetidos sem comparar tudo com tudo.
             val grade = HashMap<Long, MutableList<PerigoPonto>>()

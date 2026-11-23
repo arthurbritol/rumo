@@ -25,7 +25,6 @@ class AvisadorDePerigos {
     private class Estado(val ponto: PerigoPonto) {
         val falados = HashSet<Int>()
         var passado = false
-        var ultimaDistM = Double.MAX_VALUE
     }
 
     private val estados = HashMap<String, Estado>()
@@ -51,10 +50,11 @@ class AvisadorDePerigos {
         val adiante = PerigosAdiante.adiante(aqui, rumoGraus, velocidadeMps, rota, alongM, perigos, alvoId)
         val idsAdiante = adiante.mapTo(HashSet()) { it.perigo.id }
 
-        // O alvo anterior sumiu de "à frente" estando a poucos metros: foi ultrapassado e não volta mais.
+        // O alvo anterior sumiu de "à frente": só conta como ultrapassado se ficou ATRÁS (projeção negativa na rota, ou mais de
+        // 90º do rumo com velocidade confiável). Parar no sinal, rumo nulo ou GPS ruim não apagam nem "passam" o perigo.
         alvoId?.let { id ->
             val st = estados[id]
-            if (st != null && id !in idsAdiante && st.ultimaDistM <= PASSOU_M) st.passado = true
+            if (st != null && id !in idsAdiante && PerigosAdiante.ultrapassou(st.ponto, aqui, rumoGraus, velocidadeMps, rota, alongM)) st.passado = true
         }
         // Esquece passagens de perigos que ficaram longe (voltar depois avisa de novo).
         estados.values.removeAll { it.ponto.id !in idsAdiante && Geo.distanceM(aqui.lat, aqui.lon, it.ponto.lat, it.ponto.lon) > ESQUECER_M }
@@ -69,7 +69,6 @@ class AvisadorDePerigos {
         val p = alvo.perigo
         alvoId = p.id
         val st = estados.getOrPut(p.id) { Estado(p) }
-        st.ultimaDistM = alvo.distanciaM
 
         val velKmh = velocidadeMps * 3.6
         val acima = p.tipo == Perigo.RADAR && p.limiteKmh != null && velKmh > p.limiteKmh + MARGEM_KMH
@@ -80,23 +79,20 @@ class AvisadorDePerigos {
         val falas = ArrayList<String>(1)
         if (cruzados.isNotEmpty()) {
             st.falados += limiares.filter { alvo.distanciaM <= it }
-            falas += texto(p, cruzados.min(), acima, limiares.min())
+            falas += texto(p, alvo.distanciaM, acima, curto = p.tipo.curtoNoUltimo && cruzados.min() == limiares.min())
         }
         return ResultadoAviso(alerta, falas)
     }
 
     companion object {
-        /** Distância (m) abaixo da qual sumir de "à frente" significa "passou". */
-        const val PASSOU_M = 150.0
         /** Depois de se afastar disto (m) a passagem é esquecida. */
         const val ESQUECER_M = 2_000.0
         /** Tolerância do GPS ao comparar velocidade com o limite (km/h). */
         const val MARGEM_KMH = 2.0
 
-        /** "Radar à frente, 300 metros, limite 60. Você está acima do limite." / "Radar adiante" (último limiar do radar). */
-        fun texto(p: PerigoPonto, limiarM: Int, acima: Boolean, menorLimiarM: Int): String {
-            val curto = p.tipo.curtoNoUltimo && limiarM == menorLimiarM
-            val base = if (curto) "${p.tipo.nome} adiante" else "${p.tipo.nome} à frente, ${distanciaFalada(limiarM.toDouble())}"
+        /** "Radar à frente, 300 metros, limite 60. Você está acima do limite." (distância real, arredondada de 50 em 50 m) / "Radar adiante" (último limiar do radar). */
+        fun texto(p: PerigoPonto, distanciaM: Double, acima: Boolean, curto: Boolean): String {
+            val base = if (curto) "${p.tipo.nome} adiante" else "${p.tipo.nome} à frente, ${distanciaFalada(distanciaM)}"
             val limite = p.limiteKmh?.takeIf { p.tipo == Perigo.RADAR }?.let { ", limite $it" }.orEmpty()
             val aviso = if (acima) ". Você está acima do limite." else "."
             return base + limite + aviso

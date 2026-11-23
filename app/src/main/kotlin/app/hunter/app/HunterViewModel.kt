@@ -47,6 +47,8 @@ import app.hunter.app.account.maintenanceSeedDecision
 import app.hunter.app.perigos.PerigoPrefs
 import app.hunter.nav.perigos.CategoriaPerigo
 import app.hunter.nav.perigos.PerigoPonto
+import app.hunter.nav.perigos.PerigosNoMapa
+import app.hunter.nav.perigos.TileId
 import app.hunter.nav.perigos.PerigoStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +61,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -143,11 +146,20 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     val alertaPerigo = PerigoStatus.alerta
     val categoriasPerigo = PerigoStatus.categorias
 
-    /** Perigos dos quadrados carregados, só das categorias ligadas. O debounce evita redesenhar a cada quadrado de uma rota longa. */
-    val perigosNoMapa: StateFlow<List<PerigoPonto>> =
-        combine(PerigoStatus.repositorio?.perigos ?: MutableStateFlow(emptyList()), PerigoStatus.categorias) { todos, cats ->
-            todos.filter { it.tipo.categoria in cats }
-        }.debounce(1_000).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * Perigos para a camada do mapa: categorias ligadas, só num raio de ~25 km do quadrado da posição (e com teto de pontos).
+     * O filtro roda fora da thread principal; o debounce evita redesenhar a cada quadrado carregado.
+     */
+    val perigosNoMapa: StateFlow<List<PerigoPonto>> by lazy {  // lazy: depende de _live, declarado mais abaixo
+        val centro = _live.map { p -> p?.let { TileId.de(it.latitude, it.longitude) } }.distinctUntilChanged()
+        combine(PerigoStatus.repositorio?.perigos ?: MutableStateFlow(emptyList()), PerigoStatus.categorias, centro) { todos, cats, c ->
+            PerigosNoMapa.selecionar(
+                todos, cats,
+                c?.let { (it.sul + it.norte) / 2 }, c?.let { (it.oeste + it.leste) / 2 },
+            )
+        }.debounce(1_000).flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    }
 
     fun definirCategoriaPerigo(c: CategoriaPerigo, ligada: Boolean) {
         PerigoPrefs.gravar(prefs, c, ligada)
@@ -569,6 +581,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectRoute(i: Int) {
         _preview.update { it?.copy(selected = i) }
+        _preview.value?.routes?.getOrNull(i)?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
         refreshFuelAdvice()
     }
 
@@ -648,8 +661,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     if (cur == null || cur.place != p.place || cur.profile != p.profile || cur.via != p.via) cur
                     else cur.copy(routes = routes, selected = 0, loading = false, error = if (routes.isEmpty()) "Nenhuma rota encontrada." else null)
                 }
-                // Rota calculada: carrega os perigos dos quadrados tocados por ela (cache; nada de consulta no mapa).
-                routes.forEach { PerigoStatus.repositorio?.aoCalcularRota(it.shape) }
+                // Prévia: só os primeiros quadrados da rota escolhida (alternativas não carregam; na navegação a janela de 25 km é reposta).
+                routes.firstOrNull()?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
                 refreshFuelAdvice()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

@@ -1,0 +1,221 @@
+{
+ "version": 0.6,
+ "generator": "Overpass API 0.7.62.4 2390de5a",
+ "osm3s": {
+  "timestamp_osm_base": "2026-11-23T16:52:33Z",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+ },
+ "elements": [
+  {
+   "type": "node",
+   "id": 25716953,
+   "lat": -23.5993461,
+   "lon": -46.685963,
+   "tags": {
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 130010311,
+   "lat": -23.5523751,
+   "lon": -46.6184402,
+   "tags": {
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 312670305,
+   "lat": -23.5102993,
+   "lon": -46.6659735,
+   "tags": {
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 617887899,
+   "lat": -23.5496781,
+   "lon": -46.6423691,
+   "tags": {
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 5457732477,
+   "lat": -23.5002284,
+   "lon": -46.6290181,
+   "tags": {
+    "direction": "forward",
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 5476639320,
+   "lat": -23.5409032,
+   "lon": -46.6132467,
+   "tags": {
+    "direction": "forward",
+    "highway": "speed_camera",
+    "maxspeed": "40"
+   }
+  },
+  {
+   "type": "node",
+   "id": 5457732478,
+   "lat": -23.5002034,
+   "lon": -46.6304024,
+   "tags": {
+    "direction": "backward",
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 5615716945,
+   "lat": -23.5448406,
+   "lon": -46.6931542,
+   "tags": {
+    "direction": "backward",
+    "highway": "speed_camera",
+    "maxspeed": "50"
+   }
+  },
+  {
+   "type": "node",
+   "id": 5478174641,
+   "lat": -23.5478429,
+   "lon": -46.6025323,
+   "tags": {
+    "highway": "speed_camera"
+   }
+  },
+  {
+   "type": "node",
+   "id": 9270377483,
+   "lat": -23.5978194,
+   "lon": -46.6505194,
+   "tags": {
+    "highway": "speed_camera"
+   }
+  },
+  {
+   "type": "node",
+   "id": 25777876,
+   "lat": -23.5174555,
+   "lon": -46.6558688,
+   "tags": {
+    "traffic_calming": "rumble_strip"
+   }
+  },
+  {
+   "type": "node",
+   "id": 2348890834,
+   "lat": -23.5155591,
+   "lon": -46.6696138,
+   "tags": {
+    "traffic_calming": "rumble_strip"
+   }
+  },
+  {
+   "type": "node",
+   "id": 25615093,
+   "lat": -23.5854295,
+   "lon": -46.6902349,
+   "tags": {
+    "crossing": "uncontrolled",
+    "crossing:markings": "yes",
+    "highway": "crossing",
+    "traffic_calming": "table"
+   }
+  },
+  {
+   "type": "node",
+   "id": 25876405,
+   "lat": -23.520413,
+   "lon": -46.6299787,
+   "tags": {
+    "crossing": "zebra",
+    "highway": "crossing",
+    "traffic_calming": "table"
+   }
+  },
+  {
+   "type": "node",
+   "id": 386257468,
+   "lat": -23.5912839,
+   "lon": -46.6423376,
+   "tags": {
+    "traffic_calming": "hump"
+   }
+  },
+  {
+   "type": "node",
+   "id": 1416721749,
+   "lat": -23.5017995,
+   "lon": -46.6912632,
+   "tags": {
+    "surface": "asphalt",
+    "traffic_calming": "hump"
+   }
+  },
+  {
+   "type": "node",
+   "id": 1707836311,
+   "lat": -23.5213055,
+   "lon": -46.6879673,
+   "tags": {
+    "crossing:barrier": "double_half",
+    "crossing:bell": "yes",
+    "crossing:light": "yes",
+    "crossing:saltire": "yes",
+    "maxheight:signed": "no",
+    "railway": "level_crossing",
+    "supervised": "yes"
+   }
+  },
+  {
+   "type": "node",
+   "id": 2020751094,
+   "lat": -23.521345,
+   "lon": -46.6879457,
+   "tags": {
+    "crossing:barrier": "double_half",
+    "crossing:bell": "yes",
+    "crossing:light": "yes",
+    "crossing:saltire": "yes",
+    "maxheight:signed": "no",
+    "railway": "level_crossing",
+    "supervised": "yes"
+   }
+  },
+  {
+   "type": "way",
+   "id": 228183415,
+   "center": {
+    "lat": -23.5290749,
+    "lon": -46.6316086
+   },
+   "tags": {
+    "bicycle": "yes",
+    "crossing": "marked",
+    "crossing:island": "yes",
+    "crossing:markings": "yes",
+    "footway": "crossing",
+    "highway": "footway",
+    "lit": "yes",
+    "surface": "asphalt",
+    "traffic_calming": "table"
+   }
+  }
+ ]
+}

@@ -180,17 +180,17 @@ class AvisadorDePerigosTest {
     @Test fun `travessia fala a 400 e semaforo com camera a 400 e 150`() {
         val av = AvisadorDePerigos()
         val t = listOf(perigo("t", 2_000.0, tipo = Perigo.TRAVESSIA_FERROVIARIA))
-        assertEquals(listOf("Travessia de trem à frente, 400 metros."), passo(av, 1_650.0, t).falas)
+        assertEquals(listOf("Travessia de trem à frente, 350 metros."), passo(av, 1_650.0, t).falas)
         val av2 = AvisadorDePerigos()
         val s = listOf(perigo("s", 2_000.0, tipo = Perigo.SEMAFORO_COM_CAMERA))
-        assertEquals(listOf("Semáforo com câmera à frente, 400 metros."), passo(av2, 1_650.0, s).falas)
+        assertEquals(listOf("Semáforo com câmera à frente, 350 metros."), passo(av2, 1_650.0, s).falas)
         assertEquals(listOf("Semáforo com câmera à frente, 150 metros."), passo(av2, 1_860.0, s).falas)
     }
 
     @Test fun `entrar perto fala so o limiar mais curto e nao repete os longos`() {
         val av = AvisadorDePerigos()
         val ps = listOf(perigo("r", 2_000.0))
-        assertEquals(listOf("Radar à frente, 300 metros."), passo(av, 1_750.0, ps).falas)
+        assertEquals(listOf("Radar à frente, 250 metros."), passo(av, 1_750.0, ps).falas) // fala a distância real, não o limiar
         assertTrue(passo(av, 1_760.0, ps).falas.isEmpty())
         assertTrue(passo(av, 1_780.0, ps).falas.isEmpty()) // o 800 já foi dado por superado
     }
@@ -210,7 +210,7 @@ class AvisadorDePerigosTest {
         val av = AvisadorDePerigos()
         val ps = listOf(perigo("r", 500.0))
         // anda para o leste, a 80 m/s... de 0 a 500 m
-        assertEquals(listOf("Radar à frente, 300 metros."), av.atualizar(ll(220.0), 90.0, 15.0, null, null, ps).falas)
+        assertEquals(listOf("Radar à frente, 300 metros."), av.atualizar(ll(220.0), 90.0, 15.0, null, null, ps).falas) // 280 m
         assertEquals(listOf("Radar adiante."), av.atualizar(ll(420.0), 90.0, 15.0, null, null, ps).falas)
         assertNotNull(av.atualizar(ll(480.0), 90.0, 15.0, null, null, ps).alerta)
         // passou: o perigo está atrás
@@ -219,6 +219,44 @@ class AvisadorDePerigosTest {
         // virou e voltou de longe (> 2 km): nova passagem, avisa de novo
         assertNull(av.atualizar(ll(3_000.0), 270.0, 15.0, null, null, ps).alerta)
         assertEquals(listOf("Radar à frente, 300 metros."), av.atualizar(ll(790.0), 270.0, 15.0, null, null, ps).falas)
+    }
+
+    @Test fun `modo livre parado a 100 m nao apaga o cartao nem marca como passado`() {
+        val av = AvisadorDePerigos()
+        val ps = listOf(perigo("l", 500.0, tipo = Perigo.LOMBADA))
+        av.atualizar(ll(300.0), 90.0, 15.0, null, null, ps) // 200 m: falou o de 300
+        val andando = av.atualizar(ll(400.0), 90.0, 15.0, null, null, ps)
+        assertEquals(listOf("Lombada à frente, 100 metros."), andando.falas)
+        // parou no sinal a 100 m: velocidade 0 e rumo nulo (GPS parado)
+        for (vel in listOf(0.0, 1.0)) {
+            val parado = av.atualizar(ll(400.0), null, vel, null, null, ps)
+            assertEquals("l", parado.alerta!!.perigo.id)
+            assertTrue(parado.falas.isEmpty())
+        }
+        // volta a andar: segue sendo o alvo, sem repetir fala
+        val sai = av.atualizar(ll(450.0), 90.0, 8.0, null, null, ps)
+        assertEquals("l", sai.alerta!!.perigo.id)
+        assertTrue(sai.falas.isEmpty())
+        // só some quando ficou ATRÁS (>90º do rumo) em movimento
+        assertNull(av.atualizar(ll(520.0), 90.0, 8.0, null, null, ps).alerta)
+    }
+
+    @Test fun `modo livre sem rumo ou sem velocidade nunca marca passado`() {
+        val av = AvisadorDePerigos()
+        val ps = listOf(perigo("l", 500.0, tipo = Perigo.LOMBADA))
+        av.atualizar(ll(400.0), 90.0, 15.0, null, null, ps)
+        // some do alcance do alvo por GPS sem rumo e ESTANDO atrás do perigo, porém parado: não conclui nada
+        av.atualizar(ll(560.0), null, 0.0, null, null, ps)
+        // andando de novo para o perigo (voltou): ainda é alvo
+        assertEquals("l", av.atualizar(ll(450.0), 90.0, 8.0, null, null, ps).alerta?.perigo?.id)
+    }
+
+    @Test fun `na rota parado perto do perigo mantem o cartao`() {
+        val av = AvisadorDePerigos()
+        val ps = listOf(perigo("l", 2_000.0, tipo = Perigo.LOMBADA))
+        passo(av, 1_900.0, ps)
+        assertEquals("l", passo(av, 1_900.0, ps, velMps = 0.0).alerta!!.perigo.id)
+        assertNull(passo(av, 2_020.0, ps, velMps = 0.0).alerta) // projeção negativa: passou
     }
 
     @Test fun `radar com limite fala o limite e avisa quando esta acima`() {
@@ -266,7 +304,7 @@ class AvisadorDePerigosTest {
         passo(av, 1_490.0, ps)
         val r = passo(av, 1_520.0, ps)
         assertEquals("l2", r.alerta!!.perigo.id)
-        assertEquals(listOf("Lombada à frente, 300 metros."), r.falas) // l2 a 180 m: o aviso de 300 m dele ainda não tinha sido dado
+        assertEquals(listOf("Lombada à frente, 200 metros."), r.falas) // l2 a 180 m: o aviso de 300 m dele ainda não tinha sido dado
     }
 
     @Test fun `reset zera a memoria`() {
@@ -318,7 +356,12 @@ class PerigoMonitorTest {
         val m = monitor(listOf(todos[0]))
         assertEquals(listOf("Radar à frente, 300 metros."), m.onPoint(ponto(1_210.0), NavUiState()))
         t += 1_000
-        assertTrue(m.onPoint(ponto(1_300.0, vel = 1f), NavUiState()).isEmpty()) // parado: sem alerta
+        // parado (sinal): não fala de novo, e o cartão do alvo que já era continua
+        assertTrue(m.onPoint(ponto(1_300.0, vel = 1f), NavUiState()).isEmpty())
+        assertEquals("radar", publicados.last()!!.perigo.id)
+        // um perigo NOVO não vira alvo com o app parado
+        val outro = monitor(listOf(todos[0]))
+        assertTrue(outro.onPoint(ponto(1_300.0, vel = 1f), NavUiState()).isEmpty())
         assertNull(publicados.last())
     }
 
