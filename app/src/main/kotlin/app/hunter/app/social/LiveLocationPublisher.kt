@@ -11,20 +11,32 @@ import app.hunter.trips.recording.LocationSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 
 /**
  * Publicador reativo de localização geográfica para a nuvem.
  *
  * Transmite coordenadas em tempo real para [store] apenas quando:
- * 1) O Pod BLE estiver conectado ([isPodConnected]);
+ * 1) O Pod BLE estiver conectado ([isPodConnected]) OU o app estiver aberto, em primeiro plano
+ *    ([appInForeground], com o GPS do celular; nunca em segundo plano sem o Pod, e sem pedir localização em
+ *    segundo plano);
  * 2) Houver pelo menos um amigo autorizado ([grantedPermissions] não vazio).
+ *
+ * Ao ir para segundo plano sem o Pod, espera [backgroundGraceMs] (girar a tela recria a Activity e passa por
+ * "segundo plano" por um instante) e então para e apaga a posição.
+ *
+ * Falhas (fluxo de permissões, GPS sem permissão, rede) são registradas em [log] e tentadas de novo com recuo
+ * exponencial (de [retryBaseMs] até [retryMaxMs]), sem laço apertado e sem derrubar o processo.
  *
  * Filtra as leituras de [locationSource] para não sobrecarregar a cota da nuvem nem a bateria:
  * - Garante um piso temporal mínimo de [minFloorMs] (padrão: 10 s) para proteger a cota diária do plano Spark
@@ -41,10 +53,14 @@ class LiveLocationPublisher(
     private val locationSource: LocationSource,
     private val isPodConnected: Flow<Boolean>,
     private val grantedPermissions: Flow<Set<String>>,
+    private val appInForeground: Flow<Boolean> = flowOf(false),
     private val clock: () -> Long = System::currentTimeMillis,
     private val minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
     private val minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
     private val minDistanceMeters: Double = DEFAULT_MIN_DISTANCE_METERS,
+    private val backgroundGraceMs: Long = DEFAULT_BACKGROUND_GRACE_MS,
+    private val retryBaseMs: Long = DEFAULT_RETRY_BASE_MS,
+    private val retryMaxMs: Long = DEFAULT_RETRY_MAX_MS,
     private val log: (String, Throwable?) -> Unit = { msg, err ->
         if (err != null) Log.w(TAG, msg, err) else Log.d(TAG, msg)
     },
@@ -55,6 +71,7 @@ class LiveLocationPublisher(
         locationSource: LocationSource,
         podStatus: StateFlow<PodUiState>,
         grantedPermissions: Flow<Set<String>>,
+        appInForeground: Flow<Boolean> = flowOf(false),
         clock: () -> Long = System::currentTimeMillis,
         minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
         minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
@@ -68,6 +85,7 @@ class LiveLocationPublisher(
         locationSource = locationSource,
         isPodConnected = podStatus.map { it.phase == PodPhase.CONNECTED },
         grantedPermissions = grantedPermissions,
+        appInForeground = appInForeground,
         clock = clock,
         minFloorMs = minFloorMs,
         minIntervalMs = minIntervalMs,
@@ -86,22 +104,51 @@ class LiveLocationPublisher(
     @Volatile
     private var lastSentPoint: TrackPoint? = null
 
+    private fun backoffMs(attempt: Int): Long {
+        val shifted = if (attempt >= 20) Long.MAX_VALUE else retryBaseMs shl attempt
+        return if (shifted <= 0L) retryMaxMs else shifted.coerceAtMost(retryMaxMs)
+    }
+
+    /** Primeiro plano com tolerância ao sair: só vira falso depois de [backgroundGraceMs] contínuos. */
+    private fun foregroundWithGrace(): Flow<Boolean> {
+        var last = false
+        return appInForeground.distinctUntilChanged().transformLatest { fg ->
+            if (!fg && last) delay(backgroundGraceMs)
+            last = fg
+            emit(fg)
+        }
+    }
+
     fun start(): Job {
         if (job?.isActive == true) return job!!
+        val safePermissions = grantedPermissions.retryWhen { cause, attempt ->
+            if (cause is CancellationException) return@retryWhen false
+            log("Falha ao observar permissões de localização; tentando de novo", cause)
+            delay(backoffMs(attempt.coerceAtMost(30L).toInt()))
+            true
+        }
         val j = scope.launch {
-            combine(isPodConnected, grantedPermissions) { connected, perms ->
-                connected && perms.isNotEmpty()
+            combine(isPodConnected, foregroundWithGrace(), safePermissions) { pod, fg, perms ->
+                (pod || fg) && perms.isNotEmpty()
             }.distinctUntilChanged().collectLatest { active ->
                 if (active) {
                     wasActive = true
-                    try {
-                        locationSource.updates().collect { point ->
-                            onLocationUpdate(point)
+                    var attempt = 0
+                    while (true) {
+                        try {
+                            locationSource.updates().collect { point ->
+                                attempt = 0
+                                onLocationUpdate(point)
+                            }
+                            break
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            // SecurityException (permissão de GPS ainda não concedida) também cai aqui.
+                            log("Falha ao coletar pontos de localização; tentando de novo", e)
+                            delay(backoffMs(attempt))
+                            attempt++
                         }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        log("Falha ao coletar pontos de localização", e)
                     }
                 } else {
                     if (wasActive) {
@@ -113,7 +160,7 @@ class LiveLocationPublisher(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
-                            log("Falha ao limpar localização após desconexão", e)
+                            log("Falha ao limpar localização ao parar de compartilhar", e)
                         }
                     }
                 }
@@ -125,6 +172,8 @@ class LiveLocationPublisher(
 
     private suspend fun onLocationUpdate(point: TrackPoint) {
         val now = clock()
+        // Posição em cache (última conhecida da rede, de horas atrás) não pode sair com a hora de agora.
+        if (point.timeMs > 0L && now - point.timeMs > MAX_POINT_AGE_MS) return
         val elapsed = now - lastSentMs
         val dist = lastSentPoint?.let { Geo.distanceM(it, point) } ?: Double.MAX_VALUE
         if (lastSentPoint == null || (elapsed >= minFloorMs && (elapsed >= minIntervalMs || dist >= minDistanceMeters))) {
@@ -175,6 +224,11 @@ class LiveLocationPublisher(
         const val DEFAULT_MIN_FLOOR_MS = 10_000L
         const val DEFAULT_MIN_INTERVAL_MS = 30_000L
         const val DEFAULT_MIN_DISTANCE_METERS = 100.0
+        /** Pontos mais velhos que isso (relógio do aparelho) não são publicados. */
+        const val MAX_POINT_AGE_MS = 120_000L
+        const val DEFAULT_BACKGROUND_GRACE_MS = 5_000L
+        const val DEFAULT_RETRY_BASE_MS = 2_000L
+        const val DEFAULT_RETRY_MAX_MS = 60_000L
 
         fun fromPodStatus(
             scope: CoroutineScope,
@@ -182,6 +236,7 @@ class LiveLocationPublisher(
             locationSource: LocationSource,
             podStatus: Flow<PodUiState>,
             grantedPermissions: Flow<Set<String>>,
+            appInForeground: Flow<Boolean> = flowOf(false),
             clock: () -> Long = System::currentTimeMillis,
             minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
             minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
@@ -195,6 +250,7 @@ class LiveLocationPublisher(
             locationSource = locationSource,
             isPodConnected = podStatus.map { it.phase == PodPhase.CONNECTED },
             grantedPermissions = grantedPermissions,
+            appInForeground = appInForeground,
             clock = clock,
             minFloorMs = minFloorMs,
             minIntervalMs = minIntervalMs,

@@ -10,8 +10,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,6 +52,9 @@ class LiveLocationPublisherTest {
     private val podState = MutableStateFlow(PodUiState(phase = PodPhase.IDLE))
     private val isPodConnected = MutableStateFlow(false)
     private val permissions = MutableStateFlow<Set<String>>(emptySet())
+    private val foreground = MutableStateFlow(false)
+    private val logged = mutableListOf<String>()
+    private var permissionsSource: Flow<Set<String>> = permissions
     private var currentTime = 1_000_000L
 
     private fun TestScope.createPublisher(
@@ -64,11 +69,13 @@ class LiveLocationPublisherTest {
                 store = store,
                 locationSource = locationSource,
                 podStatus = podState,
-                grantedPermissions = permissions,
+                grantedPermissions = permissionsSource,
+                appInForeground = foreground,
                 clock = { currentTime },
                 minFloorMs = minFloorMs,
                 minIntervalMs = minIntervalMs,
                 minDistanceMeters = minDistanceMeters,
+                log = { m, _ -> logged += m },
             )
         } else {
             LiveLocationPublisher(
@@ -76,11 +83,16 @@ class LiveLocationPublisherTest {
                 store = store,
                 locationSource = locationSource,
                 isPodConnected = isPodConnected,
-                grantedPermissions = permissions,
+                grantedPermissions = permissionsSource,
+                appInForeground = foreground,
                 clock = { currentTime },
                 minFloorMs = minFloorMs,
                 minIntervalMs = minIntervalMs,
                 minDistanceMeters = minDistanceMeters,
+                backgroundGraceMs = 5_000L,
+                retryBaseMs = 2_000L,
+                retryMaxMs = 60_000L,
+                log = { m, _ -> logged += m },
             )
         }
     }
@@ -329,5 +341,184 @@ class LiveLocationPublisherTest {
         val oldPub = session.liveLocationPublisher
         val otherSession = graph.session("outro")
         assertNull(otherSession)
+    }
+
+    private fun pt(lat: Double = -23.55, lon: Double = -46.63) =
+        TrackPoint(timeMs = currentTime, latitude = lat, longitude = lon)
+
+    @Test
+    fun `sem Pod, com o app em primeiro plano e permissao concedida, publica a primeira coordenada na hora`() = runTest {
+        createPublisher()
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+
+        locationSource.emit(pt())
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
+
+    @Test
+    fun `em primeiro plano mas sem nenhum amigo autorizado, nao publica`() = runTest {
+        createPublisher()
+        foreground.value = true
+        runCurrent()
+        locationSource.emit(pt())
+        runCurrent()
+        assertTrue(store.published.isEmpty())
+    }
+
+    @Test
+    fun `sem Pod, ao ir para segundo plano apaga a posicao depois da tolerancia e nao publica mais`() = runTest {
+        createPublisher()
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+        locationSource.emit(pt())
+        runCurrent()
+        assertEquals(1, store.published.size)
+
+        foreground.value = false
+        advanceTimeBy(4_000L)
+        runCurrent()
+        assertEquals(0, store.clearCalls) // dentro da tolerancia (ex.: girar a tela)
+
+        advanceTimeBy(1_500L)
+        runCurrent()
+        assertEquals(1, store.clearCalls)
+        currentTime += 60_000L
+        locationSource.emit(pt(-23.6))
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
+
+    @Test
+    fun `voltar ao primeiro plano dentro da tolerancia nao apaga nem reinicia a publicacao`() = runTest {
+        createPublisher()
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+        locationSource.emit(pt())
+        runCurrent()
+
+        foreground.value = false
+        advanceTimeBy(2_000L)
+        foreground.value = true
+        advanceTimeBy(10_000L)
+        runCurrent()
+        assertEquals(0, store.clearCalls)
+    }
+
+    @Test
+    fun `com o Pod conectado continua publicando mesmo em segundo plano`() = runTest {
+        createPublisher()
+        permissions.value = setOf("amigo1")
+        isPodConnected.value = true
+        foreground.value = true
+        runCurrent()
+        foreground.value = false
+        advanceTimeBy(20_000L)
+        runCurrent()
+        assertEquals(0, store.clearCalls)
+        locationSource.emit(pt())
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
+
+    @Test
+    fun `falha no fluxo de permissoes e registrada e tentada de novo sem derrubar`() = runTest {
+        var attempts = 0
+        permissionsSource = flow {
+            attempts++
+            if (attempts == 1) throw java.io.IOException("sem rede")
+            emit(setOf("amigo1"))
+        }
+        createPublisher()
+        foreground.value = true
+        runCurrent()
+        assertEquals(1, attempts)
+        assertTrue(logged.any { it.contains("permiss") })
+
+        advanceTimeBy(2_100L)
+        runCurrent()
+        assertEquals(2, attempts)
+        locationSource.emit(pt())
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
+
+    @Test
+    fun `SecurityException do GPS e tentada de novo com recuo ate a permissao ser concedida`() = runTest {
+        var calls = 0
+        val shared = MutableSharedFlow<TrackPoint>(extraBufferCapacity = 8)
+        val source = LocationSource {
+            calls++
+            if (calls < 3) flow { throw SecurityException("sem permissao") } else shared
+        }
+        LiveLocationPublisher(
+            scope = backgroundScope, store = store, locationSource = source,
+            isPodConnected = isPodConnected, grantedPermissions = permissions, appInForeground = foreground,
+            clock = { currentTime }, backgroundGraceMs = 5_000L, retryBaseMs = 2_000L, retryMaxMs = 60_000L,
+            log = { m, _ -> logged += m },
+        )
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+        assertEquals(1, calls)
+        advanceTimeBy(1_900L); runCurrent()
+        assertEquals(1, calls) // recuo: sem laco apertado
+        advanceTimeBy(200L); runCurrent()
+        assertEquals(2, calls)
+        advanceTimeBy(4_100L); runCurrent() // segundo recuo: 4 s
+        assertEquals(3, calls)
+        shared.tryEmit(pt())
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
+
+    @Test
+    fun `falha ao publicar e registrada e o proximo ponto tenta de novo`() = runTest {
+        var fail = true
+        val flaky = object : SocialStore by FakeSocialStore() {
+            val ok = mutableListOf<LiveLocation>()
+            override suspend fun publishLocation(loc: LiveLocation) {
+                if (fail) throw java.io.IOException("sem rede")
+                ok += loc
+            }
+            override suspend fun clearLocation() {}
+        }
+        LiveLocationPublisher(
+            scope = backgroundScope, store = flaky, locationSource = locationSource,
+            isPodConnected = isPodConnected, grantedPermissions = permissions, appInForeground = foreground,
+            clock = { currentTime }, log = { m, _ -> logged += m },
+        )
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+        locationSource.emit(pt())
+        runCurrent()
+        assertTrue(logged.any { it.contains("publicar") })
+        assertTrue(flaky.ok.isEmpty())
+
+        fail = false
+        currentTime += 1_000L
+        locationSource.emit(pt())
+        runCurrent()
+        assertEquals(1, flaky.ok.size)
+    }
+
+    @Test
+    fun `ponto velho em cache nao e publicado como se fosse de agora`() = runTest {
+        currentTime = 10_000_000L
+        createPublisher()
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+        locationSource.emit(TrackPoint(timeMs = currentTime - 3_600_000L, latitude = -23.55, longitude = -46.63))
+        runCurrent()
+        assertTrue(store.published.isEmpty())
+        locationSource.emit(pt())
+        runCurrent()
+        assertEquals(1, store.published.size)
     }
 }

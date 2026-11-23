@@ -154,7 +154,8 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
         readCostPerKm = { FuelMath.summarize(database.syncDao().fuelups().map { it.toModel() }).avgCostPerKm },
         searchPrefs = SearchPref(prefs, ::signedUid),
         scope = scope,
-        locationSourceFactory = { AndroidLocationSource(app) },
+        // Rede só para o primeiro fix (e dentro de um ambiente fechado); pontos velhos são descartados pelo publicador.
+        locationSourceFactory = { AndroidLocationSource(app, intervalMs = 3_000L, includeNetwork = true) },
     )
 
     /** Há algo ainda não enviado à nuvem (a tela de perfil bloqueia "Sair" enquanto houver). */
