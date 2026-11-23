@@ -256,6 +256,29 @@ class AuthRepositoryTest {
         assertEquals(1, gateway.signOuts)
     }
 
+    @Test
+    fun `sair para o social ANTES de encerrar a sessao e uma falha dele nao impede o logout`() = runTest {
+        var stateWhenCalled: AuthState? = null
+        gateway.state.value = AuthState.SignedIn("u1", "Ana", "a@b.c", true)
+        val r = AuthRepository(
+            gateway, SyncEngine(local, remote) { 1L }, flag,
+            beforeSignOut = { stateWhenCalled = gateway.state.value; ev.list += "social"; throw IOException("sem rede") },
+        )
+        assertEquals(AuthResult.Ok, r.signOut())
+        assertIs<AuthState.SignedIn>(stateWhenCalled)
+        assertEquals(1, gateway.signOuts)
+        assertTrue(ev.list.indexOf("social") < ev.list.indexOf("sair"))
+    }
+
+    @Test
+    fun `sair bloqueado por pendencia nao para o social`() = runTest {
+        var called = false
+        local.dirtyDocs = listOf(sujo)
+        val r = AuthRepository(gateway, SyncEngine(local, remote) { 1L }, flag, beforeSignOut = { called = true })
+        assertIs<AuthResult.Error>(r.signOut())
+        assertFalse(called)
+    }
+
     private fun err(k: AuthError) = AuthResult.Error(k, "x")
 
     @Test

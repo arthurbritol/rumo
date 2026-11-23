@@ -17,13 +17,16 @@ undefined
 
 - **Localização compartilhada agora também com o app aberto**: a posição dos amigos autorizados é publicada com o Rumo aberto (GPS do celular), sem precisar do Tripper Pod; com o Pod conectado continua publicando mesmo em segundo plano. Ao sair do app sem o Pod a posição é apagada (sem localização em segundo plano). O primeiro ponto usa também a rede para sair mais rápido.
 - **Amigos: reciprocidade e explicação**: a aba Amigos explica quando a localização é publicada e cada amigo mostra "Você compartilha com X" e "X compartilha com você" / "X ainda não compartilha com você".
-- **"Visto por último"**: quem recebeu autorização de localização vê "online agora" ou "Visto há N min/h/dias" no cartão do amigo (novo documento `presenca/{uid}`). **Requer publicar as regras** (`firebase deploy --only firestore:rules`); sem isso o app só não mostra o texto.
+- **"Visto por último"**: quem recebeu autorização de localização vê "online agora" ou "Visto há N min/h/dias" no cartão do amigo (novo documento `presenca/{uid}`), gravado só com o app na frente e renovado a cada minuto; ao sair da conta o "visto" e a posição são apagados. **Requer publicar as regras** (`firebase deploy --only firestore:rules`); sem isso o app só não mostra o texto.
 
 ### Alterado
 - **Navegação enxuta**: com o GPS ativo a tela mostra só o essencial. Em retrato: banner baixo de manobra no topo (ícone, distância e via) e barra fina embaixo (velocidade, chegada, tempo e distância restantes, Voz/Mudo e Encerrar). Em paisagem: uma coluna estreita à esquerda com a mesma informação e o mapa ocupando o resto da tela. Busca, faixas, botões de postos/trânsito/rolê, cartões e a barra de abas ficam ocultos e voltam ao encerrar; só o botão Centralizar (quando o mapa é movido) e a pílula do encontro, se houver, permanecem. Respeita as áreas seguras do sistema. Roteiro em `docs/TESTES-MANUAIS-NAVEGACAO.md`.
 
 ### Corrigido
 - **Amigo não aparecia no mapa mesmo com o compartilhamento ligado**: a posição só era publicada com o Pod conectado; agora também com o app aberto.
+- **Selo do amigo**: com localização ao vivo mas parado aparece "Ao vivo agora"; "Na estrada" só com velocidade acima de 5 km/h.
+- **Autorizações órfãs**: desfazer a amizade ou bloquear apaga as autorizações de localização do par (nos dois sentidos), e a publicação só considera amigos atuais. Sair da conta para a publicação e apaga a posição.
+- **Localização parada**: com a moto parada a posição é republicada só a cada 4 min (em movimento, o ritmo de antes); pontos de rede com precisão pior que 1 km ou velhos (medidos pelo relógio monotônico) são descartados.
 - **Robustez da localização compartilhada**: erro ao observar um amigo ou as permissões era engolido e nunca refeito; agora é registrado e tentado de novo com recuo (até 60 s). GPS sem permissão concedida na hora volta a tentar depois.
 - **Rolê por perto: proposta não aparecia no outro aparelho**: os rótulos do ponto da proposta ("N de M") e dos amigos no mapa não tinham fonte definida; o estilo do mapa (OpenFreeMap) não serve a fonte padrão, então o símbolo (ícone e texto) podia nem ser desenhado. Agora essas camadas usam "Noto Sans Bold", como as de combustível.
 

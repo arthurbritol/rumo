@@ -23,6 +23,11 @@ class AuthRepository(
     private val firstSyncTimeoutMs: Long = FIRST_SYNC_TIMEOUT_MS,
     /** Chamado (ainda dentro da trava) quando a primeira sincronização do login termina com sucesso. */
     private val onSynced: () -> Unit = {},
+    /**
+     * Chamado depois da limpeza local e ANTES de encerrar a sessão (ainda logado: as regras do Firestore exigem
+     * login): o social para de publicar e apaga posição e "visto por último". Falhas não impedem o logout.
+     */
+    private val beforeSignOut: suspend () -> Unit = {},
 ) {
     val state: StateFlow<AuthState> get() = gateway.state
 
@@ -54,6 +59,11 @@ class AuthRepository(
                 engine.signOutWipe()
             } catch (e: IllegalStateException) {
                 return@withLock blocked() // uma edição chegou entre a checagem e a limpeza
+            }
+            try {
+                beforeSignOut()
+            } catch (e: Exception) {
+                // melhor esforço: a posição expira sozinha (5 min) e o logout não pode travar por isso
             }
             gateway.signOut()
             AuthResult.Ok

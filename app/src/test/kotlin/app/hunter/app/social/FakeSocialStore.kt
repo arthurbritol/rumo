@@ -96,8 +96,23 @@ class FakeSocialStore : SocialStore {
         declined += from to to
         invitesFlow.value = invitesFlow.value.filterNot { it.fromUid == from && it.toUid == to }
     }
-    override suspend fun unfriend(uid: String, other: String) { check() }
-    override suspend fun block(uid: String, other: String) { check(); blockedUids += other }
+    /** Como o store real: desfazer amizade ou bloquear apaga as autorizações de localização do par, nos dois sentidos. */
+    private fun dropPermissions(other: String) {
+        grantedPermissions -= other
+        grantedFlow.value = grantedPermissions.toSet()
+        receivedFlow.value = receivedFlow.value - other
+    }
+    override suspend fun unfriend(uid: String, other: String) {
+        check()
+        friendsFlow.value = friendsFlow.value.filterNot { it.profile.uid == other }
+        dropPermissions(other)
+    }
+    override suspend fun block(uid: String, other: String) {
+        check()
+        blockedUids += other
+        friendsFlow.value = friendsFlow.value.filterNot { it.profile.uid == other }
+        dropPermissions(other)
+    }
     override suspend fun unblock(uid: String, other: String) { check(); blockedUids -= other }
     override suspend fun invitesReceived(uid: String): List<Invite> { check(); return invitesFlow.value }
     override suspend fun invitesSent(uid: String): List<Invite> { check(); return sentList.toList() }
@@ -201,6 +216,13 @@ class FakeSocialStore : SocialStore {
     val lastSeenFlows = mutableMapOf<String, MutableStateFlow<Long?>>()
     /** Falha só nas operações de "visto por último" (regras não publicadas). */
     var presenceFailure: Exception? = null
+
+    var clearLastSeenCalls = 0
+    var clearLocationCalls = 0
+    val publishedLocations = mutableListOf<LiveLocation>()
+    override suspend fun publishLocation(loc: LiveLocation) { check(); publishedLocations += loc }
+    override suspend fun clearLocation() { check(); clearLocationCalls++ }
+    override suspend fun clearLastSeen() { clearLastSeenCalls++ }
 
     override suspend fun publishLastSeen(nowMs: Long) {
         presenceFailure?.let { throw it }

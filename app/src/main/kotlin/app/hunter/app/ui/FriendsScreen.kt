@@ -682,7 +682,7 @@ private fun FriendCard(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (row.isLiveOnRoad) {
-                        StatusPill(text = "Na estrada", active = true)
+                        StatusPill(text = row.liveBadge.ifEmpty { "Ao vivo agora" }, active = true)
                     }
                 }
                 Text(

@@ -127,6 +127,9 @@ interface SocialStore {
      */
     suspend fun publishLastSeen(nowMs: Long) {}
 
+    /** Apaga o "visto por último" do usuário logado (ao sair da conta). */
+    suspend fun clearLastSeen() {}
+
     /** Observa o "visto por último" de [friendUid] (nulo se não há dado); só vale para quem me autorizou. */
     fun observeFriendLastSeen(friendUid: String): Flow<Long?> = emptyFlow()
 }

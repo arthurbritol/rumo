@@ -144,11 +144,15 @@ Os testes automatizados (unitários JVM e testes de segurança no emulador Fires
 - [ ] 10.1 Ana e Beto são amigos; nenhum Pod conectado; localização do celular permitida nos dois.
 - [ ] 10.2 Na aba Amigos de Ana há o texto "Sua localização é publicada enquanto o Rumo estiver aberto ou o Pod conectado...". No cartão de Beto: "Você não compartilha com Beto" e "Beto ainda não compartilha com você".
 - [ ] 10.3 Ana liga o interruptor de Beto: vira "Você compartilha com Beto". No aparelho de Beto o cartão de Ana passa a "Ana compartilha com você".
-- [ ] 10.4 Com o Rumo aberto no aparelho de Ana (sem Pod), o console mostra `localizacoes/{uidAna}` em alguns segundos; Beto vê "Na estrada" e a moto de Ana no mapa.
+- [ ] 10.4 Com o Rumo aberto no aparelho de Ana (sem Pod), o console mostra `localizacoes/{uidAna}` em alguns segundos; Beto vê o selo "Ao vivo agora" (parada) ou "Na estrada" (acima de 5 km/h) e a moto de Ana no mapa.
 - [ ] 10.5 Ana manda o app para segundo plano (home): em cerca de 5 s o documento `localizacoes/{uidAna}` some e o marcador sai do mapa de Beto. Girar a tela não apaga.
 - [ ] 10.6 Ana volta ao app: a posição volta a ser publicada. Beto (que foi autorizado) vê "online agora" ou "Visto há N min" no cartão de Ana quando ela não está na estrada.
 - [ ] 10.7 Caio (amigo de Ana, sem autorização dela) NÃO vê "Visto há" no cartão de Ana.
-- [ ] 10.8 Negue a permissão de localização do celular a Ana, ligue o compartilhamento e depois conceda: em até 1 minuto a posição passa a ser publicada, sem reiniciar o app.
+- [ ] 10.8 Ana desfaz a amizade com Beto (ou bloqueia): a posição some do mapa de Beto e, ao refazer a amizade, o interruptor volta desligado (a autorização antiga foi apagada).
+- [ ] 10.9 Ana sai da conta (Perfil > Sair) com o app aberto: `localizacoes/{uidAna}` e `presenca/{uidAna}` somem do console e nada é regravado.
+- [ ] 10.10 Com o app aberto e Ana parada, `updatedAtMs` de `localizacoes/{uidAna}` avança a cada ~4 min (em movimento, a cada 30 s ou 100 m).
+- [ ] 10.11 Enquanto o app fica aberto, `presenca/{uidAna}.lastSeenMs` avança a cada ~1 min; em segundo plano deixa de avançar.
+- [ ] 10.12 Negue a permissão de localização do celular a Ana, ligue o compartilhamento e depois conceda: em até 1 minuto a posição passa a ser publicada, sem reiniciar o app.
 
 ---
 

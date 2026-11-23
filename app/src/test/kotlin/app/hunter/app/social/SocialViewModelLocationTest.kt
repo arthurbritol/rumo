@@ -231,4 +231,43 @@ class SocialViewModelLocationTest {
         vm.onForeground()
         assertEquals(listOf(false, true), backend.foregroundCalls)
     }
+
+    @Test
+    fun `PERMISSION_DENIED para a escuta em vez de repetir, e ela volta ao voltar a frente`() = runTest {
+        val logs = mutableListOf<String>()
+        store.friendsFlow.value = listOf(friend("ana", "Ana"))
+        store.receivedFlow.value = setOf("ana")
+        store.presenceFailure = java.io.IOException("PERMISSION_DENIED")
+        val vm = SocialViewModel(
+            backend, backgroundScope, clock = { now }, zone = { zone },
+            watchRetryBaseMs = 2_000L, log = { m, _ -> logs += m },
+            isPermanent = { it.message == "PERMISSION_DENIED" },
+        ).also { it.showTab(true) }
+        runCurrent()
+        assertTrue(logs.any { it.contains("Sem permissão") })
+        val logged = logs.size
+        advanceTimeBy(600_000L); runCurrent()
+        assertEquals(logged, logs.size) // nada de laco: parou
+
+        store.presenceFailure = null // regras publicadas
+        store.lastSeenFlows.getOrPut("ana") { MutableStateFlow(null) }.value = now - 10 * 60_000L
+        vm.onForeground()
+        runCurrent()
+        assertEquals("Visto há 10 min", vm.state.value.friends.single().lastSeenLabel)
+    }
+
+    @Test
+    fun `desfazer amizade apaga as autorizacoes do par e some a localizacao do amigo`() = runTest {
+        store.friendsFlow.value = listOf(friend("ana", "Ana"))
+        store.grantedPermissions += "ana"
+        store.grantedFlow.value = setOf("ana")
+        store.receivedFlow.value = setOf("ana")
+        val vm = vm()
+        runCurrent()
+        vm.unfriend("ana")
+        runCurrent()
+        assertTrue(store.grantedPermissions.isEmpty())
+        assertTrue(store.receivedFlow.value.isEmpty())
+        assertTrue(vm.grantedPermissions.value.isEmpty())
+    }
 }

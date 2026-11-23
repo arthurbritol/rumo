@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -74,6 +76,11 @@ class SocialGraph(
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     private val clock: () -> Long = System::currentTimeMillis,
     private val log: (String, Throwable) -> Unit = { m, e -> Log.w("Rumo/social", m, e) },
+    /** "Visto por último" é renovado a cada tanto enquanto o app está na frente. */
+    private val presenceRenewMs: Long = 60_000L,
+    /** Girar a tela passa por ON_STOP/ON_START: a gravação ao sair espera isso passar. */
+    private val rotationDebounceMs: Long = 3_000L,
+    private val presenceTimeoutMs: Long = 5_000L,
 ) : SocialBackend {
     private val store: SocialStore by lazy(storeProvider)
 
@@ -88,6 +95,21 @@ class SocialGraph(
     private var pending: Job? = null
 
     private val foreground = MutableStateFlow(false)
+    private var presenceLoop: Job? = null
+    private var backgroundWrite: Job? = null
+    @Volatile
+    private var lastPresenceWriteMs = Long.MIN_VALUE / 2
+
+    init {
+        // Ao virar visitante (logout, exclusão) a sessão em cache e o publicador de localização caem.
+        scope.launch { uid.collect { if (it == null) dropSession() } }
+    }
+
+    @Synchronized
+    private fun dropSession() {
+        cached?.liveLocationPublisher?.stop()
+        cached = null
+    }
 
     @Synchronized
     override fun session(uid: String): SocialSession? {
@@ -108,7 +130,8 @@ class SocialGraph(
                 store = store,
                 locationSource = src,
                 isPodConnected = isPodConnected,
-                grantedPermissions = store.observeGrantedPermissions(uid),
+                // Só quem ainda é amigo conta (uma permissão órfã de amizade desfeita não mantém a publicação).
+                grantedPermissions = combine(store.observeGrantedPermissions(uid), store.observeFriendUids(uid)) { g, f -> g intersect f },
                 appInForeground = foreground,
                 clock = clock,
             )
@@ -136,32 +159,70 @@ class SocialGraph(
         publishLock.withLock { store.deleteAllSocial(uid) }
     }
 
-    /** Volta do app para a frente: publica (respeitando o intervalo) para refletir a semana que pode ter virado. */
-    fun onForeground() {
-        foreground.value = true
-        publishSoon(force = false)
-    }
-
-    override fun setAppForeground(foreground: Boolean) {
-        if (foreground) {
-            this.foreground.value = true
-        } else {
-            onBackground()
-        }
-    }
-
-    /** O app saiu da frente: para a localização sem Pod e grava o "visto por último" (melhor esforço, sem limite). */
-    fun onBackground() {
-        foreground.value = false
-        scope.launch {
+    /**
+     * Antes de sair da conta (ainda logado): para a publicação de localização, apaga `localizacoes/{uid}` e
+     * `presenca/{uid}`. Melhor esforço, cada passo com limite de tempo (sem rede o logout não pode travar).
+     */
+    suspend fun stopSharing() {
+        presenceLoop?.cancel()
+        presenceLoop = null
+        backgroundWrite?.cancel()
+        val uid = currentUid()
+        val s = if (uid != null) session(uid) else null
+        s?.liveLocationPublisher?.stop()
+        if (s == null) return
+        for ((what, step) in listOf<Pair<String, suspend () -> Unit>>(
+            "limpar localização" to { s.store.clearLocation() },
+            "apagar visto por último" to { s.store.clearLastSeen() },
+        )) {
             try {
-                val uid = currentUid() ?: return@launch
-                session(uid)?.publisher?.publishLastSeen()
+                withTimeoutOrNull(presenceTimeoutMs) { step() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                log("Falha ao gravar visto por último", e)
+                log("Falha ao $what ao sair", e)
             }
+        }
+    }
+
+    override fun setAppForeground(foreground: Boolean) {
+        this.foreground.value = foreground
+        backgroundWrite?.cancel()
+        if (foreground) {
+            if (presenceLoop?.isActive != true) presenceLoop = scope.launch { runPresenceLoop() }
+        } else {
+            presenceLoop?.cancel()
+            presenceLoop = null
+            // No máximo uma gravação em voo, com limite de tempo, depois de a rotação de tela passar.
+            backgroundWrite = scope.launch {
+                delay(rotationDebounceMs)
+                if (!this@SocialGraph.foreground.value) withTimeoutOrNull(presenceTimeoutMs) { writeLastSeen() }
+            }
+        }
+    }
+
+    /** Grava na hora e renova a cada [presenceRenewMs] enquanto o app estiver na frente. */
+    private suspend fun runPresenceLoop() {
+        // Voltar à frente logo depois de sair (ex.: girar a tela) não regrava antes de a renovação vencer.
+        val wait = presenceRenewMs - (clock() - lastPresenceWriteMs)
+        if (wait > 0) delay(wait)
+        while (true) {
+            writeLastSeen()
+            delay(presenceRenewMs)
+        }
+    }
+
+    /** "Visto por último" só nasce do app na frente (ou da saída dele); nunca de uma publicação em segundo plano. */
+    private suspend fun writeLastSeen() {
+        try {
+            val uid = currentUid() ?: return
+            lastPresenceWriteMs = clock()
+            session(uid)?.publisher?.publishLastSeen()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lastPresenceWriteMs = 0L
+            log("Falha ao gravar visto por último", e)
         }
     }
 
@@ -182,14 +243,6 @@ class SocialGraph(
                 }
                 lastPublishedAtMs = now
                 try {
-                    // Passo próprio: "visto por último" não depende de a atividade ter mudado nem de haver perfil.
-                    try {
-                        s.publisher.publishLastSeen()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        log("Falha ao gravar visto por último", e)
-                    }
                     s.publisher.publishAll(force)
                 } catch (e: Throwable) {
                     lastPublishedAtMs = 0L

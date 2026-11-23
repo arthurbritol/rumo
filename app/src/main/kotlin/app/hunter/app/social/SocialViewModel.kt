@@ -1,6 +1,7 @@
 package app.hunter.app.social
 
 import android.util.Log
+import com.google.firebase.firestore.FirebaseFirestoreException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -102,6 +103,10 @@ class SocialViewModel(
     private val watchRetryBaseMs: Long = 2_000L,
     private val watchRetryMaxMs: Long = 60_000L,
     private val log: (String, Throwable) -> Unit = { m, e -> runCatching { Log.w("Rumo/social", m, e) } },
+    /** Erro que não adianta repetir (PERMISSION_DENIED: amizade desfeita, autorização revogada, regras ausentes). */
+    private val isPermanent: (Throwable) -> Boolean = {
+        it is FirebaseFirestoreException && it.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
+    },
 ) : ViewModel() {
     private val scope: CoroutineScope = scope ?: viewModelScope
 
@@ -279,6 +284,7 @@ class SocialViewModel(
                 locationJobs[friendUid] = watchWithBackoff(
                     "localização de $friendUid",
                     source = { s.store.observeFriendLocation(friendUid) },
+                    onStopped = { locationJobs.remove(friendUid) },
                 ) { loc ->
                     _activeFriendsOnRoad.update { current ->
                         if (loc == null || !loc.isValid()) current - friendUid else current + (friendUid to loc)
@@ -291,6 +297,7 @@ class SocialViewModel(
                 presenceJobs[friendUid] = watchWithBackoff(
                     "visto por último de $friendUid",
                     source = { s.store.observeFriendLastSeen(friendUid) },
+                    onStopped = { presenceJobs.remove(friendUid) },
                 ) { seen ->
                     lastSeenByFriend = if (seen == null) lastSeenByFriend - friendUid else lastSeenByFriend + (friendUid to seen)
                     rebuildFriends()
@@ -305,7 +312,12 @@ class SocialViewModel(
      * exponencial (2 s, 4 s, ... até 60 s), sem laço apertado; o recuo volta ao início quando chega um valor.
      * Nunca deixa a exceção subir (um amigo com erro não derruba os outros nem o app).
      */
-    private fun <T> watchWithBackoff(what: String, source: () -> Flow<T>, onValue: suspend (T) -> Unit): Job =
+    private fun <T> watchWithBackoff(
+        what: String,
+        source: () -> Flow<T>,
+        onStopped: () -> Unit,
+        onValue: suspend (T) -> Unit,
+    ): Job =
         scope.launch {
             var attempt = 0
             while (true) {
@@ -318,6 +330,12 @@ class SocialViewModel(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
+                    if (isPermanent(e)) {
+                        // Não repete para sempre: para (uma vez, com log) e volta quando o app voltar à frente.
+                        log("Sem permissão para observar $what; parando até o app voltar à frente", e)
+                        onStopped()
+                        return@launch
+                    }
                     log("Falha ao observar $what; tentando de novo", e)
                     val shifted = if (attempt >= 20) Long.MAX_VALUE else watchRetryBaseMs shl attempt
                     delay(if (shifted <= 0L) watchRetryMaxMs else shifted.coerceAtMost(watchRetryMaxMs))
@@ -419,6 +437,7 @@ class SocialViewModel(
     fun onForeground() {
         backend.setAppForeground(true)
         if (session == null) return
+        session?.let { onReceivedPermissions(it, receivedPermissions) } // refaz escutas paradas por PERMISSION_DENIED
         recalcWeek()
         backend.publishSoon()
         val s = session ?: return

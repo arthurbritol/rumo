@@ -15,6 +15,8 @@ data class TrackPoint(
     val speedMps: Float? = null,
     val accuracyM: Float? = null,
     val bearingDeg: Float? = null,
+    /** `Location.elapsedRealtimeNanos` (relógio monotônico; serve para medir a idade do ponto sem depender da hora do aparelho). */
+    val elapsedRealtimeNanos: Long? = null,
 )
 
 object Geo {

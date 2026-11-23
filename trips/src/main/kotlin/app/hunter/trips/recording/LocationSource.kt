@@ -70,4 +70,5 @@ internal fun Location.toTrackPoint() = TrackPoint(
     speedMps = if (hasSpeed()) speed else null,
     accuracyM = if (hasAccuracy()) accuracy else null,
     bearingDeg = if (hasBearing()) bearing else null,
+    elapsedRealtimeNanos = elapsedRealtimeNanos,
 )

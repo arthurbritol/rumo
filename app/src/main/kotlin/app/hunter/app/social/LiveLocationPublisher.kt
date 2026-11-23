@@ -61,6 +61,10 @@ class LiveLocationPublisher(
     private val backgroundGraceMs: Long = DEFAULT_BACKGROUND_GRACE_MS,
     private val retryBaseMs: Long = DEFAULT_RETRY_BASE_MS,
     private val retryMaxMs: Long = DEFAULT_RETRY_MAX_MS,
+    /** Parado (velocidade conhecida < 1 m/s e sem sair do lugar) publica só a cada [stationaryRefreshMs] (a validade é 5 min). */
+    private val stationaryRefreshMs: Long = DEFAULT_STATIONARY_REFRESH_MS,
+    /** Relógio monotônico (para a idade do ponto via `elapsedRealtimeNanos`); só é lido se o ponto traz esse campo. */
+    private val monotonicNanos: () -> Long = { android.os.SystemClock.elapsedRealtimeNanos() },
     private val log: (String, Throwable?) -> Unit = { msg, err ->
         if (err != null) Log.w(TAG, msg, err) else Log.d(TAG, msg)
     },
@@ -173,10 +177,17 @@ class LiveLocationPublisher(
     private suspend fun onLocationUpdate(point: TrackPoint) {
         val now = clock()
         // Posição em cache (última conhecida da rede, de horas atrás) não pode sair com a hora de agora.
-        if (point.timeMs > 0L && now - point.timeMs > MAX_POINT_AGE_MS) return
+        // A idade vem do relógio monotônico do ponto; sem ele, da hora do aparelho.
+        val ageMs = point.elapsedRealtimeNanos?.let { (monotonicNanos() - it) / 1_000_000L }
+            ?: if (point.timeMs > 0L) now - point.timeMs else 0L
+        if (ageMs > MAX_POINT_AGE_MS) return
+        // Posição de rede muito imprecisa (antena distante) não vale a pena.
+        if ((point.accuracyM ?: 0f) > MAX_ACCURACY_M) return
         val elapsed = now - lastSentMs
         val dist = lastSentPoint?.let { Geo.distanceM(it, point) } ?: Double.MAX_VALUE
-        if (lastSentPoint == null || (elapsed >= minFloorMs && (elapsed >= minIntervalMs || dist >= minDistanceMeters))) {
+        val stationary = lastSentPoint != null && dist < minDistanceMeters && (point.speedMps ?: Float.MAX_VALUE).let { it >= 0f && it < STATIONARY_MPS }
+        val dueByTime = if (stationary) elapsed >= stationaryRefreshMs else elapsed >= minIntervalMs
+        if (lastSentPoint == null || (elapsed >= minFloorMs && (dueByTime || dist >= minDistanceMeters))) {
             val liveLoc = LiveLocation(
                 latitude = point.latitude,
                 longitude = point.longitude,
@@ -226,6 +237,9 @@ class LiveLocationPublisher(
         const val DEFAULT_MIN_DISTANCE_METERS = 100.0
         /** Pontos mais velhos que isso (relógio do aparelho) não são publicados. */
         const val MAX_POINT_AGE_MS = 120_000L
+        const val MAX_ACCURACY_M = 1_000f
+        const val STATIONARY_MPS = 1f
+        const val DEFAULT_STATIONARY_REFRESH_MS = 240_000L
         const val DEFAULT_BACKGROUND_GRACE_MS = 5_000L
         const val DEFAULT_RETRY_BASE_MS = 2_000L
         const val DEFAULT_RETRY_MAX_MS = 60_000L

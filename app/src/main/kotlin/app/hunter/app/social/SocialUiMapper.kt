@@ -33,6 +33,10 @@ data class FriendRow(
     /** "online agora" / "Visto há 5 min"; nulo sem dado ou com o amigo na estrada ("Na estrada" tem prioridade). */
     val lastSeenLabel: String? = null,
     val isLiveOnRoad: Boolean = false,
+    /** Ao vivo e em movimento (acima de [MOVING_KMH]): só então o selo é "Na estrada"; parado é "Ao vivo agora". */
+    val isMoving: Boolean = false,
+    /** Texto do selo ao vivo ("Na estrada" ou "Ao vivo agora"); vazio sem localização ao vivo. */
+    val liveBadge: String = "",
     val liveLatitude: Double? = null,
     val liveLongitude: Double? = null,
     val liveSpeedKmh: Float? = null,
@@ -56,6 +60,9 @@ data class RoleRow(
     val expiresAtMs: Long,
     val expired: Boolean,
 )
+
+/** Acima disso o amigo conta como "Na estrada". */
+const val MOVING_KMH = 5f
 
 private val PT_BR: Locale = Locale.forLanguageTag("pt-BR")
 
@@ -102,6 +109,8 @@ fun friendRows(
             weekKmLabel = weekKmLabel(km),
             locationSharedWithHim = isShared,
             isLiveOnRoad = isLive,
+            isMoving = isLive && (loc?.speedKmh ?: 0f) > MOVING_KMH,
+            liveBadge = if (!isLive) "" else if ((loc?.speedKmh ?: 0f) > MOVING_KMH) "Na estrada" else "Ao vivo agora",
             liveLatitude = if (isLive) loc?.latitude else null,
             liveLongitude = if (isLive) loc?.longitude else null,
             liveSpeedKmh = if (isLive) loc?.speedKmh else null,

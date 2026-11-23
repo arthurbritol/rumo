@@ -203,7 +203,19 @@ class FirestoreSocialStore(
 
     /** Apaga a amizade (se existir). */
     override suspend fun unfriend(uid: String, other: String) {
-        deleteAll(friendshipRefs(uid, other))
+        deleteAll(friendshipRefs(uid, other) + locationPermissionRefs(uid, other))
+    }
+
+    /**
+     * `permissoesLocalizacao` do par, nos dois sentidos, que existirem (consulta por `de`+`para`, que as regras
+     * provam; ler ou apagar documento inexistente é recusado). Desfazer a amizade ou bloquear não deixa ninguém
+     * com autorização de ver a localização do outro.
+     */
+    private suspend fun locationPermissionRefs(a: String, b: String): List<DocumentReference> {
+        suspend fun one(de: String, para: String) =
+            db.collection("permissoesLocalizacao").whereEqualTo("de", de).whereEqualTo("para", para)
+                .fetch().documents.map { it.reference }
+        return one(a, b) + one(b, a)
     }
 
     private suspend fun friendshipRefs(uid: String, other: String): List<DocumentReference> {
@@ -231,7 +243,8 @@ class FirestoreSocialStore(
     }
 
     private suspend fun commitBlock(uid: String, other: String) {
-        val doomed = friendshipRefs(uid, other) + inviteRefs(uid, other) + inviteRefs(other, uid)
+        val doomed = friendshipRefs(uid, other) + inviteRefs(uid, other) + inviteRefs(other, uid) +
+            locationPermissionRefs(uid, other)
         val batch = db.batch()
         batch.set(ref("bloqueios/${blockId(uid, other)}"), blockToMap(uid, clock()))
         doomed.forEach { batch.delete(it) }
@@ -418,6 +431,11 @@ class FirestoreSocialStore(
     override suspend fun publishLastSeen(nowMs: Long) {
         val myUid = currentUid() ?: return
         ref("presenca/$myUid").set(lastSeenToMap(nowMs)).await()
+    }
+
+    override suspend fun clearLastSeen() {
+        val myUid = currentUid() ?: return
+        ref("presenca/$myUid").delete().await()
     }
 
     override fun observeFriendLastSeen(friendUid: String): Flow<Long?> =

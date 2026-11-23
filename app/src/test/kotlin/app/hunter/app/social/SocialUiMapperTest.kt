@@ -298,4 +298,33 @@ class SocialUiMapperTest {
         assertNull(rows.getValue("b").lastSeenLabel) // "Na estrada" tem prioridade
         assertNull(rows.getValue("c").lastSeenLabel) // sem dado (ou sem regras publicadas)
     }
+
+    @Test
+    fun `selo ao vivo agora quando parado e na estrada so acima de 5 km por hora`() {
+        val f = listOf(friend("a", "Ana"), friend("b", "Beto"), friend("c", "Caio"), friend("d", "Davi"))
+        val rows = friendRows(
+            f, now, zone,
+            activeFriendsOnRoad = mapOf(
+                "a" to LiveLocation(-8.0, -35.0, null, 0f, now - 10_000L),
+                "b" to LiveLocation(-8.0, -35.0, null, 60f, now - 10_000L),
+                "c" to LiveLocation(-8.0, -35.0, null, null, now - 10_000L),
+                "d" to LiveLocation(-8.0, -35.0, null, 5f, now - 10_000L),
+            ),
+            lastSeenMs = mapOf("a" to now - 600_000L),
+        ).associateBy { it.uid }
+        assertEquals("Ao vivo agora", rows.getValue("a").liveBadge)
+        assertEquals(false, rows.getValue("a").isMoving)
+        assertEquals("Na estrada", rows.getValue("b").liveBadge)
+        assertEquals(true, rows.getValue("b").isMoving)
+        assertEquals("Ao vivo agora", rows.getValue("c").liveBadge) // sem velocidade no doc
+        assertEquals("Ao vivo agora", rows.getValue("d").liveBadge) // exatamente 5 km/h ainda nao
+        assertNull(rows.getValue("a").lastSeenLabel) // ao vivo: o "Visto" nao aparece
+    }
+
+    @Test
+    fun `sem localizacao ao vivo nao ha selo e o visto por ultimo aparece`() {
+        val row = friendRows(listOf(friend("a", "Ana")), now, zone, lastSeenMs = mapOf("a" to now - 3_600_000L)).single()
+        assertEquals("", row.liveBadge)
+        assertEquals("Visto há 1 h", row.lastSeenLabel)
+    }
 }

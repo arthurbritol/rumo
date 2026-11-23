@@ -521,4 +521,63 @@ class LiveLocationPublisherTest {
         runCurrent()
         assertEquals(1, store.published.size)
     }
+
+    private fun TestScope.activePublisher(stationaryRefreshMs: Long = 240_000L, mono: () -> Long = { 0L }) {
+        LiveLocationPublisher(
+            scope = backgroundScope, store = store, locationSource = locationSource,
+            isPodConnected = isPodConnected, grantedPermissions = permissions, appInForeground = foreground,
+            clock = { currentTime }, stationaryRefreshMs = stationaryRefreshMs, monotonicNanos = mono,
+            log = { m, _ -> logged += m },
+        )
+        permissions.value = setOf("amigo1")
+        foreground.value = true
+        runCurrent()
+    }
+
+    @Test
+    fun `parado publica so a cada 4 min e em movimento mantem o ritmo de 30 s`() = runTest {
+        activePublisher()
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.55, longitude = -46.63, speedMps = 0f))
+        runCurrent()
+        assertEquals(1, store.published.size)
+
+        currentTime += 60_000L
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.55, longitude = -46.63, speedMps = 0.2f))
+        runCurrent()
+        assertEquals(1, store.published.size) // parado: nada aos 60 s
+
+        currentTime += 180_000L // 240 s desde a ultima
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.55, longitude = -46.63, speedMps = 0f))
+        runCurrent()
+        assertEquals(2, store.published.size)
+
+        currentTime += 31_000L // em movimento (velocidade acima de 1 m/s): ritmo de 30 s
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.5501, longitude = -46.63, speedMps = 10f))
+        runCurrent()
+        assertEquals(3, store.published.size)
+    }
+
+    @Test
+    fun `ponto com precisao pior que 1000 m e descartado`() = runTest {
+        activePublisher()
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.55, longitude = -46.63, accuracyM = 3_000f))
+        runCurrent()
+        assertTrue(store.published.isEmpty())
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.55, longitude = -46.63, accuracyM = 800f))
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
+
+    @Test
+    fun `idade do ponto vem do relogio monotonico, nao da hora do aparelho`() = runTest {
+        activePublisher(mono = { 500_000_000_000L })
+        // hora do aparelho "boa", mas o relogio monotonico diz que o ponto tem 10 min: descarta
+        locationSource.emit(TrackPoint(timeMs = currentTime, latitude = -23.55, longitude = -46.63, elapsedRealtimeNanos = 500_000_000_000L - 600_000_000_000L))
+        runCurrent()
+        assertTrue(store.published.isEmpty())
+        // hora do aparelho "velha" (relogio mudado), mas o ponto e fresco no monotonico: publica
+        locationSource.emit(TrackPoint(timeMs = 1L, latitude = -23.55, longitude = -46.63, elapsedRealtimeNanos = 500_000_000_000L - 2_000_000_000L))
+        runCurrent()
+        assertEquals(1, store.published.size)
+    }
 }

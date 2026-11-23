@@ -81,7 +81,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
             FirestoreRemoteStore(firestore, uid, deleteSocial = { social.deleteAllSocial(it) })
         },
     )
-    val repo = AuthRepository(gateway, engine, flag, gate, onSynced = ::afterSync)
+    val repo = AuthRepository(gateway, engine, flag, gate, onSynced = ::afterSync, beforeSignOut = { social.stopSharing() })
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
