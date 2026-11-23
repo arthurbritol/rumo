@@ -1,5 +1,7 @@
 package app.hunter.app.ui.onboarding
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,8 +82,9 @@ fun IntroPages(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 private fun IntroPageContent(p: IntroPage) {
+    // Rola quando a tela é baixa (deitado); centraliza quando sobra espaço.
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 8.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

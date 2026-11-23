@@ -50,9 +50,15 @@ fun navegacaoEnxuta(estado: EstadoDaTela, orientacao: Orientacao): ElementosDaTe
 /** Tamanho da janela: retrato (celular em pé), paisagem de celular, ou paisagem larga (tablet). */
 enum class ClasseDeTela { Retrato, PaisagemCompacta, Larga }
 
-/** Largura e altura em dp da janela (a configuração do sistema). Deitado: largura >= altura. */
+/** Largura mínima para o layout deitado (trilho + coluna + mapa). Abaixo disso (tela dividida, janela flutuante) vale o retrato compacto. */
+const val LARGURA_MINIMA_PAISAGEM_DP = 600
+
+/**
+ * Largura e altura em dp da janela (a configuração do sistema). Deitado: largura >= altura E largura >= 600 dp; uma janela
+ * deitada mais estreita (411x380, 400x360) usa o layout de retrato, que cabe em pouca largura.
+ */
 fun classeDeTela(widthDp: Int, heightDp: Int): ClasseDeTela = when {
-    widthDp < heightDp -> ClasseDeTela.Retrato
+    widthDp < heightDp || widthDp < LARGURA_MINIMA_PAISAGEM_DP -> ClasseDeTela.Retrato
     widthDp >= 900 && heightDp >= 600 -> ClasseDeTela.Larga
     else -> ClasseDeTela.PaisagemCompacta
 }
@@ -68,6 +74,27 @@ fun larguraColunaLateralDp(classe: ClasseDeTela): Int = when (classe) {
 
 /** Largura máxima do conteúdo das telas de rolagem (Viagens, Garagem, Amigos, Pod, Perfil), centralizado. */
 fun larguraMaximaDoConteudoDp(classe: ClasseDeTela): Int = if (classe == ClasseDeTela.Larga) 720 else 640
+
+/** Quantos atalhos cabem na coluna esquerda sem empurrar o resto para baixo da dobra. */
+fun maximoDeAtalhosNaColuna(classe: ClasseDeTela): Int = when (classe) {
+    ClasseDeTela.Retrato -> 0
+    ClasseDeTela.PaisagemCompacta -> 3
+    ClasseDeTela.Larga -> 6
+}
+
+private const val BOTAO_DP = 52
+private const val ESPACO_BOTOES_DP = 10
+
+/**
+ * Altura que sobra para a coluna de botões no retrato: o mapa menos o inset do topo, a busca (56), os atalhos (se houver),
+ * o cartão de baixo medido e uma folga. Os botões não podem passar daqui para não cobrir o cartão.
+ */
+fun alturaLivreParaBotoesDp(alturaDoMapaDp: Int, insetTopoDp: Int, comAtalhos: Boolean, alturaEmbaixoDp: Int): Int =
+    alturaDoMapaDp - insetTopoDp - 12 /* margem */ - 56 /* busca */ - (if (comAtalhos) 8 + 48 else 0) - 10 /* espaço */ - alturaEmbaixoDp - 12 /* folga */
+
+/** Alvos (inclusive o "mais") que cabem em [alturaLivreDp]: de 2 a 4. Com 2: um botão e o "mais". */
+fun maximoDeBotoes(alturaLivreDp: Int): Int =
+    ((alturaLivreDp + ESPACO_BOTOES_DP) / (BOTAO_DP + ESPACO_BOTOES_DP)).coerceIn(2, 4)
 
 /** Altura do mapa no detalhe de uma viagem: cabe na tela deitada sem engolir a rolagem. */
 fun alturaDoMapaDoDetalheDp(alturaDaTelaDp: Int): Int = (alturaDaTelaDp * 55 / 100).coerceIn(200, 340)
@@ -101,7 +128,7 @@ fun distribuirBotoes(disponiveis: List<BotaoDoMapa>, maximo: Int = 4): BotoesDoM
 data class EstadoDoMapa(
     val classe: ClasseDeTela,
     val tela: EstadoDaTela,
-    /** Cartão de moto, proposta ou encontro aberto (ocupa o lugar do painel inferior). */
+    /** Cartão de moto, proposta ou encontro aberto: em paisagem vai para o topo da coluna e esconde os atalhos. */
     val cartaoSelecionado: Boolean = false,
     val previaDeRota: Boolean = false,
     val postoSelecionado: Boolean = false,
@@ -124,16 +151,17 @@ data class ElementosDoMapa(
     val botoesFlutuantes: Boolean,
     /** Centralizar sozinho no canto, durante a navegação. */
     val centralizarNavegando: Boolean,
-    /** Retrato: "Pronto para rodar" em uma linha, no máximo ~96 dp. */
+    /** "Pronto para rodar" compacto (retrato: uma linha de até ~96 dp; paisagem: título, texto e botão na coluna). Só sem gravar. */
     val prontoCompacto: Boolean,
     /** Cartões (moto, proposta, encontro, posto, prévia) dentro da coluna esquerda em vez de cobrir o mapa. */
     val cartoesNaColuna: Boolean,
+    /** Na coluna, os cartões selecionados vêm ANTES da busca (e os atalhos somem), para ficarem acima da dobra. */
+    val cartoesNoTopoDaColuna: Boolean,
     /** Cartões como folha embaixo (retrato). */
     val cartoesEmbaixo: Boolean,
-    val abas: FormaDasAbas,
 )
 
-fun elementosDoMapa(e: EstadoDoMapa, naAbaDoMapa: Boolean = true): ElementosDoMapa {
+fun elementosDoMapa(e: EstadoDoMapa): ElementosDoMapa {
     val base = navegacaoEnxuta(e.tela, e.classe.orientacao())
     val paisagem = e.classe != ClasseDeTela.Retrato
     val ocioso = base.ocioso
@@ -144,12 +172,12 @@ fun elementosDoMapa(e: EstadoDoMapa, naAbaDoMapa: Boolean = true): ElementosDoMa
         colunaLateral = coluna,
         larguraColunaDp = if (coluna) larguraColunaLateralDp(e.classe) else 0,
         busca = livre,
-        atalhos = livre && e.temAtalhos && !e.tela.gravando,
+        atalhos = livre && e.temAtalhos && !e.tela.gravando && !(coluna && e.cartaoSelecionado),
         botoesFlutuantes = ocioso && !e.pesquisando && !e.previaDeRota && (base.camadas || base.recentralizar),
         centralizarNavegando = !ocioso && base.recentralizar && !e.pesquisando,
-        prontoCompacto = !paisagem && livre && !e.cartaoSelecionado && !e.tela.gravando,
+        prontoCompacto = livre && !e.tela.gravando,
         cartoesNaColuna = coluna,
+        cartoesNoTopoDaColuna = coluna && (e.cartaoSelecionado || e.previaDeRota || e.postoSelecionado),
         cartoesEmbaixo = ocioso && !paisagem,
-        abas = formaDasAbas(e.classe, base.abas, naAbaDoMapa),
     )
 }

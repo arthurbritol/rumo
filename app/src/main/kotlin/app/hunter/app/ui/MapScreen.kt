@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.fillMaxSize
@@ -156,7 +157,8 @@ fun MapScreen(
     val nearbyRiders = (nearbyState as? NearbyUiState.Procurando)?.vizinhos.orEmpty()
     val nearbyPref by nearbyVm.preferencia.collectAsStateWithLifecycle()
     var showNearbySheet by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    // Estados abaixo sobrevivem a girar o celular (a atividade é recriada): cartão aberto, busca e folha continuam.
+    // Girar o celular recria a atividade: sobrevivem a moto/proposta tocada, o ponto marcado, a folha de rolê, a busca ligada
+    // (o texto digitado não), o seguir e o encontro (mas o encontro minimizado reabre). O diálogo de preços do posto fecha.
     var selectedRider by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     val rider = selectedRider?.let { id -> nearbyRiders.firstOrNull { it.sessao == id } }
     var pendingNearbyPref by remember { mutableStateOf<Preferencia?>(null) }
@@ -168,7 +170,12 @@ fun MapScreen(
     val amigosMarcados by nearbyVm.amigosMarcados.collectAsStateWithLifecycle()
     val nearbyProposals = (nearbyState as? NearbyUiState.Procurando)?.propostas.orEmpty()
     var selectedProposal by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    var proposalPoint by remember { mutableStateOf<app.hunter.nav.LatLon?>(null) }
+    var proposalPoint by androidx.compose.runtime.saveable.rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.listSaver(
+            save = { p: app.hunter.nav.LatLon? -> if (p == null) emptyList() else listOf(p.lat, p.lon) },
+            restore = { l: List<Double> -> if (l.size == 2) app.hunter.nav.LatLon(l[0], l[1]) else null },
+        ),
+    ) { mutableStateOf<app.hunter.nav.LatLon?>(null) }
     val proposal = selectedProposal?.let { id -> nearbyProposals.firstOrNull { it.id == id } }
     val activeEncounter = encontro as? EncontroUiState.Ativo
     val encounterRiders = activeEncounter?.encontro?.let { e -> e.participantes.filter { it.sessao != e.eu } }.orEmpty()
@@ -179,7 +186,7 @@ fun MapScreen(
     val encounterCardShown = !nearbyCardShown && (encontro is EncontroUiState.Encerrado || (activeEncounter != null && encounterExpanded))
 
     var searching by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    var follow by remember { mutableStateOf(true) }
+    var follow by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     var nonce by remember { mutableIntStateOf(0) }
     var locationOk by remember { mutableStateOf(false) }
     var editingFuelStation by remember { mutableStateOf<ResolvedFuelStation?>(null) }
@@ -260,6 +267,10 @@ fun MapScreen(
     val classe = classeDeTela(config.screenWidthDp, config.screenHeightDp)
     val landscape = classe != ClasseDeTela.Retrato
     val seguros = insetsSeguros()
+    val density = LocalDensity.current
+    var alturaMapaPx by remember { mutableIntStateOf(0) }
+    var alturaEmbaixoPx by remember { mutableIntStateOf(0) }
+    val colunaScroll = rememberScrollState()
     val favs by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
     val atalhos = remember(favs, recents) {
@@ -269,7 +280,7 @@ fun MapScreen(
         EstadoDoMapa(
             classe = classe,
             tela = EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow, gravando = rec.isRecording),
-            cartaoSelecionado = rider != null || nearbyCardShown,
+            cartaoSelecionado = rider != null || nearbyCardShown || encounterCardShown,
             previaDeRota = preview != null,
             postoSelecionado = selectedFuelStation != null,
             pesquisando = searching,
@@ -320,8 +331,18 @@ fun MapScreen(
     }
 
     // ---- Botões flutuantes: no máximo 4 alvos; passando disso o último vira "mais" com um mini menu.
+    // A pilha respeita a altura medida: no retrato, o mapa menos o topo e o cartão de baixo; em paisagem, a borda direita.
+    val alturaMapaDp = with(density) { alturaMapaPx.toDp().value.toInt() }
+    val insetTopoDp = with(density) { seguros.getTop(density).toDp().value.toInt() }
+    val alturaEmbaixoDp = with(density) { alturaEmbaixoPx.toDp().value.toInt() }
+    val maxBotoes = when {
+        alturaMapaPx == 0 || navigating -> 4
+        landscape -> maximoDeBotoes(alturaMapaDp - insetTopoDp - 24 - 12)
+        else -> maximoDeBotoes(alturaLivreParaBotoesDp(alturaMapaDp, insetTopoDp, em.atalhos, alturaEmbaixoDp))
+    }
     val botoes = distribuirBotoes(
-        buildList {
+        maximo = maxBotoes,
+        disponiveis = buildList {
             if (el.camadas) add(BotaoDoMapa.Postos)
             if (el.camadas && trafficTileUrl != null) add(BotaoDoMapa.Transito)
             if (el.camadas && nearbyAvailable) add(BotaoDoMapa.Role)
@@ -377,7 +398,7 @@ fun MapScreen(
     // ---- Cartões. Cada um decide sozinho se aparece; quem chama só diz ONDE (embaixo no retrato, na coluna em paisagem).
     val pv = preview
     val cartaoPrevia: @Composable (Modifier) -> Unit = { m ->
-        if (pv != null && !navigating) PreviewCard(vm, pv, onStart = beginNav, modifier = m)
+        if (pv != null && !navigating) PreviewCard(vm, pv, onStart = beginNav, modifier = m, naColuna = em.cartoesNaColuna)
     }
     val cartaoPosto: @Composable (Modifier) -> Unit = { m ->
         AnimatedVisibility(
@@ -473,6 +494,10 @@ fun MapScreen(
             }
         }
     }
+    // Selecionou algo (moto, proposta, encontro, posto, prévia): a coluna volta ao topo para o cartão aparecer.
+    LaunchedEffect(rider?.sessao, proposal?.id, proposalPoint, encounterCardShown, pv != null, selectedFuelStation?.id) {
+        colunaScroll.scrollTo(0)
+    }
     // Painel de sempre ("Pronto para rodar", gravação ou pedido de localização); o cartão da moto/proposta o substitui.
     val painelPronto: @Composable () -> Unit = {
         if (rider != null || nearbyCardShown) {
@@ -485,12 +510,14 @@ fun MapScreen(
             }
         } else {
             IdleBottom(
-                vm, recording = rec.isRecording, compacto = em.prontoCompacto,
+                vm, recording = rec.isRecording, compacto = em.prontoCompacto, emColuna = em.cartoesNaColuna,
                 onRecord = startRecording, onStopRecording = { TrackingService.stop(context) }, attention = attention.size,
             )
         }
     }
     // Faixas de estado: rolê, aviso, encontro minimizado, offline e busca de postos.
+    val temFaixas = (nearbyAvailable && (nearbyState !is NearbyUiState.Desligado || nearbyAviso != null ||
+        (activeEncounter != null && !encounterExpanded))) || !online || fuelLayerEnabled
     val faixasDeEstado: @Composable ColumnScope.() -> Unit = {
         if (nearbyAvailable) {
             NearbyStrip(nearbyState, onClick = { showNearbySheet = true }, modifier = Modifier.padding(top = 8.dp))
@@ -560,7 +587,7 @@ fun MapScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().onSizeChanged { alturaMapaPx = it.height }) {
         HunterMap(
             modifier = Modifier.fillMaxSize(),
             me = live,
@@ -704,23 +731,27 @@ fun MapScreen(
                 val chipMod = if (landscape) {
                     Modifier.align(Alignment.TopEnd).windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.End)).padding(8.dp)
                 } else {
-                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top)).padding(top = 112.dp)
+                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top)).padding(top = 140.dp)
                 }
                 NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = chipMod)
             }
         }
 
         if (em.cartoesEmbaixo) {
-            // ----- RETRATO: cartões como folha embaixo -----
-            val embaixo = Modifier.align(Alignment.BottomCenter).padding(12.dp)
-            cartaoPrevia(embaixo)
-            cartaoPosto(embaixo)
-            cartaoMoto(embaixo)
-            // Acima do painel inferior (que continua lá): o cartão pronto compacto tem ~96 dp, o de gravação ~210 dp.
-            cartaoEncontro(Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 120.dp))
-            cartaoProposta(embaixo)
-            if (em.busca) {
-                Column(embaixo, verticalArrangement = Arrangement.spacedBy(10.dp)) { painelPronto() }
+            // ----- RETRATO: cartões como folha embaixo. A caixa mede a altura que ocupam, para a pilha de botões do topo não os cobrir. -----
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { alturaEmbaixoPx = it.height },
+            ) {
+                val embaixo = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+                cartaoPrevia(embaixo)
+                cartaoPosto(embaixo)
+                cartaoMoto(embaixo)
+                // Acima do painel inferior (que continua lá): o cartão pronto compacto tem ~96 dp, o de gravação ~210 dp.
+                cartaoEncontro(Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 120.dp))
+                cartaoProposta(embaixo)
+                if (em.busca) {
+                    Column(embaixo, verticalArrangement = Arrangement.spacedBy(10.dp)) { painelPronto() }
+                }
             }
         }
 
@@ -756,19 +787,24 @@ fun MapScreen(
                     Modifier
                         .fillMaxSize()
                         .windowInsetsPadding(seguros.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(colunaScroll)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    cartaoPrevia(coluna)
-                    cartaoPosto(coluna)
-                    if (em.busca) {
-                        SearchPill(onClick = { searching = true })
-                        if (em.atalhos) AtalhosRapidos(atalhos, favs, onPick = { vm.previewTo(it) }, emColuna = true, modifier = Modifier)
-                        Column(Modifier.fillMaxWidth(), content = faixasDeEstado)
+                    // Cartões selecionados primeiro (acima da dobra, em ~336 dp úteis); depois busca, poucos atalhos e o cartão pronto.
+                    if (em.cartoesNoTopoDaColuna) {
+                        cartaoPrevia(coluna)
+                        cartaoPosto(coluna)
                         cartaoEncontro(coluna)
                         cartaoMoto(coluna)
                         cartaoProposta(coluna)
+                    }
+                    if (em.busca) {
+                        SearchPill(onClick = { searching = true })
+                        if (em.atalhos) {
+                            AtalhosRapidos(atalhos.take(maximoDeAtalhosNaColuna(classe)), favs, onPick = { vm.previewTo(it) }, emColuna = true, modifier = Modifier)
+                        }
+                        if (temFaixas) Column(Modifier.fillMaxWidth(), content = faixasDeEstado)
                         painelPronto()
                     }
                 }
@@ -959,9 +995,35 @@ private fun AtalhosRapidos(atalhos: List<Place>, favs: List<Place>, onPick: (Pla
  * Em paisagem, ou gravando, o cartão completo.
  */
 @Composable
-private fun IdleBottom(vm: HunterViewModel, recording: Boolean, compacto: Boolean, onRecord: () -> Unit, onStopRecording: () -> Unit, attention: Int) {
+private fun IdleBottom(vm: HunterViewModel, recording: Boolean, compacto: Boolean, emColuna: Boolean, onRecord: () -> Unit, onStopRecording: () -> Unit, attention: Int) {
     val rec by vm.recording.collectAsStateWithLifecycle()
 
+    if (compacto && !recording && emColuna) {
+        // Paisagem: título e texto curtos e o botão embaixo, com a largura da coluna (~110 dp no total).
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Pronto para rodar", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (attention > 0) "$attention item(ns) de manutenção pedem atenção" else "Busque um destino ou grave uma viagem",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (attention > 0) Warn else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Surface(
+                    onClick = onRecord,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color.Transparent,
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("●  Gravar viagem", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                }
+            }
+        }
+        return
+    }
     if (compacto && !recording) {
         Surface(
             Modifier.fillMaxWidth().heightIn(min = 72.dp, max = 96.dp),
@@ -1032,10 +1094,11 @@ private fun IdleBottom(vm: HunterViewModel, recording: Boolean, compacto: Boolea
 // ---------------------------------------------------------------- pré-visualização
 
 @Composable
-private fun PreviewCard(vm: HunterViewModel, pv: PreviewUi, onStart: () -> Unit, modifier: Modifier) {
+private fun PreviewCard(vm: HunterViewModel, pv: PreviewUi, onStart: () -> Unit, modifier: Modifier, naColuna: Boolean = false) {
     val favs by vm.favorites.collectAsStateWithLifecycle()
     val isFav = vm.isFavorite(pv.place, favs)
-    FloatingCard(modifier.heightIn(max = 540.dp), scrollable = true) {
+    // Na coluna esquerda quem rola é a coluna (uma só rolagem); embaixo, o cartão tem teto de altura e rolagem própria.
+    FloatingCard(if (naColuna) modifier else modifier.heightIn(max = 540.dp), scrollable = !naColuna) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(pv.place.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

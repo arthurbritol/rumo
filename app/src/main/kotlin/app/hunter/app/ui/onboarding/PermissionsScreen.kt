@@ -1,5 +1,7 @@
 package app.hunter.app.ui.onboarding
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -108,7 +110,7 @@ fun PermissionsScreen(
     if (step == null) return
 
     Column(
-        modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 24.dp),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

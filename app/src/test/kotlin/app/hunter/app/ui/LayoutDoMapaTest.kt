@@ -31,6 +31,11 @@ class LayoutDoMapaTest {
         assertEquals(ClasseDeTela.PaisagemCompacta, classeDeTela(891, 411))
         assertEquals(ClasseDeTela.Larga, classeDeTela(1280, 800))
         assertEquals(ClasseDeTela.PaisagemCompacta, classeDeTela(900, 500))
+        assertEquals(ClasseDeTela.PaisagemCompacta, classeDeTela(600, 360))
+        // Deitado mas estreito (tela dividida, janela flutuante): retrato compacto.
+        assertEquals(ClasseDeTela.Retrato, classeDeTela(411, 380))
+        assertEquals(ClasseDeTela.Retrato, classeDeTela(400, 360))
+        assertEquals(ClasseDeTela.Retrato, classeDeTela(599, 300))
         assertEquals(Orientacao.Paisagem, ClasseDeTela.Larga.orientacao())
         assertEquals(Orientacao.Retrato, ClasseDeTela.Retrato.orientacao())
     }
@@ -41,7 +46,6 @@ class LayoutDoMapaTest {
         assertTrue(e.busca && e.atalhos && e.botoesFlutuantes && e.prontoCompacto && e.cartoesEmbaixo)
         assertFalse(e.colunaLateral || e.cartoesNaColuna)
         assertEquals(0, e.larguraColunaDp)
-        assertEquals(FormaDasAbas.BarraInferior, e.abas)
     }
 
     @Test
@@ -49,9 +53,9 @@ class LayoutDoMapaTest {
         for (c in listOf(ClasseDeTela.PaisagemCompacta, ClasseDeTela.Larga)) {
             val e = mapa(c)
             assertTrue(e.colunaLateral && e.cartoesNaColuna && e.busca && e.atalhos && e.botoesFlutuantes)
-            assertFalse(e.prontoCompacto || e.cartoesEmbaixo)
+            assertFalse(e.cartoesEmbaixo)
+            assertTrue(e.prontoCompacto)
             assertEquals(larguraColunaLateralDp(c), e.larguraColunaDp)
-            assertEquals(FormaDasAbas.Trilho, e.abas)
         }
         assertTrue(larguraColunaLateralDp(ClasseDeTela.PaisagemCompacta) in 300..340)
     }
@@ -68,7 +72,6 @@ class LayoutDoMapaTest {
         for (c in ClasseDeTela.entries) {
             val e = mapa(c, navegando = true, seguindo = false)
             assertFalse(e.colunaLateral || e.busca || e.atalhos || e.botoesFlutuantes || e.prontoCompacto)
-            assertEquals(FormaDasAbas.Nenhuma, e.abas)
             assertTrue(e.centralizarNavegando)
         }
         assertTrue(mapa(ClasseDeTela.PaisagemCompacta, navegando = true).base.painelLateral)
@@ -78,10 +81,35 @@ class LayoutDoMapaTest {
     }
 
     @Test
-    fun `cartao selecionado em retrato tira o cartao pronto e em paisagem vai para a coluna`() {
-        assertFalse(mapa(ClasseDeTela.Retrato, cartao = true).prontoCompacto)
+    fun `cartao selecionado em paisagem vai para o topo da coluna e esconde os atalhos`() {
         val p = mapa(ClasseDeTela.PaisagemCompacta, cartao = true)
-        assertTrue(p.cartoesNaColuna && p.colunaLateral)
+        assertTrue(p.cartoesNaColuna && p.colunaLateral && p.cartoesNoTopoDaColuna)
+        assertFalse(p.atalhos)
+        assertTrue(p.busca)
+        // Sem cartao os atalhos voltam e a ordem e a de sempre.
+        val livre = mapa(ClasseDeTela.PaisagemCompacta)
+        assertTrue(livre.atalhos)
+        assertFalse(livre.cartoesNoTopoDaColuna)
+        // Em retrato os atalhos continuam (o cartao fica embaixo) e nada vai para o topo da coluna.
+        val r = mapa(ClasseDeTela.Retrato, cartao = true)
+        assertTrue(r.atalhos)
+        assertFalse(r.cartoesNoTopoDaColuna)
+    }
+
+    @Test
+    fun `pronto para rodar e compacto em retrato e em paisagem, menos gravando`() {
+        for (c in ClasseDeTela.entries) {
+            assertTrue(mapa(c).prontoCompacto)
+            assertTrue(mapa(c, cartao = true).prontoCompacto)
+            assertFalse(mapa(c, gravando = true).prontoCompacto)
+        }
+    }
+
+    @Test
+    fun `atalhos na coluna sao poucos em paisagem de celular`() {
+        assertEquals(0, maximoDeAtalhosNaColuna(ClasseDeTela.Retrato))
+        assertEquals(3, maximoDeAtalhosNaColuna(ClasseDeTela.PaisagemCompacta))
+        assertTrue(maximoDeAtalhosNaColuna(ClasseDeTela.Larga) > 3)
     }
 
     @Test
@@ -94,6 +122,8 @@ class LayoutDoMapaTest {
             assertTrue(mapa(c, posto = true).botoesFlutuantes)
         }
         assertTrue(mapa(ClasseDeTela.PaisagemCompacta, previa = true).cartoesNaColuna)
+        assertTrue(mapa(ClasseDeTela.PaisagemCompacta, previa = true).cartoesNoTopoDaColuna)
+        assertTrue(mapa(ClasseDeTela.PaisagemCompacta, posto = true).cartoesNoTopoDaColuna)
     }
 
     @Test
@@ -116,9 +146,13 @@ class LayoutDoMapaTest {
         for (c in ClasseDeTela.entries) {
             assertTrue(mapa(c, navegando = true, encontro = true).base.pilulaEncontro)
             assertFalse(mapa(c, encontro = true).base.pilulaEncontro)
-            // fora da navegacao o cartao do encontro e um cartao selecionado: nao coexiste com o cartao pronto compacto
-            assertFalse(mapa(c, encontro = true, cartao = true).prontoCompacto)
         }
+        // Encontro ativo com o cartao aberto: em paisagem o cartao sobe ao topo da coluna e os atalhos somem.
+        val e = mapa(ClasseDeTela.PaisagemCompacta, encontro = true, cartao = true)
+        assertTrue(e.cartoesNoTopoDaColuna && !e.atalhos && !e.base.pilulaEncontro)
+        // Navegando, o encontro vira so a pilula: sem coluna nem cartoes.
+        val n = mapa(ClasseDeTela.PaisagemCompacta, navegando = true, encontro = true, cartao = true)
+        assertTrue(n.base.pilulaEncontro && !n.colunaLateral && !n.cartoesNoTopoDaColuna)
     }
 
     @Test
@@ -145,6 +179,35 @@ class LayoutDoMapaTest {
         assertEquals(3, d.visiveis.size)
         assertEquals(2, d.noMenuMais.size)
         assertTrue(d.temMais)
+    }
+
+    @Test
+    fun `quantos botoes cabem na altura livre`() {
+        // Retrato alto, cartao compacto embaixo (~120 dp), com atalhos: os 4 cabem.
+        val alto = alturaLivreParaBotoesDp(alturaDoMapaDp = 780, insetTopoDp = 24, comAtalhos = true, alturaEmbaixoDp = 120)
+        assertEquals(4, maximoDeBotoes(alto))
+        // Retrato baixo (640) com cartao de proposta (~300 dp): so um botao e o "mais".
+        val baixo = alturaLivreParaBotoesDp(640, 24, true, 300)
+        assertEquals(2, maximoDeBotoes(baixo))
+        // Nunca menos de 2 (um botao + "mais") e nunca mais de 4.
+        assertEquals(2, maximoDeBotoes(-50))
+        assertEquals(4, maximoDeBotoes(2000))
+        // Limites da conta: 4 alvos = 4*52 + 3*10 = 238 dp; 3 = 176; 2 = 114.
+        assertEquals(4, maximoDeBotoes(238))
+        assertEquals(3, maximoDeBotoes(237))
+        assertEquals(3, maximoDeBotoes(176))
+        assertEquals(2, maximoDeBotoes(175))
+    }
+
+    @Test
+    fun `a pilha de botoes escolhida nunca passa da altura livre`() {
+        for (h in 500..900 step 20) for (embaixo in listOf(120, 232, 300, 350)) for (atalhos in listOf(true, false)) {
+            val livre = alturaLivreParaBotoesDp(h, 24, atalhos, embaixo)
+            val n = maximoDeBotoes(livre)
+            val usado = n * 52 + (n - 1) * 10
+            // so pode estourar quando nem 2 alvos cabem (piso de 2)
+            if (n > 2) assertTrue(usado <= livre, "h=$h embaixo=$embaixo usado=$usado livre=$livre")
+        }
     }
 
     @Test

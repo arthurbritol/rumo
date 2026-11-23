@@ -1,5 +1,6 @@
 package app.hunter.app.ui.onboarding
 
+import app.hunter.app.ui.ConteudoLimitado
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -57,7 +58,8 @@ fun OnboardingScreen(
     }
 
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Box(Modifier.fillMaxSize()) {
+        // Áreas seguras (status, gestos, recorte, teclado) e largura limitada: "Pular" nunca fica sob a barra de status.
+        ConteudoLimitado {
             when (step) {
                 Step.INTRO -> IntroPages(onFinish = { advance() })
                 Step.LOGIN -> login(

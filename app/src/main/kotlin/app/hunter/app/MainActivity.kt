@@ -86,7 +86,9 @@ import app.hunter.app.ui.MapScreen
 import app.hunter.app.ui.PodScreen
 import app.hunter.app.ui.ProfileRoute
 import app.hunter.app.ui.EstadoDaTela
+import app.hunter.app.ui.ClasseDeTela
 import app.hunter.app.ui.FormaDasAbas
+import app.hunter.app.ui.ConteudoLimitado
 import app.hunter.app.ui.classeDeTela
 import app.hunter.app.ui.insetsSeguros
 import app.hunter.app.ui.formaDasAbas
@@ -434,11 +436,17 @@ private fun HunterRoot(
 
                 // Aviso de versão nova por cima de tudo, exceto durante a navegação (nada atrapalha a condução).
                 val update by vm.update.collectAsStateWithLifecycle()
+                val paisagem = classe != ClasseDeTela.Retrato
+                // Paisagem: aviso e banner ficam no canto de baixo à direita, em largura limitada, sem cobrir a coluna do mapa
+                // (busca, Gravar viagem) nem os botões do alto. Retrato: banner no topo e aviso embaixo, ambos dentro dos insets.
+                val ladoMapa = Modifier.widthIn(max = 380.dp)
+                val bannerMod = if (paisagem) {
+                    ladoMapa.align(Alignment.BottomEnd).windowInsetsPadding(seguros.only(WindowInsetsSides.End + WindowInsetsSides.Bottom))
+                } else {
+                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                }
                 update?.takeIf { !nav.active }?.let { u ->
-                    UpdateBanner(
-                        u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate,
-                        modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
-                    )
+                    UpdateBanner(u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate, modifier = bannerMod)
                 }
 
                 // Quem já usava o app: aviso discreto e dispensável para criar conta (nunca durante a navegação).
@@ -457,27 +465,21 @@ private fun HunterRoot(
                             prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
                             showNotice = false
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                        modifier = if (paisagem) {
+                            // Acima do banner de versão, se houver; no canto, fora da coluna do mapa.
+                            ladoMapa.align(Alignment.BottomEnd)
+                                .windowInsetsPadding(seguros.only(WindowInsetsSides.End + WindowInsetsSides.Bottom))
+                                .padding(bottom = if (update != null && !nav.active) 200.dp else 0.dp)
+                        } else {
+                            // Sobre o mapa, acima do cartão "Pronto para rodar" (~108 dp); nas outras abas, rente à barra.
+                            Modifier.align(Alignment.BottomCenter)
+                                .windowInsetsPadding(seguros.only(WindowInsetsSides.Horizontal))
+                                .padding(bottom = if (tab == Tab.Map) 128.dp else 8.dp)
+                        },
                     )
                 }
             }
         }
-    }
-}
-
-/**
- * Conteúdo das telas de rolagem: dentro das áreas seguras (topo, laterais e, como o teclado, embaixo no Perfil) e com
- * largura máxima, centralizado, em telas largas ou deitadas.
- */
-@Composable
-private fun ConteudoLimitado(content: @Composable () -> Unit) {
-    val config = androidx.compose.ui.platform.LocalConfiguration.current
-    val maxW = larguraMaximaDoConteudoDp(classeDeTela(config.screenWidthDp, config.screenHeightDp)).dp
-    Box(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Box(Modifier.widthIn(max = maxW).fillMaxWidth().fillMaxHeight()) { content() }
     }
 }
 

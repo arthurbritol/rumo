@@ -14,20 +14,25 @@ Retrato
 - [ ] Embaixo, "Pronto para rodar" em uma linha com "Gravar viagem"; o mapa continua visível acima.
 - [ ] Barra de abas embaixo (Mapa, Viagens, Garagem, Amigos, Pod) acima da barra de gestos.
 Paisagem
-- [ ] Coluna esquerda de ~300 dp, rolável: busca, atalhos, faixas de estado e "Pronto para rodar" / "Gravar viagem".
+- [ ] Coluna esquerda de ~300 dp, rolável: busca, no máximo 3 atalhos, faixas de estado (sem espaço sobrando quando vazias) e "Pronto para rodar" compacto com "Gravar viagem" visível sem rolar (celular com ~336 dp de altura útil).
 - [ ] Mapa ocupa o resto da largura e toda a altura; a moto fica no meio da parte livre do mapa.
 - [ ] Botões na borda direita, no alto, dentro da área segura; nenhum toca a barra de status.
 - [ ] Trilho de abas vertical na borda esquerda (72 dp), todas as 5 abas à vista; o selo do Amigos aparece.
-- [ ] Segurar no mapa (prévia de rota), tocar num posto, numa moto ou numa proposta: o cartão aparece NA COLUNA, não por cima do mapa.
+- [ ] Segurar no mapa (prévia de rota), tocar num posto, numa moto ou numa proposta: o cartão aparece NO TOPO da coluna (os atalhos somem), não por cima do mapa; com a coluna rolada, ela volta ao topo. A prévia rola junto com a coluna (uma só rolagem).
 - [ ] Gravando: o cartão de gravação (velocidade, métricas, "Encerrar viagem") fica na coluna e o aviso de radar/lombada aparece no canto de baixo, ao lado da coluna.
 - [ ] Rolê ligado, com encontro ativo: o cartão do encontro fica na coluna; minimizado vira pílula na coluna.
+
+Janela estreita
+- [ ] Tela dividida ou janela deitada com menos de 600 dp de largura (ex.: 411 x 380): usa o layout de retrato (barra de abas embaixo), sem trilho nem coluna.
+Retrato baixo (~640 dp)
+- [ ] Gravando, ou com cartão de moto/proposta/posto aberto: a coluna de botões mostra menos botões (um e o "mais") e não encosta no cartão de baixo; o "mais" abre um mini menu com o resto.
 
 ## Navegação (enxuta)
 - [ ] Retrato: banner de manobra no topo (respeita a barra de status), barra fina embaixo; sem abas, sem botões, sem busca.
 - [ ] Paisagem: painel esquerdo com a mesma largura da coluna do mapa em repouso: manobra grande, "Depois", velocidade grande, chegada/tempo/distância; Voz/Mudo e Encerrar fixos embaixo. Mapa no resto.
 - [ ] Painel respeita o recorte da câmera à esquerda (gire para os dois lados).
 - [ ] Cartão de radar/lombada aparece no canto de baixo ao lado do painel (paisagem) ou acima da barra (retrato), sem tocar o botão Centralizar (canto de baixo à direita, só ao mexer no mapa).
-- [ ] Pílula do encontro: retrato abaixo do banner; paisagem canto superior direito.
+- [ ] Pílula do encontro: retrato abaixo do banner (sem encostar nele); paisagem canto superior direito.
 - [ ] Girar o celular durante a navegação mantém a rota e a voz (a tela é recriada; o estado da navegação continua).
 
 ## Outras abas
@@ -37,14 +42,15 @@ Para cada uma: rola até o fim, nada fica sob a barra de gestos nem sob o trilho
 - [ ] Amigos: convites, lista, busca, papéis; abrir uma subtela e voltar.
 - [ ] Pod: conectar, PIN, bússola.
 - [ ] Perfil (avatar na Garagem ou Amigos): rolagem, edição com teclado aberto (o campo continua visível), voltar.
-- [ ] Login (criar conta) em paisagem: conteúdo rolável, largura limitada.
+- [ ] Login (criar conta) e apresentação (Perfil > Rever apresentação) em paisagem: conteúdo rolável, largura limitada, "Pular" fora da barra de status, nada sob a barra de gestos.
+- [ ] Permissões e "Sua moto" (primeira abertura): rolam em paisagem.
+- [ ] Aviso de versão e "Crie uma conta": em paisagem ficam no canto de baixo à direita sem cobrir a coluna; em retrato dentro dos insets e o aviso de conta acima do "Pronto para rodar".
 
 ## Rotação e estados
 - [ ] Girar em cada aba: não trava nem perde a aba; o mapa reaparece com a câmera seguindo.
-- [ ] Girar com a busca aberta e o teclado: a lista continua acima do teclado (o estado da busca pode reiniciar).
+- [ ] Girar com a moto ou a proposta tocada, ou com um ponto marcado: continuam abertos. Com a busca aberta: o modo de busca continua, mas o texto digitado e os resultados reiniciam. O diálogo de preços do posto fecha e o encontro minimizado reabre expandido.
 - [ ] Barra de navegação por 3 botões (no lado da tela em paisagem): nada fica sob ela.
 
 ## Conhecido
-- A tela é recriada ao girar (o app não trata a rotação por conta própria): cartões abertos e a busca reiniciam. O estado da navegação, da gravação e do rolê continua.
+- A tela é recriada ao girar (o app não trata a rotação por conta própria). Continuam: a navegação, a gravação e o rolê (ficam no ViewModel e no serviço), a moto e a proposta tocadas, o ponto marcado, a folha de rolê e o seguir. Reiniciam: o texto da busca, o diálogo de preços do posto e o encontro minimizado.
 - Viagens, Garagem e Amigos não têm dois painéis (lista e detalhe) em paisagem: só limite de largura.
-- A apresentação inicial (onboarding) não foi revista nesta rodada.
