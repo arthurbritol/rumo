@@ -430,6 +430,13 @@ fun FriendsScreen(
 
         // 5. Lista de Amigos (Ao vivo / Offline)
         SectionTitle("Amigos (${ui.friends.size})")
+        if (ui.friends.isNotEmpty()) {
+            Text(
+                "Sua localização é publicada enquanto o Rumo estiver aberto ou o Pod conectado, só para os amigos com o interruptor ligado. Para ver um amigo no mapa, ele também precisa compartilhar com você.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (!ui.friendsLoaded) {
             Text("Carregando…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else if (ui.friends.isEmpty()) {
@@ -782,6 +789,13 @@ private fun FriendCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            row.lastSeenLabel?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         // Switch estilizado para compartilhamento de localização
@@ -800,10 +814,19 @@ private fun FriendCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = if (row.locationSharedWithHim) "Visível para ${row.name}" else "Não compartilhado",
+                    text = row.mySharingLabel.ifEmpty {
+                        if (row.locationSharedWithHim) "Você compartilha com ${row.name}" else "Você não compartilha com ${row.name}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (row.theirSharingLabel.isNotEmpty()) {
+                    Text(
+                        text = row.theirSharingLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (row.friendSharesWithMe) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Switch(
                 checked = row.locationSharedWithHim,

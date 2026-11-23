@@ -120,6 +120,15 @@ interface SocialStore {
 
     /** Observa em tempo real a coordenada de [friendUid], se houver autorização. */
     fun observeFriendLocation(friendUid: String): Flow<LiveLocation?> = emptyFlow()
+
+    /**
+     * Grava "visto por último" do usuário logado em `presenca/{uid}` (`lastSeenMs`, relógio do aparelho; sobrescreve).
+     * Só quem recebeu autorização de localização dele lê.
+     */
+    suspend fun publishLastSeen(nowMs: Long) {}
+
+    /** Observa o "visto por último" de [friendUid] (nulo se não há dado); só vale para quem me autorizou. */
+    fun observeFriendLastSeen(friendUid: String): Flow<Long?> = emptyFlow()
 }
 
 /** Resultado de uma operação que pode ser recusada por regra de negócio. */

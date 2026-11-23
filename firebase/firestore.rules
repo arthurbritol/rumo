@@ -295,6 +295,22 @@ service cloud.firestore {
       allow delete: if dono(uid);
     }
 
+    // "Visto por último": só o dono grava (apenas lastSeenMs, relógio do aparelho dele, sobrescrito);
+    // leem o dono e os amigos que receberam autorização de localização dele (mesma condição de localizacoes).
+    function presencaValida(d) {
+      return d.keys().hasOnly(['lastSeenMs'])
+        && d.keys().hasAll(['lastSeenMs'])
+        && epochMsOk(d.lastSeenMs);
+    }
+
+    match /presenca/{uid} {
+      allow read: if dono(uid)
+        || (logado() && amigos(uid, request.auth.uid)
+            && exists(/databases/$(database)/documents/permissoesLocalizacao/$(uid + '_' + request.auth.uid)));
+      allow create, update: if dono(uid) && semExclusao(uid) && presencaValida(request.resource.data);
+      allow delete: if dono(uid);
+    }
+
     // Rolê. Criação: criador + até 9 convidados, todos amigos do criador:
     // no máximo 9 exists() (limite de 10 por avaliação).
     function amigoOuVazio(lista, i, criador) {

@@ -2,6 +2,7 @@ package app.hunter.app.social
 
 import app.hunter.social.Activity
 import app.hunter.social.Friend
+import app.hunter.social.LiveLocation
 import app.hunter.social.Member
 import app.hunter.social.MemberState
 import app.hunter.social.MemberWarning
@@ -252,5 +253,49 @@ class SocialUiMapperTest {
         assertEquals(-34.9, row.liveLongitude)
         assertEquals(72.5f, row.liveSpeedKmh)
         assertEquals(now - 15_000L, row.liveUpdatedAtMs)
+    }
+
+    @Test
+    fun `reciprocidade da localizacao nos dois sentidos`() {
+        val f = listOf(friend("a", "Ana"), friend("b", "Beto"), friend("c", "Caio"))
+        val rows = friendRows(
+            f, now, zone,
+            grantedPermissions = setOf("a", "b"),
+            receivedPermissions = setOf("b", "c"),
+        ).associateBy { it.uid }
+        assertEquals("Você compartilha com Ana", rows.getValue("a").mySharingLabel)
+        assertEquals("Ana ainda não compartilha com você", rows.getValue("a").theirSharingLabel)
+        assertEquals(false, rows.getValue("a").friendSharesWithMe)
+        assertEquals("Você compartilha com Beto", rows.getValue("b").mySharingLabel)
+        assertEquals("Beto compartilha com você", rows.getValue("b").theirSharingLabel)
+        assertEquals("Você não compartilha com Caio", rows.getValue("c").mySharingLabel)
+        assertEquals("Caio compartilha com você", rows.getValue("c").theirSharingLabel)
+        assertEquals(true, rows.getValue("c").friendSharesWithMe)
+    }
+
+    @Test
+    fun `visto por ultimo em minutos, horas e dias`() {
+        assertEquals("online agora", formatLastSeen(now - 30_000L, now))
+        assertEquals("online agora", formatLastSeen(now - 119_999L, now))
+        assertEquals("online agora", formatLastSeen(now + 5_000L, now)) // relogio do outro aparelho adiantado
+        assertEquals("Visto há 2 min", formatLastSeen(now - 120_000L, now))
+        assertEquals("Visto há 59 min", formatLastSeen(now - 59 * 60_000L, now))
+        assertEquals("Visto há 1 h", formatLastSeen(now - 60 * 60_000L, now))
+        assertEquals("Visto há 23 h", formatLastSeen(now - 23 * 3_600_000L - 59 * 60_000L, now))
+        assertEquals("Visto há 1 dia", formatLastSeen(now - 24 * 3_600_000L, now))
+        assertEquals("Visto há 3 dias", formatLastSeen(now - 3 * 24 * 3_600_000L, now))
+    }
+
+    @Test
+    fun `visto por ultimo so aparece sem localizacao ao vivo e com dado`() {
+        val f = listOf(friend("a", "Ana"), friend("b", "Beto"), friend("c", "Caio"))
+        val rows = friendRows(
+            f, now, zone,
+            activeFriendsOnRoad = mapOf("b" to LiveLocation(-8.0, -35.0, null, 50f, now - 10_000L)),
+            lastSeenMs = mapOf("a" to now - 600_000L, "b" to now - 600_000L),
+        ).associateBy { it.uid }
+        assertEquals("Visto há 10 min", rows.getValue("a").lastSeenLabel)
+        assertNull(rows.getValue("b").lastSeenLabel) // "Na estrada" tem prioridade
+        assertNull(rows.getValue("c").lastSeenLabel) // sem dado (ou sem regras publicadas)
     }
 }

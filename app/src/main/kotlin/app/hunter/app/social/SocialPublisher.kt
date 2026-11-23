@@ -60,6 +60,12 @@ class SocialPublisher(
         searchReconciled = true
     }
 
+    /**
+     * Grava "visto por último" (`presenca/{uid}`) com o relógio de agora. Sempre escreve (não depende de mudança);
+     * o limite de 1/min fica com quem chama. Lança em falha (inclusive regras ainda não publicadas).
+     */
+    suspend fun publishLastSeen() = store.publishLastSeen(clock())
+
     /** No máximo uma publicação por minuto; relógio que voltou para trás não bloqueia. */
     fun shouldPublish(lastPublishedAtMs: Long, nowMs: Long): Boolean =
         nowMs < lastPublishedAtMs || nowMs - lastPublishedAtMs >= MIN_INTERVAL_MS

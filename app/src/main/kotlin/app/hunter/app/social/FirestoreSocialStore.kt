@@ -415,6 +415,16 @@ class FirestoreSocialStore(
             if (snap.exists()) mapToLiveLocation(snap.map()) else null
         }
 
+    override suspend fun publishLastSeen(nowMs: Long) {
+        val myUid = currentUid() ?: return
+        ref("presenca/$myUid").set(lastSeenToMap(nowMs)).await()
+    }
+
+    override fun observeFriendLastSeen(friendUid: String): Flow<Long?> =
+        ref("presenca/$friendUid").snapshots().map { snap ->
+            if (snap.exists()) mapToLastSeen(snap.map()) else null
+        }
+
     // ---------------------------------------------------------------- apagar a conta
 
     private suspend fun deleteAll(refs: List<DocumentReference>) {
@@ -438,7 +448,7 @@ class FirestoreSocialStore(
      * Apaga todo o social de [uid]. Idempotente e resumível: cada etapa só olha o que ainda existe e pode ser
      * repetida depois de uma queda. Ordem: 1) `busca` (some da pesquisa primeiro); 2) rolês (criados: membros e rolê
      * num lote; os demais: saída própria); 3) convites enviados e recebidos; 4) amizades; 5) bloqueios feitos;
-     * 6) `localizacoes` e `permissoesLocalizacao`; 7) `perfisPublicos` e `atividade` (só os amigos os liam, e as amizades já se foram).
+     * 6) `localizacoes`, `presenca` e `permissoesLocalizacao`; 7) `perfisPublicos` e `atividade` (só os amigos os liam, e as amizades já se foram).
      */
     override suspend fun deleteAllSocial(uid: String) {
         ref("busca/$uid").delete().await()
@@ -454,6 +464,7 @@ class FirestoreSocialStore(
         friendsQueries(uid).forEach { deleteQuery(it) }
         deleteQuery(blockedQuery(uid))
         ref("localizacoes/$uid").delete().await()
+        ref("presenca/$uid").delete().await()
         deleteQuery(db.collection("permissoesLocalizacao").whereEqualTo("de", uid))
         deleteQuery(db.collection("permissoesLocalizacao").whereEqualTo("para", uid))
         val batch = db.batch()

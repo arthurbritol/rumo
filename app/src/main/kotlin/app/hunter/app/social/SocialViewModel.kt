@@ -1,5 +1,6 @@
 package app.hunter.app.social
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -97,6 +98,10 @@ class SocialViewModel(
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     private val retryDelaysMs: List<Long> = listOf(2_000L, 5_000L, 15_000L),
     private val searchDebounceMs: Long = 300L,
+    /** Recuo exponencial dos observadores por amigo (localização, "visto por último"): de [watchRetryBaseMs] até [watchRetryMaxMs]. */
+    private val watchRetryBaseMs: Long = 2_000L,
+    private val watchRetryMaxMs: Long = 60_000L,
+    private val log: (String, Throwable) -> Unit = { m, e -> runCatching { Log.w("Rumo/social", m, e) } },
 ) : ViewModel() {
     private val scope: CoroutineScope = scope ?: viewModelScope
 
@@ -114,6 +119,9 @@ class SocialViewModel(
     val focusMapEvents: SharedFlow<Pair<Double, Double>> get() = focusFriendOnMapEvent
 
     private val locationJobs = mutableMapOf<String, Job>()
+    private val presenceJobs = mutableMapOf<String, Job>()
+    private var receivedPermissions: Set<String> = emptySet()
+    private var lastSeenByFriend: Map<String, Long> = emptyMap()
 
     private val _detail = MutableStateFlow<RoleDetailUi?>(null)
 
@@ -175,6 +183,10 @@ class SocialViewModel(
         friendsJob = null
         locationJobs.values.forEach { it.cancel() }
         locationJobs.clear()
+        presenceJobs.values.forEach { it.cancel() }
+        presenceJobs.clear()
+        receivedPermissions = emptySet()
+        lastSeenByFriend = emptyMap()
         _grantedPermissions.value = emptySet()
         _activeFriendsOnRoad.value = emptyMap()
         loadedFriendUids = null
@@ -252,38 +264,67 @@ class SocialViewModel(
     }
 
     private fun onReceivedPermissions(s: SocialSession, received: Set<String>) {
+        receivedPermissions = received
         val removed = locationJobs.keys - received
         for (uid in removed) {
             locationJobs.remove(uid)?.cancel()
+            presenceJobs.remove(uid)?.cancel()
         }
         if (removed.isNotEmpty()) {
             _activeFriendsOnRoad.update { current -> current - removed }
+            lastSeenByFriend = lastSeenByFriend - removed
         }
         for (friendUid in received) {
             if (friendUid !in locationJobs) {
-                val job = scope.launch {
-                    try {
-                        s.store.observeFriendLocation(friendUid).collect { loc ->
-                            _activeFriendsOnRoad.update { current ->
-                                if (loc == null || !loc.isValid()) {
-                                    current - friendUid
-                                } else {
-                                    current + (friendUid to loc)
-                                }
-                            }
-                            rebuildFriends()
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        // erro individual de um amigo não derruba o fluxo
+                locationJobs[friendUid] = watchWithBackoff(
+                    "localização de $friendUid",
+                    source = { s.store.observeFriendLocation(friendUid) },
+                ) { loc ->
+                    _activeFriendsOnRoad.update { current ->
+                        if (loc == null || !loc.isValid()) current - friendUid else current + (friendUid to loc)
                     }
+                    rebuildFriends()
                 }
-                locationJobs[friendUid] = job
+            }
+            if (friendUid !in presenceJobs) {
+                // PERMISSION_DENIED (regras de `presenca` ainda não publicadas) só impede de mostrar o "visto por último".
+                presenceJobs[friendUid] = watchWithBackoff(
+                    "visto por último de $friendUid",
+                    source = { s.store.observeFriendLastSeen(friendUid) },
+                ) { seen ->
+                    lastSeenByFriend = if (seen == null) lastSeenByFriend - friendUid else lastSeenByFriend + (friendUid to seen)
+                    rebuildFriends()
+                }
             }
         }
         rebuildFriends()
     }
+
+    /**
+     * Escuta [source] até o cancelamento. Uma falha é registrada (`Log.w`) e a escuta é refeita com recuo
+     * exponencial (2 s, 4 s, ... até 60 s), sem laço apertado; o recuo volta ao início quando chega um valor.
+     * Nunca deixa a exceção subir (um amigo com erro não derruba os outros nem o app).
+     */
+    private fun <T> watchWithBackoff(what: String, source: () -> Flow<T>, onValue: suspend (T) -> Unit): Job =
+        scope.launch {
+            var attempt = 0
+            while (true) {
+                try {
+                    source().collect {
+                        attempt = 0
+                        onValue(it)
+                    }
+                    return@launch
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    log("Falha ao observar $what; tentando de novo", e)
+                    val shifted = if (attempt >= 20) Long.MAX_VALUE else watchRetryBaseMs shl attempt
+                    delay(if (shifted <= 0L) watchRetryMaxMs else shifted.coerceAtMost(watchRetryMaxMs))
+                    attempt++
+                }
+            }
+        }
 
     private fun onFriends(friends: List<Friend>) {
         rawFriends = friends
@@ -368,12 +409,15 @@ class SocialViewModel(
                 zone = zone(),
                 grantedPermissions = _grantedPermissions.value,
                 activeFriendsOnRoad = _activeFriendsOnRoad.value,
+                receivedPermissions = receivedPermissions,
+                lastSeenMs = lastSeenByFriend,
             )
         )
     }
 
     /** Volta do app para a frente: recalcula a semana na tela (ela pode ter virado) e publica respeitando o intervalo. */
     fun onForeground() {
+        backend.setAppForeground(true)
         if (session == null) return
         recalcWeek()
         backend.publishSoon()
@@ -382,6 +426,9 @@ class SocialViewModel(
         scope.launch { loadSent(s) }
         if (!searchResolved) scope.launch { resolveSearch(s) }
     }
+
+    /** O app saiu da frente (ON_STOP): a localização sem Pod para e o "visto por último" é gravado. */
+    fun onBackground() = backend.setAppForeground(false)
 
     /** Refaz as listas com o relógio de agora: a semana (ou a validade de um rolê) pode ter virado com a tela aberta. */
     fun recalcWeek() {

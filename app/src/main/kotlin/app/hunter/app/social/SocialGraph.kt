@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -41,6 +42,12 @@ interface SocialBackend {
 
     /** Publica perfil e atividade em segundo plano; [force] ignora o intervalo mínimo (mudança de opção de busca). */
     fun publishSoon(force: Boolean = false)
+
+    /**
+     * O app foi para a frente ([foreground] verdadeiro) ou saiu dela. Com o app aberto a localização compartilhada
+     * é publicada mesmo sem o Pod; ao sair, sem o Pod, ela para e é apagada, e o "visto por último" é gravado.
+     */
+    fun setAppForeground(foreground: Boolean) {}
 }
 
 /**
@@ -80,6 +87,8 @@ class SocialGraph(
     private val pendingLock = Any()
     private var pending: Job? = null
 
+    private val foreground = MutableStateFlow(false)
+
     @Synchronized
     override fun session(uid: String): SocialSession? {
         if (!available || !allowed() || currentUid() != uid) {
@@ -100,6 +109,7 @@ class SocialGraph(
                 locationSource = src,
                 isPodConnected = isPodConnected,
                 grantedPermissions = store.observeGrantedPermissions(uid),
+                appInForeground = foreground,
                 clock = clock,
             )
         }
@@ -127,7 +137,33 @@ class SocialGraph(
     }
 
     /** Volta do app para a frente: publica (respeitando o intervalo) para refletir a semana que pode ter virado. */
-    fun onForeground() = publishSoon(force = false)
+    fun onForeground() {
+        foreground.value = true
+        publishSoon(force = false)
+    }
+
+    override fun setAppForeground(foreground: Boolean) {
+        if (foreground) {
+            this.foreground.value = true
+        } else {
+            onBackground()
+        }
+    }
+
+    /** O app saiu da frente: para a localização sem Pod e grava o "visto por último" (melhor esforço, sem limite). */
+    fun onBackground() {
+        foreground.value = false
+        scope.launch {
+            try {
+                val uid = currentUid() ?: return@launch
+                session(uid)?.publisher?.publishLastSeen()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("Falha ao gravar visto por último", e)
+            }
+        }
+    }
 
     private suspend fun publishNow(force: Boolean) {
         try {
@@ -146,6 +182,14 @@ class SocialGraph(
                 }
                 lastPublishedAtMs = now
                 try {
+                    // Passo próprio: "visto por último" não depende de a atividade ter mudado nem de haver perfil.
+                    try {
+                        s.publisher.publishLastSeen()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        log("Falha ao gravar visto por último", e)
+                    }
                     s.publisher.publishAll(force)
                 } catch (e: Throwable) {
                     lastPublishedAtMs = 0L

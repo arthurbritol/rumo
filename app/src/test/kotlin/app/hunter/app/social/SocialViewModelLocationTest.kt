@@ -10,6 +10,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.time.ZoneId
@@ -36,6 +37,8 @@ class SocialViewModelLocationTest {
             return SocialSession(uid, store, SocialEngine(store, uid, clock = { now }, idGen = { "role-x" }), publisher)
         }
         override fun publishSoon(force: Boolean) {}
+        val foregroundCalls = mutableListOf<Boolean>()
+        override fun setAppForeground(foreground: Boolean) { foregroundCalls += foreground }
     }
 
     private val backend = FakeBackend()
@@ -159,5 +162,73 @@ class SocialViewModelLocationTest {
         vm.focusFriendOnMap(-8.05, -34.9)
         val event = vm.focusFriendOnMapEvent.first()
         assertEquals(-8.05 to -34.9, event)
+    }
+
+    @Test
+    fun `amigo que me autorizou aparece como compartilha com voce`() = runTest {
+        store.friendsFlow.value = listOf(friend("ana", "Ana"), friend("beto", "Beto"))
+        store.receivedFlow.value = setOf("ana")
+        val vm = vm()
+        runCurrent()
+
+        val rows = vm.state.value.friends.associateBy { it.uid }
+        assertEquals("Ana compartilha com você", rows.getValue("ana").theirSharingLabel)
+        assertEquals("Beto ainda não compartilha com você", rows.getValue("beto").theirSharingLabel)
+    }
+
+    @Test
+    fun `falha ao observar a localizacao do amigo e registrada e tentada de novo com recuo`() = runTest {
+        val logs = mutableListOf<String>()
+        store.friendsFlow.value = listOf(friend("ana", "Ana"))
+        store.receivedFlow.value = setOf("ana")
+        store.friendLocationFailures = 2
+        val vm = SocialViewModel(
+            backend, backgroundScope, clock = { now }, zone = { zone },
+            watchRetryBaseMs = 2_000L, watchRetryMaxMs = 60_000L, log = { m, _ -> logs += m },
+        ).also { it.showTab(true) }
+        runCurrent()
+        assertEquals(1, store.friendLocationStarts)
+        assertTrue(logs.any { it.contains("localização") })
+
+        advanceTimeBy(1_900L); runCurrent()
+        assertEquals(1, store.friendLocationStarts) // sem laco apertado
+        advanceTimeBy(200L); runCurrent()
+        assertEquals(2, store.friendLocationStarts)
+        advanceTimeBy(4_100L); runCurrent() // segundo recuo: 4 s
+        assertEquals(3, store.friendLocationStarts)
+
+        store.friendLocations.getValue("ana").value =
+            LiveLocation(latitude = -8.05, longitude = -34.9, updatedAtMs = now - 5_000L)
+        runCurrent()
+        assertTrue(vm.state.value.friends.single().isLiveOnRoad)
+    }
+
+    @Test
+    fun `visto por ultimo so vem de quem me autorizou e regras ausentes nao derrubam nada`() = runTest {
+        store.friendsFlow.value = listOf(friend("ana", "Ana"), friend("beto", "Beto"))
+        store.receivedFlow.value = setOf("ana")
+        store.lastSeenFlows.getOrPut("ana") { MutableStateFlow(null) }.value = now - 10 * 60_000L
+        store.lastSeenFlows.getOrPut("beto") { MutableStateFlow(null) }.value = now - 10 * 60_000L
+        val vm = vm()
+        runCurrent()
+
+        val rows = vm.state.value.friends.associateBy { it.uid }
+        assertEquals("Visto há 10 min", rows.getValue("ana").lastSeenLabel)
+        assertNull(rows.getValue("beto").lastSeenLabel) // Beto não me autorizou: nem é lido
+
+        // Regras de `presenca` ainda não publicadas: o erro só impede de mostrar.
+        store.presenceFailure = java.io.IOException("PERMISSION_DENIED")
+        store.receivedFlow.value = setOf("ana", "beto")
+        runCurrent()
+        assertEquals("Beto compartilha com você", vm.state.value.friends.first { it.uid == "beto" }.theirSharingLabel)
+    }
+
+    @Test
+    fun `onForeground e onBackground avisam o backend`() = runTest {
+        val vm = vm()
+        runCurrent()
+        vm.onBackground()
+        vm.onForeground()
+        assertEquals(listOf(false, true), backend.foregroundCalls)
     }
 }

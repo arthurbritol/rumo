@@ -277,6 +277,10 @@ private fun HunterRoot(
         vm.checkUpdate()
         socialVm.onForeground()
     }
+    // Saiu da frente: a localização compartilhada sem Pod para e o "visto por último" é gravado.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        socialVm.onBackground()
+    }
     val social by socialVm.state.collectAsStateWithLifecycle()
     val badge = friendsBadge(pendingCount(social.invitesReceived.size, social.roles.count { it.pending }))
     var friendsSubOpen by remember { mutableStateOf(false) }

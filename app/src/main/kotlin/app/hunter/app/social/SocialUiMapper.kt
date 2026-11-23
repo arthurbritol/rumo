@@ -24,6 +24,14 @@ data class FriendRow(
     val bikeLabel: String,
     val weekKmLabel: String,
     val locationSharedWithHim: Boolean = false,
+    /** O amigo me autorizou a ver a localização dele. */
+    val friendSharesWithMe: Boolean = false,
+    /** "Você compartilha com X" / "Você não compartilha com X" (a linha do switch). */
+    val mySharingLabel: String = "",
+    /** "X compartilha com você" / "X ainda não compartilha com você". */
+    val theirSharingLabel: String = "",
+    /** "online agora" / "Visto há 5 min"; nulo sem dado ou com o amigo na estrada ("Na estrada" tem prioridade). */
+    val lastSeenLabel: String? = null,
     val isLiveOnRoad: Boolean = false,
     val liveLatitude: Double? = null,
     val liveLongitude: Double? = null,
@@ -73,15 +81,23 @@ fun friendRows(
     zone: ZoneId,
     grantedPermissions: Set<String> = emptySet(),
     activeFriendsOnRoad: Map<String, LiveLocation> = emptyMap(),
+    receivedPermissions: Set<String> = emptySet(),
+    lastSeenMs: Map<String, Long> = emptyMap(),
 ): List<FriendRow> =
     friends.map { f ->
         val km = WeekMath.visibleWeekKm(f.activity, nowMs, zone)
         val isShared = f.profile.uid in grantedPermissions
         val loc = activeFriendsOnRoad[f.profile.uid]
         val isLive = loc != null && !loc.isExpired(nowMs) && loc.isValid()
+        val name = f.profile.displayName.trim().ifEmpty { UNKNOWN_FRIEND_NAME }
+        val sharesWithMe = f.profile.uid in receivedPermissions
         km to FriendRow(
             uid = f.profile.uid,
-            name = f.profile.displayName.trim().ifEmpty { UNKNOWN_FRIEND_NAME },
+            name = name,
+            friendSharesWithMe = sharesWithMe,
+            mySharingLabel = if (isShared) "Você compartilha com $name" else "Você não compartilha com $name",
+            theirSharingLabel = if (sharesWithMe) "$name compartilha com você" else "$name ainda não compartilha com você",
+            lastSeenLabel = if (isLive) null else lastSeenMs[f.profile.uid]?.let { formatLastSeen(it, nowMs) },
             bikeLabel = bikeLabel(f.profile.brand, f.profile.model),
             weekKmLabel = weekKmLabel(km),
             locationSharedWithHim = isShared,
@@ -93,6 +109,24 @@ fun friendRows(
         )
     }.sortedWith(compareByDescending<Pair<Double, FriendRow>> { it.first }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.second.name })
         .map { it.second }
+
+/**
+ * "online agora" (menos de 2 min, ou relógio do outro aparelho adiantado), "Visto há N min", "Visto há N h" e
+ * "Visto há N dia(s)".
+ */
+fun formatLastSeen(lastSeenMs: Long, nowMs: Long): String {
+    val diff = nowMs - lastSeenMs
+    val minutes = diff / 60_000L
+    return when {
+        diff < 2 * 60_000L -> "online agora"
+        minutes < 60 -> "Visto há $minutes min"
+        minutes < 24 * 60 -> "Visto há ${minutes / 60} h"
+        else -> {
+            val days = minutes / (24 * 60)
+            "Visto há $days ${if (days == 1L) "dia" else "dias"}"
+        }
+    }
+}
 
 /** Linhas de convite para [uids], com os nomes já conhecidos em [names]. */
 fun inviteRows(uids: List<String>, names: Map<String, String>): List<InviteRow> =

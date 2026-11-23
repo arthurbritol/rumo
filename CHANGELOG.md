@@ -15,7 +15,13 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 undefined
 - **Rolê por perto: aviso ao propor longe** e **"Ir até o ponto"**: ao marcar um ponto a mais que o seu raio de busca de você, o cartão avisa "Esse ponto fica a X km de você. Só quem estiver a até R km do ponto vê o encontro." (sem bloquear). No cartão do encontro em andamento, o botão "Ir até o ponto" abre a prévia de rota do app até o ponto (durante a navegação o cartão vira a pílula de resumo, então o botão não aparece).
 
+- **Localização compartilhada agora também com o app aberto**: a posição dos amigos autorizados é publicada com o Rumo aberto (GPS do celular), sem precisar do Tripper Pod; com o Pod conectado continua publicando mesmo em segundo plano. Ao sair do app sem o Pod a posição é apagada (sem localização em segundo plano). O primeiro ponto usa também a rede para sair mais rápido.
+- **Amigos: reciprocidade e explicação**: a aba Amigos explica quando a localização é publicada e cada amigo mostra "Você compartilha com X" e "X compartilha com você" / "X ainda não compartilha com você".
+- **"Visto por último"**: quem recebeu autorização de localização vê "online agora" ou "Visto há N min/h/dias" no cartão do amigo (novo documento `presenca/{uid}`). **Requer publicar as regras** (`firebase deploy --only firestore:rules`); sem isso o app só não mostra o texto.
+
 ### Corrigido
+- **Amigo não aparecia no mapa mesmo com o compartilhamento ligado**: a posição só era publicada com o Pod conectado; agora também com o app aberto.
+- **Robustez da localização compartilhada**: erro ao observar um amigo ou as permissões era engolido e nunca refeito; agora é registrado e tentado de novo com recuo (até 60 s). GPS sem permissão concedida na hora volta a tentar depois.
 - **Rolê por perto: proposta não aparecia no outro aparelho**: os rótulos do ponto da proposta ("N de M") e dos amigos no mapa não tinham fonte definida; o estilo do mapa (OpenFreeMap) não serve a fonte padrão, então o símbolo (ícone e texto) podia nem ser desenhado. Agora essas camadas usam "Noto Sans Bold", como as de combustível.
 
 ## [0.7.19]

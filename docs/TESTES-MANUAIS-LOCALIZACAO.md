@@ -137,6 +137,21 @@ Os testes automatizados (unitários JVM e testes de segurança no emulador Fires
 
 ---
 
+## Cenário 10: Sem Pod, com o app aberto (dois aparelhos)
+
+**Objetivo:** validar a publicação com o GPS do celular e a reciprocidade. Pré-requisito: regras publicadas (`firebase deploy --only firestore:rules`) para o "Visto há".
+
+- [ ] 10.1 Ana e Beto são amigos; nenhum Pod conectado; localização do celular permitida nos dois.
+- [ ] 10.2 Na aba Amigos de Ana há o texto "Sua localização é publicada enquanto o Rumo estiver aberto ou o Pod conectado...". No cartão de Beto: "Você não compartilha com Beto" e "Beto ainda não compartilha com você".
+- [ ] 10.3 Ana liga o interruptor de Beto: vira "Você compartilha com Beto". No aparelho de Beto o cartão de Ana passa a "Ana compartilha com você".
+- [ ] 10.4 Com o Rumo aberto no aparelho de Ana (sem Pod), o console mostra `localizacoes/{uidAna}` em alguns segundos; Beto vê "Na estrada" e a moto de Ana no mapa.
+- [ ] 10.5 Ana manda o app para segundo plano (home): em cerca de 5 s o documento `localizacoes/{uidAna}` some e o marcador sai do mapa de Beto. Girar a tela não apaga.
+- [ ] 10.6 Ana volta ao app: a posição volta a ser publicada. Beto (que foi autorizado) vê "online agora" ou "Visto há N min" no cartão de Ana quando ela não está na estrada.
+- [ ] 10.7 Caio (amigo de Ana, sem autorização dela) NÃO vê "Visto há" no cartão de Ana.
+- [ ] 10.8 Negue a permissão de localização do celular a Ana, ligue o compartilhamento e depois conceda: em até 1 minuto a posição passa a ser publicada, sem reiniciar o app.
+
+---
+
 ## Cenário 9: Casos de borda e tolerância a falhas
 
 - [ ] 9.1 **Queda abrupta / Celular desligado na estrada**:

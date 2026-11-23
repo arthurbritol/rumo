@@ -145,4 +145,34 @@ class SocialGraphTest {
         runCurrent()
         assertEquals(2, profileReads)
     }
+
+    @Test
+    fun `visto por ultimo e gravado ao voltar a frente (sem depender de mudanca) e ao sair`() = runTest {
+        val g = graph()
+        g.onForeground()
+        runCurrent()
+        assertEquals(listOf(base), store.lastSeenWrites)
+
+        advanceTimeBy(70_000)
+        g.onForeground() // atividade igual, mas o visto por ultimo sempre sobrescreve
+        runCurrent()
+        assertEquals(2, store.lastSeenWrites.size)
+        assertEquals(1, store.activityWrites) // a atividade nao mudou: nao regrava
+
+        advanceTimeBy(5_000)
+        g.onBackground() // melhor esforco, sem o limite de 1 por minuto
+        runCurrent()
+        assertEquals(3, store.lastSeenWrites.size)
+    }
+
+    @Test
+    fun `falha ao gravar visto por ultimo (regras nao publicadas) nao impede perfil e atividade`() = runTest {
+        store.presenceFailure = IOException("PERMISSION_DENIED")
+        val g = graph()
+        g.onForeground()
+        runCurrent()
+        assertEquals(1, store.profileWrites)
+        assertEquals(1, store.activityWrites)
+        assertTrue(logged.any { it.contains("visto por último") })
+    }
 }

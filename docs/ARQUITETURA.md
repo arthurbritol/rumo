@@ -130,7 +130,7 @@ Decisões adiadas de propósito (backlog); nenhuma expõe dados que as regras n�
 
 ## Localização compartilhada com amigos (Projeto 3)
 
-Compartilhamento de posição geográfica em tempo real com amigos autorizados, condicionado estritamente à moto conectada via Bluetooth (Tripper Pod). Sem moto conectada, nada é transmitido para a nuvem.
+Compartilhamento de posição geográfica em tempo real com amigos autorizados. A posição só é transmitida com o **Tripper Pod conectado** OU com o **app aberto, em primeiro plano** (GPS do celular, sem Pod); em segundo plano sem o Pod nada é transmitido (o app não usa `ACCESS_BACKGROUND_LOCATION`).
 
 ### Coleções no Firestore
 - **`permissoesLocalizacao/{deUid_paraUid}`**: concessão unidirecional em que `deUid` autoriza `paraUid` a ver sua localização.
@@ -143,12 +143,14 @@ Compartilhamento de posição geográfica em tempo real com amigos autorizados, 
 ### Ciclo de vida e `LiveLocationPublisher`
 O `LiveLocationPublisher` (no módulo `app`, gerenciado pelo `SocialGraph`) opera de forma totalmente reativa:
 1. **Gatilhos de transmissão**:
-   - Observa `PodStatus.state`: a transmissão só é habilitada quando o Pod está na fase `PodPhase.CONNECTED`.
-   - Observa `observeGrantedPermissions`: requer pelo menos um amigo autorizado (`grantedPermissions.isNotEmpty()`).
-   - Se o Pod desconectar ou a lista de permissões esvaziar, o publisher cancela a coleta e executa `SocialStore.clearLocation()`, deletando imediatamente `localizacoes/{uid}` no Firestore.
+   - Condição: `(Pod conectado OU app em primeiro plano) E há permissão concedida a algum amigo`. O primeiro plano vem de `SocialGraph.setAppForeground` (ON_START/ON_STOP da `MainActivity`, via `SocialViewModel.onForeground/onBackground`), injetado como `Flow<Boolean>`.
+   - Observa `PodStatus.state` (`PodPhase.CONNECTED`) e `observeGrantedPermissions` (`grantedPermissions.isNotEmpty()`).
+   - Ao sair do primeiro plano sem o Pod (após 5 s de tolerância, para girar a tela não apagar a posição), ao desconectar o Pod sem o app aberto ou ao esvaziar as permissões, o publisher cancela a coleta e executa `SocialStore.clearLocation()`, deletando `localizacoes/{uid}`.
+   - Fonte: `AndroidLocationSource` com GPS e, para o primeiro fix e ambientes fechados, a rede (`includeNetwork = true`); pontos com mais de 2 min são descartados (a "última posição conhecida" não sai com a hora de agora).
+   - Robustez: falha no fluxo de permissões, `SecurityException` do GPS (permissão concedida depois) e erros de coleta são logados (`Rumo/LiveLoc`) e refeitos com recuo exponencial (2 s até 60 s). O listener de cada amigo no `SocialViewModel` faz o mesmo (`Rumo/social`).
 2. **Filtragem e cota (Spark)**:
    - Coleta pontos de GPS via `LocationSource` (`AndroidLocationSource`).
-   - Só emite nova coordenada para o Firestore se decorreram pelo menos **30 segundos** desde a última escrita OU se o deslocamento foi superior a **100 metros**.
+   - Primeiro ponto na hora; depois só emite se decorreram pelo menos **30 segundos** desde a última escrita OU o deslocamento foi superior a **100 metros**, com piso de **10 s**.
 3. **Tolerância a desconexões abruptas**:
    - Se o aparelho desligar sem rede ou sem chance de invocar `clearLocation()`, o leitor no cliente descarta qualquer coordenada com `updatedAtMs` mais antigo que **5 minutos** (critério de inatividade), ocultando o marcador de amigo offline.
 
@@ -161,8 +163,16 @@ O `LiveLocationPublisher` (no módulo `app`, gerenciado pelo `SocialGraph`) oper
   - Desenha marcadores com ícone estilizado de moto apontando no sentido do deslocamento (`bearing`), acompanhados pelo nome do amigo e texto relativo de tempo decorrido (ex: "Ana • agora", "há 1 min", etc.).
   - Tocar em "Ver no mapa" na aba Amigos dispara um evento via `SocialViewModel.focusFriendOnMapEvent` que alterna para a aba Mapa e centraliza suavemente a câmera na coordenada da moto.
 
+### "Visto por último" (`presenca/{uid}`)
+- Documento `{ lastSeenMs }` (relógio do aparelho de quem grava; sobrescreve). Gravado ao voltar ao primeiro plano (`SocialGraph.publishNow`, com o limite de 1/min e como passo próprio, sem depender de mudança de atividade) e ao ir para segundo plano (melhor esforço, ON_STOP).
+- Regras: só o dono grava (apenas `lastSeenMs`, número; sem exclusão de conta pendente); leem o dono e os amigos que receberam autorização de localização dele (mesma condição de `localizacoes`).
+- O app só escuta a presença de quem me autorizou (mesmo conjunto de `observeReceivedPermissions`). No cartão do amigo: "Na estrada" tem prioridade; senão "online agora" (menos de 2 min) ou "Visto há N min/h/dias". Se as regras ainda não foram publicadas, o `PERMISSION_DENIED` é logado e tentado de novo com recuo; só não aparece o texto.
+
+### Reciprocidade na UI
+- O cartão mostra "Você compartilha com X" (interruptor) e "X compartilha com você" / "X ainda não compartilha com você" (`observeReceivedPermissions`). Só vê o amigo no mapa quem foi autorizado por ele.
+
 ### Exclusão de conta
-- No fluxo de exclusão de conta (`deleteAllUserData`), `FirestoreSocialStore.deleteAllSocial` apaga o documento `localizacoes/{uid}` e remove todas as concessões em `permissoesLocalizacao` onde o usuário é remetente (`de`) ou destinatário (`para`), não deixando dados órfãos.
+- No fluxo de exclusão de conta (`deleteAllUserData`), `FirestoreSocialStore.deleteAllSocial` apaga os documentos `localizacoes/{uid}` e `presenca/{uid}` e remove todas as concessões em `permissoesLocalizacao` onde o usuário é remetente (`de`) ou destinatário (`para`), não deixando dados órfãos.
 
 ## Preços de combustíveis e dados da ANP (Projeto 6)
 

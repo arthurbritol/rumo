@@ -251,6 +251,12 @@ fun liveLocationToMap(loc: LiveLocation): Map<String, Any?> = mapOf(
     "updatedAtMs" to boundedEpoch(loc.updatedAtMs),
 )
 
+/** Mapa de `presenca/{uid}`: só `lastSeenMs`. */
+fun lastSeenToMap(nowMs: Long): Map<String, Any?> = mapOf("lastSeenMs" to boundedEpoch(nowMs))
+
+/** Inverso de [lastSeenToMap]; nulo se o campo falta ou não é número. */
+fun mapToLastSeen(data: Map<String, Any?>): Long? = (data["lastSeenMs"] as? Number)?.toLong()
+
 /** Inverso de [liveLocationToMap]. Retorna nulo se faltarem campos obrigatórios ou forem inválidos. */
 fun mapToLiveLocation(data: Map<String, Any?>): LiveLocation? {
     val lat = (data["latitude"] as? Number)?.toDouble() ?: return null

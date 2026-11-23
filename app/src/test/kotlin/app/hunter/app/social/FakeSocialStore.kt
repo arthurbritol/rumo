@@ -15,6 +15,7 @@ import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
@@ -193,8 +194,30 @@ class FakeSocialStore : SocialStore {
         grantedFlow.value = grantedPermissions.toSet()
     }
 
+    /** Falhas restantes de [observeFriendLocation] antes de funcionar (testa a nova tentativa). */
+    var friendLocationFailures = 0
+    var friendLocationStarts = 0
+    val lastSeenWrites = mutableListOf<Long>()
+    val lastSeenFlows = mutableMapOf<String, MutableStateFlow<Long?>>()
+    /** Falha só nas operações de "visto por último" (regras não publicadas). */
+    var presenceFailure: Exception? = null
+
+    override suspend fun publishLastSeen(nowMs: Long) {
+        presenceFailure?.let { throw it }
+        check()
+        lastSeenWrites += nowMs
+    }
+
+    override fun observeFriendLastSeen(friendUid: String): Flow<Long?> = flow {
+        presenceFailure?.let { throw it }
+        emitAll(lastSeenFlows.getOrPut(friendUid) { MutableStateFlow(null) }.guarded())
+    }
+
     override fun observeGrantedPermissions(myUid: String): Flow<Set<String>> = grantedFlow.guarded()
     override fun observeReceivedPermissions(myUid: String): Flow<Set<String>> = receivedFlow.guarded()
-    override fun observeFriendLocation(friendUid: String): Flow<LiveLocation?> =
-        friendLocations.getOrPut(friendUid) { MutableStateFlow(null) }.guarded()
+    override fun observeFriendLocation(friendUid: String): Flow<LiveLocation?> = flow {
+        friendLocationStarts++
+        if (friendLocationFailures > 0) { friendLocationFailures--; throw IOException("sem rede") }
+        emitAll(friendLocations.getOrPut(friendUid) { MutableStateFlow(null) }.guarded())
+    }
 }

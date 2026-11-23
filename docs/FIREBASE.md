@@ -116,3 +116,23 @@ Após atualizar o app para a versão 0.5.2, aplique as novas regras de seguranç
    ```
 
 5. **Testes manuais**: para o roteiro completo de validação com dois aparelhos, consulte [TESTES-MANUAIS-LOCALIZACAO.md](TESTES-MANUAIS-LOCALIZACAO.md).
+
+### Quando a localização é publicada (atualizado)
+
+`localizacoes/{uid}` agora é gravado com o **Pod conectado ou com o app aberto em primeiro plano** (GPS do celular), desde que haja permissão concedida a algum amigo. Em segundo plano sem o Pod a posição é apagada. Nenhuma regra mudou por isso.
+
+### "Visto por último": `presenca/{uid}` (REQUER publicar as regras)
+
+Nova coleção `presenca/{uid}` com `{ lastSeenMs }` (epoch ms do aparelho de quem grava):
+- `create, update`: só o dono, sem exclusão de conta pendente, apenas o campo `lastSeenMs` (número entre 0 e 1e14).
+- `delete`: só o dono.
+- `read`: o dono, ou amigo (`amigos(uid, request.auth.uid)`) que tenha `permissoesLocalizacao/{uid}_{leitor}` (mesma condição de `localizacoes`).
+
+**Deploy necessário** antes de usar o recurso (sem ele o app funciona normalmente, mas o "Visto há ..." não aparece e o log mostra `PERMISSION_DENIED` em `Rumo/social`):
+
+```bash
+cd firebase
+firebase deploy --only firestore:rules
+```
+
+Testes das regras: `firebase/test/presence.rules.test.js` (rodam com os demais pelo comando do item 4). Nenhum índice novo.
