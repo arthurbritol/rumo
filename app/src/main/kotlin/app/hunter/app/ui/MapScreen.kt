@@ -251,6 +251,14 @@ fun MapScreen(
         EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow),
         if (landscape) Orientacao.Paisagem else Orientacao.Retrato,
     )
+    // Ao começar a navegar, nada fica selecionado: os cartões não reaparecem do nada ao encerrar.
+    LaunchedEffect(navigating) {
+        if (navigating) {
+            selectedRider = null
+            selectedProposal = null
+            proposalPoint = null
+        }
+    }
     val leftInset = WindowInsets.safeDrawing.asPaddingValues().calculateLeftPadding(LayoutDirection.Ltr)
     val sidePanelDp = if (el.painelLateral) NAV_PANEL_WIDTH.value.toInt() + leftInset.value.toInt() + 8 else 0
     // Estes valores são lembrados: sem isso a lista era recriada a cada fix de GPS (1 Hz) e o mapa
@@ -297,7 +305,7 @@ fun MapScreen(
             camera = camera,
             cameraNonce = nonce,
             paddingTopDp = when {
-                el.bannerManobra -> 150
+                el.bannerManobra -> 172
                 navigating -> 24
                 preview != null -> 110
                 else -> 0
@@ -324,10 +332,10 @@ fun MapScreen(
                 }
             },
             onFuelStationClick = { if (!navigating) vm.selectFuelStation(it) },
-            onNearbyClick = { selectedRider = it; selectedProposal = null },
+            onNearbyClick = { if (!navigating) { selectedRider = it; selectedProposal = null } },
             onProposalClick = {
                 // Em encontro (ou esperando resposta) as propostas dos outros não abrem cartão.
-                if (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado) {
+                if (!navigating && (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado)) {
                     nearbyVm.limparFim() // o cartão de fim sai e o da proposta aparece
                     selectedProposal = it
                     selectedRider = null
@@ -348,7 +356,7 @@ fun MapScreen(
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End)) else Modifier)
+                    .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Bottom)) else Modifier)
                     .padding(
                         end = 16.dp,
                         bottom = when {
@@ -422,7 +430,7 @@ fun MapScreen(
 
         // ----- Card de Detalhes do Posto -----
         AnimatedVisibility(
-            visible = selectedFuelStation != null && !navigating,
+            visible = selectedFuelStation != null && el.ocioso,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier
@@ -446,7 +454,7 @@ fun MapScreen(
         }
 
         // ----- Rolê por perto: cartão da moto tocada e folha de ajustes -----
-        if (rider != null && !navigating && pv == null && selectedFuelStation == null) {
+        if (rider != null && el.ocioso && pv == null && selectedFuelStation == null) {
             NearbyRiderCard(
                 vizinho = rider,
                 distancia = live?.let { distanciaAproximada(it.latitude, it.longitude, rider) },
@@ -461,18 +469,18 @@ fun MapScreen(
             )
         }
         // O cartão do encontro fica acima do painel inferior (que continua lá); com navegação ativa, só a pílula de resumo.
-        // Navegando: só a pílula de resumo, compacta (retrato: acima da barra; paisagem: canto superior direito).
+        // Navegando: só a pílula de resumo, compacta (retrato: logo abaixo do banner; paisagem: canto superior direito).
         if (el.pilulaEncontro) {
             (encontro as? EncontroUiState.Ativo)?.let { e ->
                 val chipMod = if (landscape) {
                     Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.End)).padding(8.dp)
                 } else {
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp)
+                    Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 112.dp)
                 }
                 NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = chipMod)
             }
         }
-        if (!navigating && pv == null && selectedFuelStation == null && rider == null) {
+        if (el.ocioso && pv == null && selectedFuelStation == null && rider == null) {
             val acima = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 200.dp)
             val e = encontro
             if (e is EncontroUiState.Ativo) {
@@ -488,7 +496,7 @@ fun MapScreen(
                         onIrAtePonto = { vm.previewAt(app.hunter.nav.LatLon(e.encontro.ponto.lat, e.encontro.ponto.lon)) },
                     )
                 }
-            } else if (e is EncontroUiState.Encerrado && encounterCardShown && !navigating) {
+            } else if (e is EncontroUiState.Encerrado && encounterCardShown && el.ocioso) {
                 NearbyEndCard(
                     e.motivo,
                     onClose = nearbyVm::limparFim,
@@ -502,7 +510,7 @@ fun MapScreen(
                 )
             }
         }
-        if (nearbyCardShown && !navigating && pv == null && selectedFuelStation == null && rider == null) {
+        if (nearbyCardShown && el.ocioso && pv == null && selectedFuelStation == null && rider == null) {
             val cardModifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
             if (encontro is EncontroUiState.Aguardando || encontro is EncontroUiState.Nenhum) {
                 val ponto = proposalPoint
@@ -551,7 +559,7 @@ fun MapScreen(
         }
 
         // ----- Ocioso / gravando -----
-        if (el.busca && pv == null && selectedFuelStation == null) {
+        if (el.ocioso && pv == null && selectedFuelStation == null) {
             Column(
                 Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).fillMaxWidth(),
             ) {
@@ -1023,6 +1031,13 @@ private fun NavBannerCompact(vm: HunterViewModel, modifier: Modifier) {
                 Column(Modifier.weight(1f)) {
                     Text(fmtDist(p.distanceToUpcomingM), fontSize = 30.sp, fontWeight = FontWeight.Black)
                     Text(p.upcoming.instruction, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    p.then?.takeIf { !it.isDestination }?.let { next ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Depois", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            ManeuverGlyph(next.type, 16.dp, MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(next.streetName ?: "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
             }
         }
@@ -1035,7 +1050,7 @@ private fun NavBarCompact(vm: HunterViewModel, onStop: () -> Unit, modifier: Mod
     val nav by vm.nav.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
     val voice by vm.voice.collectAsStateWithLifecycle()
-    var confirm by remember { mutableStateOf(false) }
+    var confirm by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val p = nav.progress
     val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
 
@@ -1063,7 +1078,7 @@ private fun NavSidePanel(vm: HunterViewModel, onStop: () -> Unit, leftInset: Dp,
     val nav by vm.nav.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
     val voice by vm.voice.collectAsStateWithLifecycle()
-    var confirm by remember { mutableStateOf(false) }
+    var confirm by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val p = nav.progress
     val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
 

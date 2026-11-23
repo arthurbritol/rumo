@@ -10,16 +10,13 @@ data class EstadoDaTela(
     val seguindo: Boolean = true,
 )
 
-/** Quais blocos da tela do mapa aparecem. Função pura, testável em JVM. */
+/** Quais blocos da tela do mapa aparecem (todos são lidos pela tela). Função pura, testável em JVM. */
 data class ElementosDaTela(
-    // Fora da navegação (comportamento de sempre).
-    val busca: Boolean,
+    /** Tela de sempre: busca, faixas, cartões e painel inferior. */
+    val ocioso: Boolean,
+    /** Botões de postos, trânsito e rolê. */
     val camadas: Boolean,
-    val faixasSecundarias: Boolean,
-    val cartoes: Boolean,
-    val painelOcioso: Boolean,
     val abas: Boolean,
-    // Navegação enxuta.
     val bannerManobra: Boolean,
     val barraInferior: Boolean,
     val painelLateral: Boolean,
@@ -33,18 +30,12 @@ data class ElementosDaTela(
  * um painel lateral estreito. Fora da navegação nada muda.
  */
 fun navegacaoEnxuta(estado: EstadoDaTela, orientacao: Orientacao): ElementosDaTela {
-    if (!estado.navegando) {
-        return ElementosDaTela(
-            busca = true, camadas = true, faixasSecundarias = true, cartoes = true, painelOcioso = true, abas = true,
-            bannerManobra = false, barraInferior = false, painelLateral = false, pilulaEncontro = false,
-            recentralizar = !estado.seguindo,
-        )
-    }
+    val nav = estado.navegando
     val paisagem = orientacao == Orientacao.Paisagem
     return ElementosDaTela(
-        busca = false, camadas = false, faixasSecundarias = false, cartoes = false, painelOcioso = false, abas = false,
-        bannerManobra = !paisagem, barraInferior = !paisagem, painelLateral = paisagem,
-        pilulaEncontro = estado.encontroAtivo,
+        ocioso = !nav, camadas = !nav, abas = !nav,
+        bannerManobra = nav && !paisagem, barraInferior = nav && !paisagem, painelLateral = nav && paisagem,
+        pilulaEncontro = nav && estado.encontroAtivo,
         recentralizar = !estado.seguindo,
     )
 }

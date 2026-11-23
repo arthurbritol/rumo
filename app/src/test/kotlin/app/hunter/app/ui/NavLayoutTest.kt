@@ -15,7 +15,7 @@ class NavLayoutTest {
     fun `fora da navegacao tudo continua como antes nas duas orientacoes`() {
         for (o in Orientacao.entries) {
             val e = fora(o)
-            assertTrue(e.busca && e.camadas && e.faixasSecundarias && e.cartoes && e.painelOcioso && e.abas)
+            assertTrue(e.ocioso && e.camadas && e.abas)
             assertFalse(e.bannerManobra || e.barraInferior || e.painelLateral || e.pilulaEncontro)
             assertFalse(e.recentralizar)
         }
@@ -31,7 +31,7 @@ class NavLayoutTest {
         val e = nav(Orientacao.Retrato)
         assertTrue(e.bannerManobra && e.barraInferior)
         assertFalse(e.painelLateral)
-        assertFalse(e.busca || e.camadas || e.faixasSecundarias || e.cartoes || e.painelOcioso || e.abas)
+        assertFalse(e.ocioso || e.camadas || e.abas)
     }
 
     @Test
@@ -39,7 +39,7 @@ class NavLayoutTest {
         val e = nav(Orientacao.Paisagem)
         assertTrue(e.painelLateral)
         assertFalse(e.bannerManobra || e.barraInferior)
-        assertFalse(e.busca || e.camadas || e.faixasSecundarias || e.cartoes || e.painelOcioso || e.abas)
+        assertFalse(e.ocioso || e.camadas || e.abas)
     }
 
     @Test
