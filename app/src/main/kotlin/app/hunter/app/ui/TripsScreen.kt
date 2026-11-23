@@ -289,7 +289,8 @@ private fun TripDetail(vm: HunterViewModel, trip: TripSummary, onBack: () -> Uni
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(340.dp),
+                // Deitado o mapa encolhe (200 a 340 dp) para a rolagem e os dados continuarem à vista.
+                .height(alturaDoMapaDoDetalheDp(androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp).dp),
         ) {
             val p = points
             val placeholder = tripMapPlaceholder(p?.size)
