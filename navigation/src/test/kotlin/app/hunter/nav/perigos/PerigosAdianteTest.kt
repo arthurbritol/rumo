@@ -7,6 +7,7 @@ import app.hunter.nav.NavProgress
 import app.hunter.nav.NavUiState
 import app.hunter.nav.Route
 import app.hunter.nav.RouteProfile
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -104,12 +105,12 @@ class PerigosAdianteTest {
             perigo("longe", 700.0, 0.0),
             perigo("de-lado", 0.0, 300.0),
             perigo("atras", -300.0, 0.0),
-            perigo("a-30-graus", 400.0, 230.0), // atan(230/400)=29,9º
-            perigo("a-40-graus", 400.0, 336.0), // 40º
+            perigo("a-30-graus", 80.0, 46.0), // 30º, 46 m ao lado
+            perigo("a-40-graus", 50.0, 42.0), // 40º: fora do cone
         )
         val r = livre(90.0, 15.0, ps)
-        assertEquals(listOf("a-frente", "a-30-graus"), r.map { it.perigo.id })
-        assertEquals(400.0, r[0].distanciaM, 1.0)
+        assertEquals(listOf("a-30-graus", "a-frente"), r.map { it.perigo.id }) // do mais perto ao mais longe
+        assertEquals(400.0, r[1].distanciaM, 1.0)
     }
 
     @Test fun `livre exige velocidade acima de 3 m por s e rumo`() {
@@ -131,10 +132,25 @@ class PerigosAdianteTest {
     }
 
     @Test fun `histerese segura o alvo um pouco alem dos limites`() {
-        val ps = listOf(perigo("a", 620.0, 0.0), perigo("b", 400.0, 340.0)) // b: 40º
+        val ps = listOf(perigo("a", 620.0, 0.0), perigo("b", 60.0, 50.0)) // b: ~40º, 50 m ao lado
         assertTrue(livre(90.0, 10.0, ps).isEmpty())
         assertEquals(listOf("a"), livre(90.0, 10.0, ps, atual = "a").map { it.perigo.id })
         assertEquals(listOf("b"), livre(90.0, 10.0, ps, atual = "b").map { it.perigo.id })
+    }
+
+    @Test fun `livre ignora radar numa avenida paralela a 200 m mesmo dentro do cone`() {
+        // 400 m a frente e 200 m ao lado: 26,6º (dentro dos 35º), mas é outra via.
+        val ps = listOf(perigo("paralela", 400.0, 200.0), perigo("na-via", 400.0, 10.0))
+        assertEquals(listOf("na-via"), livre(90.0, 15.0, ps).map { it.perigo.id })
+        // aos 600 m o cone aceitaria ~340 m ao lado: o limite lateral barra
+        assertTrue(livre(90.0, 15.0, listOf(perigo("longe-lado", 550.0, 250.0))).isEmpty())
+    }
+
+    @Test fun `livre guarda o desvio lateral e a histerese dele`() {
+        val p = perigo("x", 400.0, 70.0) // 70 m ao lado: fora de 60, dentro de 80 para quem já é o alvo
+        assertTrue(livre(90.0, 15.0, listOf(p)).isEmpty())
+        assertEquals(1, livre(90.0, 15.0, listOf(p), atual = "x").size)
+        assertEquals(45.0, livre(90.0, 15.0, listOf(perigo("y", 400.0, 45.0))).single().desvioLateralM, 1.0)
     }
 
     @Test fun `histerese na rota aceita ate 40 m de desvio para o alvo`() {
@@ -257,6 +273,17 @@ class AvisadorDePerigosTest {
         passo(av, 1_900.0, ps)
         assertEquals("l", passo(av, 1_900.0, ps, velMps = 0.0).alerta!!.perigo.id)
         assertNull(passo(av, 2_020.0, ps, velMps = 0.0).alerta) // projeção negativa: passou
+    }
+
+    @Test fun `modo livre so fala com a via alinhada, mas mostra o cartao`() {
+        val av = AvisadorDePerigos()
+        val ao_lado = listOf(perigo("r", 500.0, 45.0)) // 45 m ao lado: no cartão, sem voz
+        val r = av.atualizar(ll(220.0), 90.0, 15.0, null, null, ao_lado)
+        assertNotNull(r.alerta)
+        assertTrue(r.falas.isEmpty())
+        // a voz não foi gasta: alinhando (30 m ou menos), fala o limiar de 300 m
+        val alinhado = listOf(perigo("r", 500.0, 20.0))
+        assertEquals(1, av.atualizar(ll(225.0), 90.0, 15.0, null, null, alinhado).falas.size)
     }
 
     @Test fun `radar com limite fala o limite e avisa quando esta acima`() {
@@ -407,5 +434,30 @@ class PerigoMonitorTest {
         m.onPoint(ponto(1_210.0), navegando(1_210.0))
         m.encerrar()
         assertNull(publicados.last())
+    }
+
+    @Test fun `sem categoria ligada nao pede quadrados nem consulta a rede`() = kotlinx.coroutines.test.runTest {
+        val scope = this
+        val fonte = object : PerigoSource {
+            var chamadas = 0
+            override suspend fun buscar(tile: TileId): List<PerigoPonto> { chamadas++; return emptyList() }
+        }
+        val mem = object : PerigoCacheStore {
+            override fun ler(tile: TileId): QuadradoEmCache? = null
+            override fun gravar(tile: TileId, q: QuadradoEmCache) {}
+        }
+        val repo = PerigoRepositorio(fonte, mem, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.test.StandardTestDispatcher(scope.testScheduler)),
+            intervaloMinMs = 0, io = kotlinx.coroutines.test.StandardTestDispatcher(scope.testScheduler))
+        cats = emptySet()
+        val m = PerigoMonitor(repo, categorias = { cats }, publicar = { publicados += it }, agora = { t })
+        m.onPoint(ponto(100.0), navegando(100.0))
+        advanceUntilIdle()
+        assertEquals(0, fonte.chamadas)
+        // ligou uma categoria: o próximo ponto pede o 3x3 (navegando/gravando)
+        cats = setOf(CategoriaPerigo.LOMBADAS)
+        t += 1_000
+        m.onPoint(ponto(120.0), navegando(120.0))
+        advanceUntilIdle()
+        assertTrue(fonte.chamadas >= 9, "chamadas=${fonte.chamadas}")
     }
 }

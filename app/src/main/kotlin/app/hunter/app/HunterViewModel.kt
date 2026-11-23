@@ -466,7 +466,10 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     if (app.hunter.app.ui.isLiveFixUsable(it.elapsedRealtimeNanos, it.accuracyM, android.os.SystemClock.elapsedRealtimeNanos(), hasCurrent = _live.value != null)) {
                         _live.value = it
                         // Só pede quadrados quando muda de quadrado (0,1°); o mapa parado/arrastado nunca consulta.
-                        PerigoStatus.repositorio?.aoMudarPosicao(it.latitude, it.longitude)
+                        // Sem categoria ligada não consulta; fora de viagem só o quadrado atual (o 3x3 é do serviço, navegando/gravando).
+                        if (PerigoStatus.categorias.value.isNotEmpty()) {
+                            PerigoStatus.repositorio?.aoMudarPosicao(it.latitude, it.longitude, amplo = recording.value.isRecording || nav.value.active)
+                        }
                     }
                 }
             } catch (e: SecurityException) {
@@ -581,7 +584,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectRoute(i: Int) {
         _preview.update { it?.copy(selected = i) }
-        _preview.value?.routes?.getOrNull(i)?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
+        if (PerigoStatus.categorias.value.isNotEmpty()) _preview.value?.routes?.getOrNull(i)?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
         refreshFuelAdvice()
     }
 
@@ -662,7 +665,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     else cur.copy(routes = routes, selected = 0, loading = false, error = if (routes.isEmpty()) "Nenhuma rota encontrada." else null)
                 }
                 // Prévia: só os primeiros quadrados da rota escolhida (alternativas não carregam; na navegação a janela de 25 km é reposta).
-                routes.firstOrNull()?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
+                if (PerigoStatus.categorias.value.isNotEmpty()) routes.firstOrNull()?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
                 refreshFuelAdvice()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

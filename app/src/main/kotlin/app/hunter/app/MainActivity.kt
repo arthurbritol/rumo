@@ -14,6 +14,24 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -71,7 +89,11 @@ import app.hunter.app.ui.MapScreen
 import app.hunter.app.ui.PodScreen
 import app.hunter.app.ui.ProfileRoute
 import app.hunter.app.ui.EstadoDaTela
-import app.hunter.app.ui.Orientacao
+import app.hunter.app.ui.FormaDasAbas
+import app.hunter.app.ui.classeDeTela
+import app.hunter.app.ui.formaDasAbas
+import app.hunter.app.ui.larguraMaximaDoConteudoDp
+import app.hunter.app.ui.orientacao
 import app.hunter.app.ui.Tab
 import app.hunter.app.ui.navegacaoEnxuta
 import app.hunter.app.ui.TripsScreen
@@ -211,7 +233,7 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
             when (Overlay.valueOf(overlay)) {
                 Overlay.NONE -> Unit
                 Overlay.PROFILE -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                    ConteudoLimitado {
                         ProfileRoute(
                             vm = accountVm,
                             authAvailable = account.available,
@@ -241,7 +263,7 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                 Overlay.LOGIN, Overlay.LOGIN_FROM_PROFILE -> {
                     val back = if (overlay == Overlay.LOGIN_FROM_PROFILE.name) Overlay.PROFILE else Overlay.NONE
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                        Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                        ConteudoLimitado {
                             LoginRoute(
                                 vm = accountVm, available = account.available,
                                 setActivity = { account.gateway.activity = it },
@@ -321,13 +343,18 @@ private fun HunterRoot(
         }
     }
 
+    // Classe de tela: retrato usa barra de abas embaixo; paisagem usa um trilho vertical na borda esquerda.
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    val classe = classeDeTela(config.screenWidthDp, config.screenHeightDp)
+    val abasNoMapa = navegacaoEnxuta(EstadoDaTela(navegando = nav.active), classe.orientacao()).abas
+    // Durante a navegação as abas somem do mapa: mais mapa e nenhum toque acidental com a moto andando.
+    val formaAbas = formaDasAbas(classe, abasNoMapa, tab == Tab.Map)
+    val seguros = insetsSeguros()
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            // Durante a navegação a barra some: mais mapa e nenhum toque acidental com a moto andando.
-            val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            val showTabs = navegacaoEnxuta(EstadoDaTela(navegando = nav.active), if (landscape) Orientacao.Paisagem else Orientacao.Retrato).abas
-            if (showTabs || tab != Tab.Map) {
+            if (formaAbas == FormaDasAbas.BarraInferior) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
@@ -338,49 +365,7 @@ private fun HunterRoot(
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = { tabIndex = i },
-                                icon = {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
-                                        val iconContent: @Composable () -> Unit = {
-                                            Icon(
-                                                painter = painterResource(t.iconResId),
-                                                contentDescription = t.label,
-                                                modifier = Modifier.size(20.dp),
-                                            )
-                                        }
-                                        if (t == Tab.Friends && badge != null) {
-                                            BadgedBox(
-                                                badge = {
-                                                    Badge(
-                                                        containerColor = MaterialTheme.colorScheme.error,
-                                                        contentColor = MaterialTheme.colorScheme.onError,
-                                                    ) {
-                                                        Text(badge)
-                                                    }
-                                                }
-                                            ) {
-                                                iconContent()
-                                            }
-                                        } else {
-                                            iconContent()
-                                        }
-                                        if (selected) {
-                                            Box(
-                                                Modifier
-                                                    .width(16.dp)
-                                                    .height(3.dp)
-                                                    .background(
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        shape = RoundedCornerShape(1.5.dp),
-                                                    )
-                                            )
-                                        } else {
-                                            Spacer(Modifier.height(3.dp))
-                                        }
-                                    }
-                                },
+                                icon = { IconeDaAba(t, selected, badge) },
                                 label = {
                                     Text(
                                         t.label,
@@ -402,68 +387,193 @@ private fun HunterRoot(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            // O mapa fica SEMPRE montado por baixo: trocar de aba não recria o mapa nem recarrega os tiles
-            // (era a maior causa de lentidão). As outras abas aparecem por cima, opacas.
-            MapScreen(vm, friends = friendMarkers, social = socialVm)
-            Crossfade(targetState = tab, animationSpec = tween(160), label = "tab") { t ->
-                if (t != Tab.Map) {
-                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                        Box(Modifier.fillMaxSize().statusBarsPadding()) {
-                            when (t) {
-                                Tab.Trips -> TripsScreen(vm)
-                                Tab.Garage -> GarageScreen(vm, onOpenProfile)
-                                Tab.Friends -> FriendsRoute(
-                                    vm = socialVm,
-                                    accountAvailable = accountAvailable,
-                                    accountSignedIn = signedIn,
-                                    myName = myName,
-                                    onSignIn = onCreateAccount,
-                                    onSubScreen = { friendsSubOpen = it },
-                                    onFocusFriendOnMap = { lat, lon ->
-                                        tabIndex = Tab.Map.ordinal
-                                        vm.focusOn(lat, lon)
-                                    },
-                                    onOpenProfile = onOpenProfile,
-                                )
-                                Tab.Pod -> PodScreen(vm)
-                                Tab.Map -> {}
+        // O Scaffold só reserva o espaço da barra inferior (ou da barra de navegação do sistema): o resto dos insets
+        // é aplicado por cada elemento. O que já foi reservado aqui é marcado como consumido para não contar duas vezes.
+        val baixo = padding.calculateBottomPadding()
+        Row(Modifier.fillMaxSize().padding(bottom = baixo).consumeWindowInsets(PaddingValues(bottom = baixo))) {
+            if (formaAbas == FormaDasAbas.Trilho) {
+                TrilhoDeAbas(tabIndex = tabIndex, badge = badge, seguros = seguros, onSelect = { tabIndex = it })
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    // O trilho já ocupa a área segura da esquerda: os filhos não a aplicam de novo.
+                    .then(if (formaAbas == FormaDasAbas.Trilho) Modifier.consumeWindowInsets(seguros.only(WindowInsetsSides.Start)) else Modifier),
+            ) {
+                // O mapa fica SEMPRE montado por baixo: trocar de aba não recria o mapa nem recarrega os tiles
+                // (era a maior causa de lentidão). As outras abas aparecem por cima, opacas.
+                MapScreen(vm, friends = friendMarkers, social = socialVm)
+                Crossfade(targetState = tab, animationSpec = tween(160), label = "tab") { t ->
+                    if (t != Tab.Map) {
+                        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                            ConteudoLimitado {
+                                when (t) {
+                                    Tab.Trips -> TripsScreen(vm)
+                                    Tab.Garage -> GarageScreen(vm, onOpenProfile)
+                                    Tab.Friends -> FriendsRoute(
+                                        vm = socialVm,
+                                        accountAvailable = accountAvailable,
+                                        accountSignedIn = signedIn,
+                                        myName = myName,
+                                        onSignIn = onCreateAccount,
+                                        onSubScreen = { friendsSubOpen = it },
+                                        onFocusFriendOnMap = { lat, lon ->
+                                            tabIndex = Tab.Map.ordinal
+                                            vm.focusOn(lat, lon)
+                                        },
+                                        onOpenProfile = onOpenProfile,
+                                    )
+                                    Tab.Pod -> PodScreen(vm)
+                                    Tab.Map -> {}
+                                }
                             }
                         }
                     }
                 }
-            }
-            // Composto depois do MapScreen para ter prioridade sobre o "voltar" do mapa.
-            BackHandler(enabled = tab != Tab.Map && !(tab == Tab.Friends && friendsSubOpen)) { tabIndex = Tab.Map.ordinal }
+                // Composto depois do MapScreen para ter prioridade sobre o "voltar" do mapa.
+                BackHandler(enabled = tab != Tab.Map && !(tab == Tab.Friends && friendsSubOpen)) { tabIndex = Tab.Map.ordinal }
 
-            // Aviso de versão nova por cima de tudo, exceto durante a navegação (nada atrapalha a condução).
-            val update by vm.update.collectAsStateWithLifecycle()
-            update?.takeIf { !nav.active }?.let { u ->
-                UpdateBanner(
-                    u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate,
-                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
-                )
-            }
-
-            // Quem já usava o app: aviso discreto e dispensável para criar conta (nunca durante a navegação).
-            var showNotice by remember { mutableStateOf(prefs.getBoolean(EXISTING_USER_NOTICE_KEY, false)) }
-            // Entrou numa conta: o aviso perde o sentido. Efeito (não durante a composição) para gravar a preferência.
-            LaunchedEffect(signedIn, showNotice) {
-                if (signedIn && showNotice) {
-                    prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
-                    showNotice = false
+                // Aviso de versão nova por cima de tudo, exceto durante a navegação (nada atrapalha a condução).
+                val update by vm.update.collectAsStateWithLifecycle()
+                update?.takeIf { !nav.active }?.let { u ->
+                    UpdateBanner(
+                        u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate,
+                        modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+                    )
                 }
-            }
-            if (showNotice && !signedIn && accountAvailable && !nav.active) {
-                AccountNotice(
-                    onCreate = onCreateAccount,
-                    onDismiss = {
+
+                // Quem já usava o app: aviso discreto e dispensável para criar conta (nunca durante a navegação).
+                var showNotice by remember { mutableStateOf(prefs.getBoolean(EXISTING_USER_NOTICE_KEY, false)) }
+                // Entrou numa conta: o aviso perde o sentido. Efeito (não durante a composição) para gravar a preferência.
+                LaunchedEffect(signedIn, showNotice) {
+                    if (signedIn && showNotice) {
                         prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
                         showNotice = false
-                    },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
-                )
+                    }
+                }
+                if (showNotice && !signedIn && accountAvailable && !nav.active) {
+                    AccountNotice(
+                        onCreate = onCreateAccount,
+                        onDismiss = {
+                            prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
+                            showNotice = false
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                    )
+                }
             }
         }
+    }
+}
+
+/** Insets que todo elemento do app respeita: barra de status, barras de navegação, laterais e recortes (câmera). */
+@Composable
+fun insetsSeguros(): WindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+
+/**
+ * Conteúdo das telas de rolagem: dentro das áreas seguras (topo, laterais e, como o teclado, embaixo no Perfil) e com
+ * largura máxima, centralizado, em telas largas ou deitadas.
+ */
+@Composable
+private fun ConteudoLimitado(content: @Composable () -> Unit) {
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    val maxW = larguraMaximaDoConteudoDp(classeDeTela(config.screenWidthDp, config.screenHeightDp)).dp
+    Box(
+        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(Modifier.widthIn(max = maxW).fillMaxWidth().fillMaxHeight()) { content() }
+    }
+}
+
+@Composable
+private fun IconeDaAba(t: Tab, selected: Boolean, badge: String?) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        val iconContent: @Composable () -> Unit = {
+            Icon(
+                painter = painterResource(t.iconResId),
+                contentDescription = t.label,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        if (t == Tab.Friends && badge != null) {
+            BadgedBox(
+                badge = {
+                    Badge(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ) {
+                        Text(badge)
+                    }
+                }
+            ) {
+                iconContent()
+            }
+        } else {
+            iconContent()
+        }
+        if (selected) {
+            Box(
+                Modifier
+                    .width(16.dp)
+                    .height(3.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(1.5.dp),
+                    )
+            )
+        } else {
+            Spacer(Modifier.height(3.dp))
+        }
+    }
+}
+
+/**
+ * Paisagem: trilho vertical de abas na borda esquerda (72 dp), rolável se a tela for muito baixa. Cada alvo tem 56 dp de altura
+ * e a largura toda do trilho (acima do mínimo de 48 dp).
+ */
+@Composable
+private fun TrilhoDeAbas(tabIndex: Int, badge: String?, seguros: WindowInsets, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxHeight()) {
+        Surface(color = MaterialTheme.colorScheme.surface) {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .windowInsetsPadding(seguros.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
+                    .width(72.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Tab.entries.forEachIndexed { i, t ->
+                    val selected = i == tabIndex
+                    val cor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(i) }),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides cor) {
+                            IconeDaAba(t, selected, badge)
+                            Text(
+                                t.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = cor,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)))
     }
 }

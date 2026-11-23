@@ -77,11 +77,13 @@ class PerigoMonitor(
         if (t - ultimoCalculo < INTERVALO_MS) return emptyList()
         ultimoCalculo = t
 
-        repo?.aoMudarPosicao(p.latitude, p.longitude)
-        if (t - ultimaTentativa >= RETENTAR_MS) { ultimaTentativa = t; repo?.tentarDeNovo() }
+        // Sem nenhuma categoria ligada não há motivo para consultar a rede. O serviço só roda navegando/gravando: 3x3.
+        val ligado = categorias().isNotEmpty()
+        if (ligado) repo?.aoMudarPosicao(p.latitude, p.longitude, amplo = true)
+        if (ligado && t - ultimaTentativa >= RETENTAR_MS) { ultimaTentativa = t; repo?.tentarDeNovo() }
         val route = nav.route
         // Janela de ~25 km à frente: ao iniciar/recalcular a rota e de novo a cada 10 km andados.
-        if (nav.active && route != null) {
+        if (ligado && nav.active && route != null) {
             val along = nav.progress?.alongM ?: 0.0
             if (nav.routeVersion != versaoRota || along - alongDaJanela >= REPOR_JANELA_M) {
                 versaoRota = nav.routeVersion

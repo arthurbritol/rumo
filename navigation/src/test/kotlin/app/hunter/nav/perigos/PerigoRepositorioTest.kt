@@ -130,7 +130,8 @@ class ArquivoPerigoCacheTest {
         val q = QuadradoEmCache(1_000, emptyList())
         assertTrue(q.valido(1_000 + VALIDADE_CACHE_MS))
         assertFalse(q.valido(1_001 + VALIDADE_CACHE_MS))
-        assertFalse(q.valido(500)) // relógio voltou: não confia
+        assertTrue(q.valido(500)) // relógio um pouco atrasado não derruba o cache
+        assertFalse(q.valido(1_000 - VALIDADE_CACHE_MS - 1)) // muito atrasado (data absurda): não confia
     }
 }
 
@@ -244,21 +245,60 @@ class PerigoRepositorioTest {
         assertEquals(base - VALIDADE_CACHE_MS - 1, cache.dados[t]!!.buscadoEm)
     }
 
-    @Test fun `falha entra em recuo e nao martela o servidor`() = runTest {
+    @Test fun `falha entra em recuo, nao martela o servidor e a fila retoma sozinha ao fim do recuo`() = runTest {
         val src = FakeSource { this }.also { it.falha = true }
         val r = repo(src)
         r.aoMudarPosicao(-8.05, -34.95)
-        advanceUntilIdle()
-        assertEquals(1, src.buscados.size) // a 1ª falha trava o resto (9 quadrados) em vez de 9 tentativas
+        advanceTimeBy(10_000)
+        assertEquals(1, src.buscados.size) // a 1ª falha trava a rede (não são 9 tentativas)...
         r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
-        advanceUntilIdle()
-        assertEquals(1, src.buscados.size) // ainda no recuo de 1 min
-        advanceTimeBy(61_000)
+        advanceTimeBy(10_000)
+        assertEquals(1, src.buscados.size) // ...e continua travada no recuo de 1 min
         src.falha = false
-        r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
-        advanceUntilIdle()
+        advanceUntilIdle() // o recuo acaba: os 8 quadrados guardados são buscados sem novo pedido
+        // o pedido feito durante o recuo (inclui o que falhou) também ficou guardado
         assertEquals(1 + 9, src.buscados.size)
         assertEquals(9, r.perigos.value.size)
+    }
+
+    @Test fun `no recuo a posicao atual continua antes da rota na retomada`() = runTest {
+        val src = FakeSource { this }.also { it.falha = true }
+        val r = repo(src)
+        val rota = listOf(LatLon(-8.05, -34.95), LatLon(-8.05, -34.55))
+        r.aoPreviaDeRota(rota) // 1º da rota falha e abre o recuo
+        advanceTimeBy(10_000)
+        assertEquals(1, src.buscados.size)
+        r.aoPreviaDeRota(rota) // rota inteira em fila durante o recuo
+        r.aoMudarPosicao(-8.05, -34.45) // posição atual, num quadrado mais à frente (urgente)
+        src.falha = false
+        src.buscados.clear()
+        advanceUntilIdle()
+        // os 9 primeiros são exatamente o 3x3 da posição atual (urgente), antes de qualquer quadrado só da rota
+        assertEquals(TileId.aoRedor(-8.05, -34.45).toSet(), src.buscados.take(9).toSet(), src.buscados.toString())
+        assertTrue(src.buscados.size > 9) // e a rota também foi carregada, nada foi descartado
+        assertEquals(src.buscados.size, src.buscados.toSet().size)
+    }
+
+    @Test fun `fora de viagem so o quadrado atual e depois amplia para 3x3`() = runTest {
+        val src = FakeSource { this }
+        val r = repo(src)
+        r.aoMudarPosicao(-8.05, -34.95, amplo = false)
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size)
+        r.aoMudarPosicao(-8.051, -34.951, amplo = false)
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size)
+        r.aoMudarPosicao(-8.051, -34.951, amplo = true) // começou a gravar no mesmo quadrado
+        advanceUntilIdle()
+        assertEquals(9, src.buscados.size)
+    }
+
+    @Test fun `perigo repetido nos dois quadrados da divisa conta uma vez`() = runTest {
+        val src = FakeSource { this }.also { it.porTile = { listOf(PerigoPonto("n1", Perigo.RADAR, -8.0, -34.9)) } }
+        val r = repo(src)
+        r.aoMudarPosicao(-8.05, -34.95)
+        advanceUntilIdle()
+        assertEquals(1, r.perigos.value.size)
     }
 
     @Test fun `uma consulta por vez e intervalo minimo`() = runTest {
@@ -303,12 +343,12 @@ class PerigoRepositorioTest {
         val cache = MemCache()
         val r = repo(src, cache)
         r.aoMudarPosicao(-8.05, -34.95)
-        advanceUntilIdle()
+        advanceTimeBy(10_000)
         assertTrue(cache.dados.isEmpty())
         assertTrue(r.perigos.value.isEmpty())
         assertEquals(1, src.buscados.size)
         r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
-        advanceUntilIdle()
+        advanceTimeBy(10_000)
         assertEquals(1, src.buscados.size) // em recuo
     }
 
@@ -317,17 +357,14 @@ class PerigoRepositorioTest {
         src.erro = app.hunter.nav.HttpFailure(429, "HTTP 429", 300_000)
         val r = repo(src)
         r.aoMudarPosicao(-8.05, -34.95)
-        advanceUntilIdle()
+        advanceTimeBy(10_000)
         assertEquals(1, src.buscados.size)
-        advanceTimeBy(120_000) // já passou o recuo de 1 min, mas não os 5 min pedidos
         src.erro = null
-        r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
-        advanceUntilIdle()
+        advanceTimeBy(120_000) // já passou o recuo de 1 min, mas não os 5 min pedidos
         assertEquals(1, src.buscados.size)
-        advanceTimeBy(200_000)
-        r.pedir(TileId.aoRedor(-8.05, -34.95), urgente = true)
+        advanceTimeBy(200_000) // passou dos 5 min: os guardados retomam sozinhos
         advanceUntilIdle()
-        assertEquals(10, src.buscados.size)
+        assertEquals(9, src.buscados.size)
     }
 
     @Test fun `cenario A B C com o trabalhador terminando entre os pedidos mantem uma consulta por vez`() = runTest {

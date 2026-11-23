@@ -7,7 +7,8 @@ import java.io.File
 
 /** Conteúdo de um quadrado em cache. Quadrado sem perigos também é guardado (lista vazia): não consulta de novo por 30 dias. */
 data class QuadradoEmCache(val buscadoEm: Long, val perigos: List<PerigoPonto>) {
-    fun valido(agora: Long) = agora - buscadoEm in 0..VALIDADE_CACHE_MS
+    /** Relógio um pouco atrasado não invalida (idade negativa vale até 30 dias de diferença); muito no futuro, sim. */
+    fun valido(agora: Long) = agora - buscadoEm in -VALIDADE_CACHE_MS..VALIDADE_CACHE_MS
 }
 
 /** Onde os quadrados ficam guardados. Trocável nos testes. */
@@ -66,7 +67,11 @@ class ArquivoPerigoCache(raiz: File) : PerigoCacheStore {
             val tmp = File(dir, "${tile.ix}_${tile.iy}.tmp")
             tmp.writeText(json.encodeToString(ArquivoQuadrado.serializer(), a))
             val alvo = arquivo(tile)
-            if (!tmp.renameTo(alvo)) { alvo.delete(); tmp.renameTo(alvo) }
+            try {
+                java.nio.file.Files.move(tmp.toPath(), alvo.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: java.nio.file.AtomicMoveNotSupportedException) {
+                java.nio.file.Files.move(tmp.toPath(), alvo.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
         } catch (e: Exception) {
             // cache é só otimização: sem espaço/permissão, segue sem ele
         }

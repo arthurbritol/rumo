@@ -44,6 +44,10 @@ class PerigoRepositorio(
     private var protegidosPosicao: Set<TileId> = emptySet()
     private var protegidosJanela: Set<TileId> = emptySet()
     private var ultimoCentro: TileId? = null
+    private var ultimoAmplo = false
+    // Quadrados que esperam o fim do recuo de falha (na ordem da fila: posição antes de rota) e a retomada agendada.
+    private val aguardandoRede = LinkedHashSet<TileId>()
+    private var retomadaAgendada = false
 
     // Só o trabalhador (uma coroutine por vez) mexe nestes.
     private var falhasSeguidas = 0
@@ -63,13 +67,17 @@ class PerigoRepositorio(
     /** Quantos quadrados estão em memória. */
     fun quadradosEmMemoria(): Int = synchronized(lock) { carregados.size }
 
-    /** Posição mudou: se o quadrado é outro, carrega os 3x3 ao redor (na frente da fila). */
-    fun aoMudarPosicao(lat: Double, lon: Double) {
+    /**
+     * Posição mudou: se o quadrado é outro, carrega os 3x3 ao redor ([amplo], navegando/gravando) ou só o quadrado atual
+     * (mapa aberto sem viagem), na frente da fila. Passar de estreito para amplo no mesmo quadrado completa o 3x3.
+     */
+    fun aoMudarPosicao(lat: Double, lon: Double, amplo: Boolean = true) {
         val c = TileId.de(lat, lon)
-        val ao = TileId.aoRedor(lat, lon)
+        val ao = if (amplo) TileId.aoRedor(lat, lon) else listOf(c)
         synchronized(lock) {
-            if (c == ultimoCentro) return
+            if (c == ultimoCentro && (ultimoAmplo || !amplo)) return
             ultimoCentro = c
+            ultimoAmplo = amplo
             protegidosPosicao = ao.toSet()
         }
         pedir(ao, urgente = true)
@@ -91,8 +99,11 @@ class PerigoRepositorio(
 
     /** Tenta de novo os quadrados ao redor da última posição (o recuo de falha ainda vale). */
     fun tentarDeNovo() {
-        val c = synchronized(lock) { ultimoCentro } ?: return
-        pedir(TileId.aoRedor(c.sul + TileId.TAMANHO_GRAUS / 2, c.oeste + TileId.TAMANHO_GRAUS / 2), urgente = true)
+        val (c, amplo) = synchronized(lock) { ultimoCentro to ultimoAmplo }
+        if (c == null) return
+        val lat = c.sul + TileId.TAMANHO_GRAUS / 2
+        val lon = c.oeste + TileId.TAMANHO_GRAUS / 2
+        pedir(if (amplo) TileId.aoRedor(lat, lon) else listOf(c), urgente = true)
     }
 
     /** Insere na fila ([urgente] vai para a frente, mantendo a ordem). Quadrados já carregados e válidos são ignorados. */
@@ -134,7 +145,12 @@ class PerigoRepositorio(
                 }
                 if (q != null && q.valido(agora())) continue
                 // Falta ou venceu: só vai à rede fora do recuo de falha.
-                if (agora() < bloqueadoAte) continue
+                if (agora() < bloqueadoAte) {
+                    // Em recuo: não descarta; guarda na ordem e retoma sozinho quando o recuo acabar.
+                    synchronized(lock) { aguardandoRede += tile }
+                    agendarRetomada()
+                    continue
+                }
                 val espera = ultimaRede + intervaloMinMs - agora()
                 if (espera > 0) delay(espera)
                 ultimaRede = agora()
@@ -159,6 +175,24 @@ class PerigoRepositorio(
         }
     }
 
+    /** Um único despertador: ao fim do recuo recoloca os quadrados que esperavam (mantendo a ordem de prioridade). */
+    private fun agendarRetomada() {
+        val espera = synchronized(lock) {
+            if (retomadaAgendada) return
+            retomadaAgendada = true
+            (bloqueadoAte - agora()).coerceAtLeast(0L) + 1
+        }
+        scope.launch {
+            delay(espera)
+            val lista = synchronized(lock) {
+                retomadaAgendada = false
+                // Posição atual antes da rota (a ordem de chegada ao recuo pode ter posto a rota na frente).
+                aguardandoRede.partition { it in protegidosPosicao }.let { it.first + it.second }.also { aguardandoRede.clear() }
+            }
+            pedir(lista, urgente = false)
+        }
+    }
+
     private fun guardar(tile: TileId, q: QuadradoEmCache) {
         val lista = synchronized(lock) {
             carregados.remove(tile)
@@ -170,7 +204,8 @@ class PerigoRepositorio(
                     if (k !in protegidosPosicao && k !in protegidosJanela) it.remove()
                 }
             }
-            carregados.values.flatMap { it.perigos }
+            // distinctBy: perigo na divisa pode vir nos dois quadrados com o mesmo id.
+            carregados.values.flatMap { it.perigos }.distinctBy { it.id }
         }
         _perigos.value = lista
     }

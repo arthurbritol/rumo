@@ -77,7 +77,9 @@ class AvisadorDePerigos {
         val limiares = p.tipo.limiaresM
         val cruzados = limiares.filter { alvo.distanciaM <= it && it !in st.falados }
         val falas = ArrayList<String>(1)
-        if (cruzados.isNotEmpty()) {
+        // Sem rota a voz só fala com a via alinhada; o cartão aparece mesmo assim e o limiar fica para quando alinhar.
+        val alinhado = rota != null || alvo.desvioLateralM <= PerigosAdiante.LIVRE_VOZ_DESVIO_M
+        if (cruzados.isNotEmpty() && alinhado) {
             st.falados += limiares.filter { alvo.distanciaM <= it }
             falas += texto(p, alvo.distanciaM, acima, curto = p.tipo.curtoNoUltimo && cruzados.min() == limiares.min())
         }

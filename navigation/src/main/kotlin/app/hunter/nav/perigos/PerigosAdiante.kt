@@ -8,10 +8,16 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** Um perigo à frente e a distância até ele (m): pela rota quando há rota, em linha reta quando não há. */
-data class AlvoPerigo(val perigo: PerigoPonto, val distanciaM: Double)
+data class AlvoPerigo(
+    val perigo: PerigoPonto,
+    val distanciaM: Double,
+    /** Modo livre: quanto o perigo fica ao lado do eixo do rumo (m). Com rota é 0 (já vale o desvio do traçado). */
+    val desvioLateralM: Double = 0.0,
+)
 
 /**
  * Quais perigos estão à frente. Puro (sem Android, sem rede), chamado ~1 vez por segundo.
@@ -28,6 +34,11 @@ object PerigosAdiante {
     const val LIVRE_ALCANCE_M = 600.0
     const val LIVRE_ALCANCE_HISTERESE_M = 650.0
     const val LIVRE_ANGULO = 35.0
+    /** Modo livre: desvio lateral máximo do eixo do rumo (m); uma avenida paralela a ~200 m não conta. */
+    const val LIVRE_DESVIO_M = 60.0
+    const val LIVRE_DESVIO_HISTERESE_M = 80.0
+    /** Modo livre: a voz só fala se a via está alinhada (desvio lateral até este valor, m). */
+    const val LIVRE_VOZ_DESVIO_M = 30.0
     const val LIVRE_ANGULO_HISTERESE = 50.0
     const val VELOCIDADE_MIN_MPS = 3.0
 
@@ -59,7 +70,7 @@ object PerigosAdiante {
             // continua adiante enquanto estiver perto (o cartão não some no semáforo a 100 m da lombada).
             val atual = perigos.firstOrNull { it.id == alvoAtualId } ?: return emptyList()
             val d = Geo.distanceM(aqui.lat, aqui.lon, atual.lat, atual.lon)
-            return if (d <= LIVRE_ALCANCE_HISTERESE_M) listOf(AlvoPerigo(atual, d)) else emptyList()
+            return if (d <= LIVRE_ALCANCE_HISTERESE_M) listOf(AlvoPerigo(atual, d, desvioLateralM = Double.MAX_VALUE)) else emptyList()
         }
         val kx = cos(Math.toRadians(aqui.lat))
         val out = ArrayList<AlvoPerigo>()
@@ -72,9 +83,13 @@ object PerigosAdiante {
             val d = sqrt(dx * dx + dy * dy)
             if (d > alcance || d < 1.0) continue
             val rumoAoPerigo = (Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0
-            if (difAngular(rumo, rumoAoPerigo) > (if (atual) LIVRE_ANGULO_HISTERESE else LIVRE_ANGULO)) continue
+            val dif = difAngular(rumo, rumoAoPerigo)
+            if (dif > (if (atual) LIVRE_ANGULO_HISTERESE else LIVRE_ANGULO)) continue
+            // Além do cone, limita o desvio lateral: sem a via, o cone sozinho aceita ~340 m ao lado a 600 m de distância.
+            val lateral = d * sin(Math.toRadians(dif))
+            if (lateral > (if (atual) LIVRE_DESVIO_HISTERESE_M else LIVRE_DESVIO_M)) continue
             if (!vale(p, rumo)) continue
-            out += AlvoPerigo(p, d)
+            out += AlvoPerigo(p, d, lateral)
         }
         return out.sortedBy { it.distanciaM }
     }
