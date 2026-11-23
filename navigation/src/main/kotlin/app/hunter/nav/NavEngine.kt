@@ -20,6 +20,11 @@ data class NavProgress(
     val deviationM: Double,
     val offRoute: Boolean,
     val arrived: Boolean,
+    /** Posição do GPS projetada no traçado (para desenhar o marcador sobre a rota). Padrão 0 só para compatibilidade. */
+    val snapLat: Double = 0.0,
+    val snapLon: Double = 0.0,
+    /** Rumo (0..360, graus a partir do norte) do segmento do traçado no ponto projetado. */
+    val segmentBearingDeg: Double = 0.0,
 )
 
 /**
@@ -48,6 +53,11 @@ class NavEngine(
         lastSeg = seg
         val segLen = cum[seg + 1] - cum[seg]
         val along = cum[seg] + t * segLen
+        val a = shape[seg]
+        val b = shape[seg + 1]
+        val snapLat = a.lat + t * (b.lat - a.lat)
+        val snapLon = a.lon + t * (b.lon - a.lon)
+        val segBearing = bearingDeg(a, b)
         val total = cum.last()
 
         val limit = max(offRouteM, (accuracyM ?: 0f) * 2.0)
@@ -73,6 +83,9 @@ class NavEngine(
             deviationM = dev,
             offRoute = offStreak >= offRouteCount,
             arrived = upcoming.isDestination && remaining <= arrivalM,
+            snapLat = snapLat,
+            snapLon = snapLon,
+            segmentBearingDeg = segBearing,
         )
     }
 
@@ -125,6 +138,14 @@ class NavEngine(
             if (d < bestDev) { bestDev = d; bestSeg = i; bestT = t }
         }
         return Triple(bestSeg, bestT, bestDev)
+    }
+
+    private fun bearingDeg(a: LatLon, b: LatLon): Double {
+        val dx = (b.lon - a.lon) * cos(Math.toRadians((a.lat + b.lat) / 2))
+        val dy = b.lat - a.lat
+        if (dx == 0.0 && dy == 0.0) return 0.0
+        val deg = Math.toDegrees(kotlin.math.atan2(dx, dy))
+        return (deg + 360.0) % 360.0
     }
 
     private companion object {

@@ -134,6 +134,20 @@ class NavigationTest {
     }
 
     @Test
+    fun `projecao no traçado e rumo do segmento sao expostos`() {
+        val e = NavEngine(syntheticRoute())
+        // 500 m a leste do início, 12 m ao norte do traçado: a projeção cai sobre a linha (lat 0) e o rumo é leste (90°)
+        val p = e.update(at(500.0, 12.0))
+        near(0.0, p.snapLat, 1e-7)
+        near(500.0 / 111_194.9, p.snapLon, 1e-6)
+        near(90.0, p.segmentBearingDeg, 0.5)
+        near(12.0, p.deviationM, 0.5)
+        // no 2º trecho o rumo é norte (0°)
+        val q = e.update(at(1000.0, 400.0))
+        near(0.0, kotlin.math.min(q.segmentBearingDeg, 360.0 - q.segmentBearingDeg), 0.5)
+    }
+
+    @Test
     fun `tempo restante soma o resto do trecho atual e os seguintes`() {
         val e = NavEngine(syntheticRoute())
         near(220.0, e.update(at(0.0, 0.0)).remainingS, 1.0)
