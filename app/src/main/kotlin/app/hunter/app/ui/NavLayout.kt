@@ -75,6 +75,12 @@ fun larguraColunaLateralDp(classe: ClasseDeTela): Int = when (classe) {
 /** Largura máxima do conteúdo das telas de rolagem (Viagens, Garagem, Amigos, Pod, Perfil), centralizado. */
 fun larguraMaximaDoConteudoDp(classe: ClasseDeTela): Int = if (classe == ClasseDeTela.Larga) 720 else 640
 
+/**
+ * Um cartão só pode ter rolagem própria quando a altura que recebe é limitada. Numa coluna rolável (a coluna esquerda do mapa)
+ * a altura é infinita e `verticalScroll` aninhado lança IllegalStateException: ali o cartão cresce e a coluna rola.
+ */
+fun rolagemPropria(pedida: Boolean, alturaLimitada: Boolean): Boolean = pedida && alturaLimitada
+
 /** Quantos atalhos cabem na coluna esquerda sem empurrar o resto para baixo da dobra. */
 fun maximoDeAtalhosNaColuna(classe: ClasseDeTela): Int = when (classe) {
     ClasseDeTela.Retrato -> 0

@@ -89,6 +89,7 @@ import app.hunter.app.ui.EstadoDaTela
 import app.hunter.app.ui.ClasseDeTela
 import app.hunter.app.ui.FormaDasAbas
 import app.hunter.app.ui.ConteudoLimitado
+import app.hunter.app.ui.larguraColunaLateralDp
 import app.hunter.app.ui.classeDeTela
 import app.hunter.app.ui.insetsSeguros
 import app.hunter.app.ui.formaDasAbas
@@ -350,6 +351,8 @@ private fun HunterRoot(
     // Durante a navegação as abas somem do mapa: mais mapa e nenhum toque acidental com a moto andando.
     val formaAbas = formaDasAbas(classe, abasNoMapa, tab == Tab.Map)
     val seguros = insetsSeguros()
+    // Altura dos cartões de baixo do mapa (retrato), para o aviso de conta ficar acima deles.
+    var embaixoDp by remember { mutableStateOf(0) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -403,7 +406,7 @@ private fun HunterRoot(
             ) {
                 // O mapa fica SEMPRE montado por baixo: trocar de aba não recria o mapa nem recarrega os tiles
                 // (era a maior causa de lentidão). As outras abas aparecem por cima, opacas.
-                MapScreen(vm, friends = friendMarkers, social = socialVm)
+                MapScreen(vm, friends = friendMarkers, social = socialVm, onAlturaEmbaixo = { embaixoDp = it })
                 Crossfade(targetState = tab, animationSpec = tween(160), label = "tab") { t ->
                     if (t != Tab.Map) {
                         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -434,22 +437,13 @@ private fun HunterRoot(
                 // Composto depois do MapScreen para ter prioridade sobre o "voltar" do mapa.
                 BackHandler(enabled = tab != Tab.Map && !(tab == Tab.Friends && friendsSubOpen)) { tabIndex = Tab.Map.ordinal }
 
-                // Aviso de versão nova por cima de tudo, exceto durante a navegação (nada atrapalha a condução).
+                // Avisos (versão nova e criar conta) nunca atrapalham a condução: somem navegando E gravando.
                 val update by vm.update.collectAsStateWithLifecycle()
+                val gravando by vm.recording.collectAsStateWithLifecycle()
+                val semPressa = !nav.active && !gravando.isRecording
                 val paisagem = classe != ClasseDeTela.Retrato
-                // Paisagem: aviso e banner ficam no canto de baixo à direita, em largura limitada, sem cobrir a coluna do mapa
-                // (busca, Gravar viagem) nem os botões do alto. Retrato: banner no topo e aviso embaixo, ambos dentro dos insets.
-                val ladoMapa = Modifier.widthIn(max = 380.dp)
-                val bannerMod = if (paisagem) {
-                    ladoMapa.align(Alignment.BottomEnd).windowInsetsPadding(seguros.only(WindowInsetsSides.End + WindowInsetsSides.Bottom))
-                } else {
-                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                }
-                update?.takeIf { !nav.active }?.let { u ->
-                    UpdateBanner(u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate, modifier = bannerMod)
-                }
 
-                // Quem já usava o app: aviso discreto e dispensável para criar conta (nunca durante a navegação).
+                // Quem já usava o app: aviso discreto e dispensável para criar conta.
                 var showNotice by remember { mutableStateOf(prefs.getBoolean(EXISTING_USER_NOTICE_KEY, false)) }
                 // Entrou numa conta: o aviso perde o sentido. Efeito (não durante a composição) para gravar a preferência.
                 LaunchedEffect(signedIn, showNotice) {
@@ -458,25 +452,47 @@ private fun HunterRoot(
                         showNotice = false
                     }
                 }
-                if (showNotice && !signedIn && accountAvailable && !nav.active) {
-                    AccountNotice(
-                        onCreate = onCreateAccount,
-                        onDismiss = {
-                            prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
-                            showNotice = false
-                        },
-                        modifier = if (paisagem) {
-                            // Acima do banner de versão, se houver; no canto, fora da coluna do mapa.
-                            ladoMapa.align(Alignment.BottomEnd)
+                val avisoDeVersao = update?.takeIf { semPressa }
+                val avisoDeConta = showNotice && !signedIn && accountAvailable && semPressa
+                val dispensarConta = {
+                    prefs.edit().putBoolean(EXISTING_USER_NOTICE_KEY, false).apply()
+                    showNotice = false
+                }
+                if (paisagem) {
+                    // Paisagem: uma pilha só, embaixo, ao lado da coluna do mapa (busca e Gravar viagem ficam livres) e com folga à
+                    // direita para a coluna de botões. Em outras abas, junto da borda esquerda.
+                    if (avisoDeVersao != null || avisoDeConta) {
+                        val inicio = if (tab == Tab.Map) larguraColunaLateralDp(classe).dp + 12.dp else 12.dp
+                        Column(
+                            Modifier
+                                .align(Alignment.BottomStart)
+                                .widthIn(max = 380.dp)
                                 .windowInsetsPadding(seguros.only(WindowInsetsSides.End + WindowInsetsSides.Bottom))
-                                .padding(bottom = if (update != null && !nav.active) 200.dp else 0.dp)
-                        } else {
-                            // Sobre o mapa, acima do cartão "Pronto para rodar" (~108 dp); nas outras abas, rente à barra.
-                            Modifier.align(Alignment.BottomCenter)
+                                .padding(start = inicio, end = 76.dp, bottom = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            avisoDeVersao?.let { UpdateBanner(it, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate) }
+                            if (avisoDeConta) AccountNotice(onCreate = onCreateAccount, onDismiss = dispensarConta)
+                        }
+                    }
+                } else {
+                    // Retrato: banner no topo; aviso de conta embaixo, acima dos cartões do mapa (altura medida pelo mapa).
+                    avisoDeVersao?.let { u ->
+                        UpdateBanner(
+                            u, onInstall = vm::installUpdate, onDismiss = vm::dismissUpdate,
+                            modifier = Modifier.align(Alignment.TopCenter)
+                                .windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+                        )
+                    }
+                    if (avisoDeConta) {
+                        AccountNotice(
+                            onCreate = onCreateAccount,
+                            onDismiss = dispensarConta,
+                            modifier = Modifier.align(Alignment.BottomCenter)
                                 .windowInsetsPadding(seguros.only(WindowInsetsSides.Horizontal))
-                                .padding(bottom = if (tab == Tab.Map) 128.dp else 8.dp)
-                        },
-                    )
+                                .padding(bottom = if (tab == Tab.Map) (embaixoDp + 8).dp else 8.dp),
+                        )
+                    }
                 }
             }
         }

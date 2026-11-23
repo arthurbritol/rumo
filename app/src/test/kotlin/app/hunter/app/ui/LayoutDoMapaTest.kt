@@ -217,4 +217,24 @@ class LayoutDoMapaTest {
         assertEquals(200, alturaDoMapaDoDetalheDp(300))
         assertEquals(330, alturaDoMapaDoDetalheDp(600))
     }
+
+    @Test
+    fun `cartao so rola por conta propria com altura limitada`() {
+        // Na coluna rolavel a altura e infinita: verticalScroll aninhado derruba o app.
+        assertFalse(rolagemPropria(pedida = true, alturaLimitada = false))
+        assertTrue(rolagemPropria(pedida = true, alturaLimitada = true))
+        assertFalse(rolagemPropria(pedida = false, alturaLimitada = true))
+        assertFalse(rolagemPropria(pedida = false, alturaLimitada = false))
+    }
+
+    @Test
+    fun `floating card usa o guarda de altura limitada`() {
+        // Checagem estatica: sem infraestrutura de composicao em JVM, garante que o FloatingCard continua passando por rolagemPropria.
+        val dir = generateSequence(java.io.File("").absoluteFile) { it.parentFile }
+            .first { java.io.File(it, "app/src/main/kotlin/app/hunter/app/ui/Components.kt").exists() }
+        val fonte = java.io.File(dir, "app/src/main/kotlin/app/hunter/app/ui/Components.kt").readText()
+        val corpo = fonte.substringAfter("fun FloatingCard(").substringBefore("\n@Composable")
+        assertTrue(corpo.contains("rolagemPropria(scrollable, constraints.hasBoundedHeight)"))
+        assertFalse(corpo.contains("if (scrollable) Modifier.verticalScroll"))
+    }
 }

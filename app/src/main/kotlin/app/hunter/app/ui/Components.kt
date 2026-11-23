@@ -438,8 +438,11 @@ fun FloatingCard(modifier: Modifier = Modifier, scrollable: Boolean = false, con
         shadowElevation = 16.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
     ) {
-        val inner = if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier
-        Column(inner.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        // Rolagem própria só com altura limitada: dentro de uma coluna rolável (altura infinita) `verticalScroll` derruba o app.
+        androidx.compose.foundation.layout.BoxWithConstraints {
+            val inner = if (rolagemPropria(scrollable, constraints.hasBoundedHeight)) Modifier.verticalScroll(rememberScrollState()) else Modifier
+            Column(inner.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        }
     }
 }
 

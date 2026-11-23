@@ -125,6 +125,8 @@ fun MapScreen(
     nearbyVm: NearbyViewModel = viewModel(factory = nearbyViewModelFactory(LocalContext.current.applicationContext as HunterApp)),
     /** Para o convite de amizade que nasce de um encontro ("Quero ser amigo" das duas pessoas). */
     social: app.hunter.app.social.SocialViewModel? = null,
+    /** Altura (dp) que os cartões de baixo ocupam em retrato; a raiz a usa para subir os avisos acima deles. */
+    onAlturaEmbaixo: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     if (social != null) LaunchedEffect(nearbyVm, social) { nearbyVm.convidarAmigo = social::conviteDeEncontro }
@@ -327,7 +329,8 @@ fun MapScreen(
     val controlsBottom = when {
         navigating -> if (landscape) 16.dp else 104.dp
         landscape -> 16.dp
-        else -> 210.dp
+        // Retrato gravando: acima do cartão de baixo, pela altura medida (210 dp enquanto ainda não mediu).
+        else -> if (alturaEmbaixoPx > 0) (with(density) { alturaEmbaixoPx.toDp() } + 8.dp) else 210.dp
     }
 
     // ---- Botões flutuantes: no máximo 4 alvos; passando disso o último vira "mais" com um mini menu.
@@ -335,6 +338,8 @@ fun MapScreen(
     val alturaMapaDp = with(density) { alturaMapaPx.toDp().value.toInt() }
     val insetTopoDp = with(density) { seguros.getTop(density).toDp().value.toInt() }
     val alturaEmbaixoDp = with(density) { alturaEmbaixoPx.toDp().value.toInt() }
+    val embaixoParaAvisos = if (em.cartoesEmbaixo) alturaEmbaixoDp else 0
+    LaunchedEffect(embaixoParaAvisos) { onAlturaEmbaixo(embaixoParaAvisos) }
     val maxBotoes = when {
         alturaMapaPx == 0 || navigating -> 4
         landscape -> maximoDeBotoes(alturaMapaDp - insetTopoDp - 24 - 12)
@@ -991,8 +996,8 @@ private fun AtalhosRapidos(atalhos: List<Place>, favs: List<Place>, onPick: (Pla
 }
 
 /**
- * Painel inferior do mapa. Retrato e sem gravar: cartão COMPACTO de uma linha (texto curto + "Gravar viagem"), até ~96 dp.
- * Em paisagem, ou gravando, o cartão completo.
+ * Painel inferior do mapa. Sem gravar e [compacto]: retrato, cartão de uma linha (texto curto + "Gravar viagem"), até ~96 dp;
+ * paisagem ([emColuna]), versão vertical de ~110 dp com o botão embaixo. Gravando, o cartão completo (velocidade, métricas, encerrar).
  */
 @Composable
 private fun IdleBottom(vm: HunterViewModel, recording: Boolean, compacto: Boolean, emColuna: Boolean, onRecord: () -> Unit, onStopRecording: () -> Unit, attention: Int) {

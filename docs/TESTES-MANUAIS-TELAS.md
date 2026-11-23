@@ -44,7 +44,9 @@ Para cada uma: rola até o fim, nada fica sob a barra de gestos nem sob o trilho
 - [ ] Perfil (avatar na Garagem ou Amigos): rolagem, edição com teclado aberto (o campo continua visível), voltar.
 - [ ] Login (criar conta) e apresentação (Perfil > Rever apresentação) em paisagem: conteúdo rolável, largura limitada, "Pular" fora da barra de status, nada sob a barra de gestos.
 - [ ] Permissões e "Sua moto" (primeira abertura): rolam em paisagem.
-- [ ] Aviso de versão e "Crie uma conta": em paisagem ficam no canto de baixo à direita sem cobrir a coluna; em retrato dentro dos insets e o aviso de conta acima do "Pronto para rodar".
+- [ ] Aviso de versão e "Crie uma conta": em paisagem formam uma pilha embaixo, ao lado da coluna, sem cobrir a coluna nem os botões da direita; em retrato o banner fica no topo e o aviso de conta acima dos cartões de baixo. Somem navegando e gravando.
+
+- [ ] Paisagem com encontro ativo ou encerrado (rolê): o cartão aparece no topo da coluna, sem fechar o app, e a coluna rola.
 
 ## Rotação e estados
 - [ ] Girar em cada aba: não trava nem perde a aba; o mapa reaparece com a câmera seguindo.

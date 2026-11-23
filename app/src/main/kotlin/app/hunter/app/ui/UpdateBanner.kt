@@ -3,6 +3,7 @@ package app.hunter.app.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -16,7 +17,8 @@ import app.hunter.app.UpdateUi
 /** Cartão "Nova versão disponível": mostra as alterações e baixa/instala a release do GitHub. */
 @Composable
 fun UpdateBanner(ui: UpdateUi, onInstall: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
-    FloatingCard(modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+    // Altura limitada (rola por dentro) para o aviso nunca cobrir metade da tela.
+    FloatingCard(modifier.heightIn(max = 260.dp).padding(horizontal = 12.dp, vertical = 8.dp), scrollable = true) {
         Text("Nova versão disponível", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
             "Rumo ${ui.update.versionName}" + sizeLabel(ui.update.sizeBytes),
