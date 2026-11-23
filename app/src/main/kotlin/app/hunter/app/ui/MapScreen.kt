@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,11 +51,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -151,8 +155,9 @@ fun MapScreen(
     val nearbyState by nearbyVm.estado.collectAsStateWithLifecycle()
     val nearbyRiders = (nearbyState as? NearbyUiState.Procurando)?.vizinhos.orEmpty()
     val nearbyPref by nearbyVm.preferencia.collectAsStateWithLifecycle()
-    var showNearbySheet by remember { mutableStateOf(false) }
-    var selectedRider by remember { mutableStateOf<String?>(null) }
+    var showNearbySheet by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    // Estados abaixo sobrevivem a girar o celular (a atividade é recriada): cartão aberto, busca e folha continuam.
+    var selectedRider by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     val rider = selectedRider?.let { id -> nearbyRiders.firstOrNull { it.sessao == id } }
     var pendingNearbyPref by remember { mutableStateOf<Preferencia?>(null) }
     // Encontros: proposta tocada no mapa, ponto marcado com o dedo para propor, e o encontro do usuário.
@@ -162,18 +167,18 @@ fun MapScreen(
     val fimPessoas by nearbyVm.fimPessoas.collectAsStateWithLifecycle()
     val amigosMarcados by nearbyVm.amigosMarcados.collectAsStateWithLifecycle()
     val nearbyProposals = (nearbyState as? NearbyUiState.Procurando)?.propostas.orEmpty()
-    var selectedProposal by remember { mutableStateOf<String?>(null) }
+    var selectedProposal by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var proposalPoint by remember { mutableStateOf<app.hunter.nav.LatLon?>(null) }
     val proposal = selectedProposal?.let { id -> nearbyProposals.firstOrNull { it.id == id } }
     val activeEncounter = encontro as? EncontroUiState.Ativo
     val encounterRiders = activeEncounter?.encontro?.let { e -> e.participantes.filter { it.sessao != e.eu } }.orEmpty()
     // Cartões de propor/entrar substituem o painel inferior (como o da moto tocada); o do encontro convive com ele.
     val nearbyCardShown = proposalPoint != null || proposal != null
-    var encounterExpanded by remember { mutableStateOf(true) }
+    var encounterExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(activeEncounter == null) { if (activeEncounter != null) encounterExpanded = true }
     val encounterCardShown = !nearbyCardShown && (encontro is EncontroUiState.Encerrado || (activeEncounter != null && encounterExpanded))
 
-    var searching by remember { mutableStateOf(false) }
+    var searching by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var follow by remember { mutableStateOf(true) }
     var nonce by remember { mutableIntStateOf(0) }
     var locationOk by remember { mutableStateOf(false) }
@@ -249,12 +254,29 @@ fun MapScreen(
     }
 
     val navigating = nav.active
-    // Navegação enxuta: o que aparece depende de estar navegando e da orientação (ver NavLayout.kt).
-    val landscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val el = navegacaoEnxuta(
-        EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow, gravando = rec.isRecording),
-        if (landscape) Orientacao.Paisagem else Orientacao.Retrato,
+    // Layout adaptativo: a classe da janela (retrato, paisagem de celular, tablet) e o estado decidem onde cada bloco fica
+    // (ver NavLayout.kt). Em paisagem a tela de sempre vira uma coluna esquerda + mapa; em retrato, busca no topo e cartão embaixo.
+    val config = LocalConfiguration.current
+    val classe = classeDeTela(config.screenWidthDp, config.screenHeightDp)
+    val landscape = classe != ClasseDeTela.Retrato
+    val seguros = insetsSeguros()
+    val favs by vm.favorites.collectAsStateWithLifecycle()
+    val recents by vm.recents.collectAsStateWithLifecycle()
+    val atalhos = remember(favs, recents) {
+        (favs + recents.filter { r -> favs.none { it.lat == r.lat && it.lon == r.lon } }).take(8)
+    }
+    val em = elementosDoMapa(
+        EstadoDoMapa(
+            classe = classe,
+            tela = EstadoDaTela(navegando = navigating, encontroAtivo = activeEncounter != null, seguindo = follow, gravando = rec.isRecording),
+            cartaoSelecionado = rider != null || nearbyCardShown,
+            previaDeRota = preview != null,
+            postoSelecionado = selectedFuelStation != null,
+            pesquisando = searching,
+            temAtalhos = atalhos.isNotEmpty(),
+        ),
     )
+    val el = em.base
     // Ao começar a navegar, nada fica selecionado: os cartões não reaparecem do nada ao encerrar.
     LaunchedEffect(navigating) {
         if (navigating) {
@@ -263,8 +285,10 @@ fun MapScreen(
             proposalPoint = null
         }
     }
-    val leftInset = WindowInsets.safeDrawing.asPaddingValues().calculateLeftPadding(LayoutDirection.Ltr)
-    val sidePanelDp = if (el.painelLateral) NAV_PANEL_WIDTH.value.toInt() + leftInset.value.toInt() + 8 else 0
+    val leftInset = seguros.asPaddingValues().calculateLeftPadding(LayoutDirection.Ltr)
+    // O painel da navegação tem a mesma largura da coluna esquerda do mapa ocioso.
+    val larguraPainel = larguraColunaLateralDp(classe).dp
+    val sidePanelDp = if (el.painelLateral) larguraPainel.value.toInt() + leftInset.value.toInt() + 8 else 0
     // Estes valores são lembrados: sem isso a lista era recriada a cada fix de GPS (1 Hz) e o mapa
     // reenviava as rotas inteiras ao motor de renderização a cada segundo.
     val previewRoute = preview?.route
@@ -287,15 +311,253 @@ fun MapScreen(
         preview?.let { p -> p.routes.filterIndexed { i, _ -> i != p.selected }.map { it.shape } } ?: emptyList()
     }
 
-    // Altura (a partir de baixo) dos botões flutuantes da direita; o cartão de perigo usa a mesma, do outro lado.
+    // Altura (a partir de baixo) do botão de centralizar na navegação e do cartão de perigo (do outro lado).
+    // Fora da navegação, em paisagem, não há cartões embaixo; em retrato o cartão de gravação ocupa ~210 dp.
     val controlsBottom = when {
         navigating -> if (landscape) 16.dp else 104.dp
-        selectedFuelStation != null -> 340.dp
-        rider != null && !navigating -> 250.dp
-        nearbyCardShown && !navigating -> 300.dp
-        encounterCardShown && !navigating -> 430.dp
-        rec.isRecording -> 210.dp
-        else -> 190.dp
+        landscape -> 16.dp
+        else -> 210.dp
+    }
+
+    // ---- Botões flutuantes: no máximo 4 alvos; passando disso o último vira "mais" com um mini menu.
+    val botoes = distribuirBotoes(
+        buildList {
+            if (el.camadas) add(BotaoDoMapa.Postos)
+            if (el.camadas && trafficTileUrl != null) add(BotaoDoMapa.Transito)
+            if (el.camadas && nearbyAvailable) add(BotaoDoMapa.Role)
+            if (el.recentralizar) add(BotaoDoMapa.Centralizar)
+        },
+    )
+    var maisAberto by remember { mutableStateOf(false) }
+    val acaoDoBotao: (BotaoDoMapa) -> Unit = {
+        when (it) {
+            BotaoDoMapa.Postos -> vm.toggleFuelLayer()
+            BotaoDoMapa.Transito -> vm.toggleTraffic()
+            BotaoDoMapa.Role -> showNearbySheet = true
+            BotaoDoMapa.Centralizar -> { follow = true; nonce++; vm.clearFocus() }
+        }
+    }
+    val rotuloDoBotao: (BotaoDoMapa) -> String = {
+        when (it) {
+            BotaoDoMapa.Postos -> "Camada de postos de combustível"
+            BotaoDoMapa.Transito -> "Camada de trânsito"
+            BotaoDoMapa.Role -> "Procurar rolê"
+            BotaoDoMapa.Centralizar -> "Centralizar"
+        }
+    }
+    val colunaDeBotoes: @Composable (Modifier) -> Unit = { m ->
+        Column(m, verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.End) {
+            botoes.visiveis.forEach { b ->
+                when (b) {
+                    BotaoDoMapa.Postos -> SquircleIconButton(R.drawable.fa_gas_pump, rotuloDoBotao(b), { acaoDoBotao(b) }, selected = fuelLayerEnabled)
+                    BotaoDoMapa.Transito -> SquircleIconButton(R.drawable.fa_traffic_light, rotuloDoBotao(b), { acaoDoBotao(b) }, selected = trafficEnabled)
+                    BotaoDoMapa.Role -> SquircleIconButton(R.drawable.fa_motorcycle, rotuloDoBotao(b), { acaoDoBotao(b) }, selected = nearbyState !is NearbyUiState.Desligado)
+                    BotaoDoMapa.Centralizar -> CircleButton(
+                        icon = Icons.Default.LocationOn,
+                        description = rotuloDoBotao(b),
+                        onClick = { acaoDoBotao(b) },
+                        container = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+            if (botoes.temMais) {
+                Box {
+                    CircleButton(Icons.Default.MoreVert, "Mais botões", { maisAberto = true })
+                    DropdownMenu(expanded = maisAberto, onDismissRequest = { maisAberto = false }) {
+                        botoes.noMenuMais.forEach { b ->
+                            DropdownMenuItem(text = { Text(rotuloDoBotao(b)) }, onClick = { maisAberto = false; acaoDoBotao(b) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Cartões. Cada um decide sozinho se aparece; quem chama só diz ONDE (embaixo no retrato, na coluna em paisagem).
+    val pv = preview
+    val cartaoPrevia: @Composable (Modifier) -> Unit = { m ->
+        if (pv != null && !navigating) PreviewCard(vm, pv, onStart = beginNav, modifier = m)
+    }
+    val cartaoPosto: @Composable (Modifier) -> Unit = { m ->
+        AnimatedVisibility(
+            visible = selectedFuelStation != null && el.ocioso,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = m,
+        ) {
+            selectedFuelStation?.let { station ->
+                val distM = live?.let { loc ->
+                    app.hunter.model.Geo.distanceM(loc.latitude, loc.longitude, station.lat, station.lon)
+                }
+                FuelStationCard(
+                    station = station,
+                    distanceM = distM,
+                    onNavigate = { vm.navigateToStation(station) },
+                    onAddStop = { vm.addStationAsStop(station) },
+                    onClose = { vm.selectFuelStation(null) },
+                    onEditPrices = { editingFuelStation = station },
+                    cityReference = stationReference,
+                )
+            }
+        }
+    }
+    val cartaoMoto: @Composable (Modifier) -> Unit = { m ->
+        if (rider != null && el.ocioso && pv == null && selectedFuelStation == null) {
+            NearbyRiderCard(
+                vizinho = rider,
+                distancia = live?.let { distanciaAproximada(it.latitude, it.longitude, rider) },
+                onClose = { selectedRider = null },
+                modifier = m,
+                enviando = nearbyEnviando,
+                onBloquear = {
+                    nearbyVm.bloquear(rider.sessao)
+                    selectedRider = null
+                },
+                onDenunciar = { motivo -> nearbyVm.denunciar(rider.sessao, motivo) },
+            )
+        }
+    }
+    val cartaoEncontro: @Composable (Modifier) -> Unit = { m ->
+        if (el.ocioso && pv == null && selectedFuelStation == null && rider == null) {
+            val e = encontro
+            if (e is EncontroUiState.Ativo) {
+                if (encounterCardShown) {
+                    NearbyEncounterCard(
+                        e,
+                        onSair = nearbyVm::sair,
+                        onMinimizar = { encounterExpanded = false },
+                        modifier = m,
+                        enviando = nearbyEnviando,
+                        onBloquear = nearbyVm::bloquear,
+                        onDenunciar = nearbyVm::denunciar,
+                        onIrAtePonto = { vm.previewAt(app.hunter.nav.LatLon(e.encontro.ponto.lat, e.encontro.ponto.lon)) },
+                    )
+                }
+            } else if (e is EncontroUiState.Encerrado && encounterCardShown) {
+                NearbyEndCard(
+                    e.motivo,
+                    onClose = nearbyVm::limparFim,
+                    modifier = m,
+                    pessoas = fimPessoas,
+                    enviando = nearbyEnviando,
+                    onBloquear = nearbyVm::bloquear,
+                    onDenunciar = nearbyVm::denunciar,
+                    marcadas = amigosMarcados,
+                    onQueroAmigo = nearbyVm::querSerAmigo,
+                )
+            }
+        }
+    }
+    val cartaoProposta: @Composable (Modifier) -> Unit = { m ->
+        if (nearbyCardShown && el.ocioso && pv == null && selectedFuelStation == null && rider == null) {
+            if (encontro is EncontroUiState.Aguardando || encontro is EncontroUiState.Nenhum) {
+                val ponto = proposalPoint
+                if (ponto != null) {
+                    NearbyCreateProposalCard(
+                        aguardando = encontro is EncontroUiState.Aguardando,
+                        onPropor = { vagas -> nearbyVm.proporPonto(ponto.lat, ponto.lon, vagas) },
+                        onClose = { proposalPoint = null },
+                        modifier = m,
+                        aviso = avisoPontoLonge(live?.latitude, live?.longitude, ponto.lat, ponto.lon, nearbyPref?.raioKm ?: RAIO_PADRAO_KM),
+                    )
+                } else if (proposal != null) {
+                    NearbyProposalCard(
+                        proposta = proposal,
+                        aguardando = encontro is EncontroUiState.Aguardando,
+                        onEntrar = { nearbyVm.entrar(proposal.id) },
+                        onClose = { selectedProposal = null },
+                        modifier = m,
+                    )
+                }
+            }
+        }
+    }
+    // Painel de sempre ("Pronto para rodar", gravação ou pedido de localização); o cartão da moto/proposta o substitui.
+    val painelPronto: @Composable () -> Unit = {
+        if (rider != null || nearbyCardShown) {
+            // O cartão da moto tocada (ou o de proposta) ocupa o lugar do painel inferior.
+        } else if (!hasLocation && !locationOk) {
+            FloatingCard {
+                Text("Permita a localização", style = MaterialTheme.typography.titleMedium)
+                Text("O mapa precisa saber onde você está para traçar rotas e gravar suas viagens.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PrimaryButton("Permitir localização", askLocation)
+            }
+        } else {
+            IdleBottom(
+                vm, recording = rec.isRecording, compacto = em.prontoCompacto,
+                onRecord = startRecording, onStopRecording = { TrackingService.stop(context) }, attention = attention.size,
+            )
+        }
+    }
+    // Faixas de estado: rolê, aviso, encontro minimizado, offline e busca de postos.
+    val faixasDeEstado: @Composable ColumnScope.() -> Unit = {
+        if (nearbyAvailable) {
+            NearbyStrip(nearbyState, onClick = { showNearbySheet = true }, modifier = Modifier.padding(top = 8.dp))
+            nearbyAviso?.let { NearbyNotice(it, onClose = nearbyVm::limparAviso, modifier = Modifier.padding(top = 8.dp)) }
+            // Encontro minimizado: pílula com o resumo; tocar reabre o cartão.
+            val ativo = activeEncounter
+            if (ativo != null && !encounterExpanded) {
+                NearbyEncounterChip(ativo, onClick = { encounterExpanded = true }, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        if (!online) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Warn.copy(alpha = 0.95f),
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text(
+                    "Sem internet: rotas e busca indisponíveis",
+                    Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium, color = Color.Black,
+                )
+            }
+        }
+        if (fuelLayerEnabled) {
+            if (isSearchingFuelOnline) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text(
+                        "Buscando postos próximos...",
+                        Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            } else {
+                Surface(
+                    onClick = { vm.searchFuelStationsInArea() },
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    modifier = Modifier.padding(top = 8.dp),
+                    shadowElevation = 3.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.heightIn(min = 40.dp).padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        androidx.compose.material3.Icon(
+                            painter = androidx.compose.ui.res.painterResource(R.drawable.fa_gas_pump),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            fuelSearchStatus ?: "Buscar postos nesta área",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -324,17 +586,19 @@ fun MapScreen(
             paddingTopDp = when {
                 el.bannerManobra -> 172
                 navigating -> 24
+                em.colunaLateral -> 24
                 preview != null -> 110
                 else -> 0
             },
             paddingBottomDp = when {
                 el.barraInferior -> 100
                 navigating -> 24
+                em.colunaLateral -> 24
                 preview != null -> 440
                 selectedFuelStation != null -> 360
                 else -> 0
             },
-            paddingStartDp = sidePanelDp,
+            paddingStartDp = if (em.colunaLateral) em.larguraColunaDp + 8 else sidePanelDp,
             onLongPress = {
                 if (!navigating) {
                     // Procurando rolê e fora de um encontro, segurar no mapa marca o ponto de uma proposta.
@@ -368,48 +632,24 @@ fun MapScreen(
             },
         )
 
-        // Controles flutuantes na lateral do mapa (Camada de postos + Centralizar)
-        if (!searching && preview == null && (el.camadas || el.recentralizar)) {
-            Column(
-                modifier = Modifier
+        // ----- Botões flutuantes -----
+        // Navegando: só "centralizar", no canto de baixo à direita. Fora disso: em paisagem, coluna na borda direita;
+        // em retrato, coluna à direita ABAIXO da busca e dos atalhos (dentro da pilha do topo, ver adiante).
+        if (em.centralizarNavegando) {
+            colunaDeBotoes(
+                Modifier
                     .align(Alignment.BottomEnd)
-                    .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Bottom)) else Modifier)
+                    .windowInsetsPadding(seguros.only(WindowInsetsSides.End + WindowInsetsSides.Bottom))
                     .padding(end = 16.dp, bottom = controlsBottom),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                if (el.camadas) SquircleIconButton(
-                    iconRes = R.drawable.fa_gas_pump,
-                    description = "Camada de postos de combustível",
-                    selected = fuelLayerEnabled,
-                    onClick = { vm.toggleFuelLayer() },
-                )
-                if (el.camadas && trafficTileUrl != null) {
-                    SquircleIconButton(
-                        iconRes = R.drawable.fa_traffic_light,
-                        description = "Camada de trânsito",
-                        selected = trafficEnabled,
-                        onClick = { vm.toggleTraffic() },
-                    )
-                }
-                if (el.camadas && nearbyAvailable) {
-                    SquircleIconButton(
-                        iconRes = R.drawable.fa_motorcycle,
-                        description = "Procurar rolê",
-                        selected = nearbyState !is NearbyUiState.Desligado,
-                        onClick = { showNearbySheet = true },
-                    )
-                }
-                if (el.recentralizar) {
-                    CircleButton(
-                        icon = Icons.Default.LocationOn,
-                        description = "Centralizar",
-                        onClick = { follow = true; nonce++; vm.clearFocus() },
-                        container = MaterialTheme.colorScheme.primary,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
+            )
+        }
+        if (em.botoesFlutuantes && (landscape || !em.busca)) {
+            colunaDeBotoes(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.End))
+                    .padding(top = 12.dp, end = 12.dp),
+            )
         }
 
         // ----- Aviso do próximo radar/lombada/travessia -----
@@ -422,17 +662,31 @@ fun MapScreen(
                 alerta,
                 Modifier
                     .align(Alignment.BottomStart)
-                    .then(if (navigating) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Bottom)) else Modifier)
-                    .padding(start = if (el.painelLateral) NAV_PANEL_WIDTH + 12.dp else 16.dp, bottom = controlsBottom),
+                    .windowInsetsPadding(seguros.only(WindowInsetsSides.Start + WindowInsetsSides.Bottom))
+                    .padding(
+                        start = when {
+                            el.painelLateral -> larguraPainel + 12.dp
+                            em.colunaLateral -> em.larguraColunaDp.dp + 12.dp
+                            else -> 16.dp
+                        },
+                        bottom = controlsBottom,
+                    ),
             )
         }
 
         // ----- Navegação -----
         if (navigating) {
             val stopNav = { TrackingService.stop(context); vm.stopNavigationNow() }
-            if (el.bannerManobra) NavBannerCompact(vm, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp))
+            if (el.bannerManobra) {
+                NavBannerCompact(
+                    vm,
+                    Modifier.align(Alignment.TopCenter)
+                        .windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                )
+            }
             if (el.barraInferior) NavBarCompact(vm, onStop = stopNav, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp))
-            if (el.painelLateral) NavSidePanel(vm, onStop = stopNav, leftInset = leftInset, modifier = Modifier.align(Alignment.CenterStart))
+            if (el.painelLateral) NavSidePanel(vm, onStop = stopNav, leftInset = leftInset, largura = larguraPainel, modifier = Modifier.align(Alignment.CenterStart))
             if (nav.arrived) {
                 AlertDialog(
                     onDismissRequest = {},
@@ -443,117 +697,84 @@ fun MapScreen(
             }
         }
 
-        // ----- Pré-visualização de rota -----
-        val pv = preview
-        if (pv != null && !navigating) {
-            PreviewCard(vm, pv, onStart = beginNav, modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
-        }
-
-        // ----- Card de Detalhes do Posto -----
-        AnimatedVisibility(
-            visible = selectedFuelStation != null && el.ocioso,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(12.dp),
-        ) {
-            selectedFuelStation?.let { station ->
-                val distM = live?.let { loc ->
-                    app.hunter.model.Geo.distanceM(loc.latitude, loc.longitude, station.lat, station.lon)
-                }
-                FuelStationCard(
-                    station = station,
-                    distanceM = distM,
-                    onNavigate = { vm.navigateToStation(station) },
-                    onAddStop = { vm.addStationAsStop(station) },
-                    onClose = { vm.selectFuelStation(null) },
-                    onEditPrices = { editingFuelStation = station },
-                    cityReference = stationReference,
-                )
-            }
-        }
-
-        // ----- Rolê por perto: cartão da moto tocada e folha de ajustes -----
-        if (rider != null && el.ocioso && pv == null && selectedFuelStation == null) {
-            NearbyRiderCard(
-                vizinho = rider,
-                distancia = live?.let { distanciaAproximada(it.latitude, it.longitude, rider) },
-                onClose = { selectedRider = null },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
-                enviando = nearbyEnviando,
-                onBloquear = {
-                    nearbyVm.bloquear(rider.sessao)
-                    selectedRider = null
-                },
-                onDenunciar = { motivo -> nearbyVm.denunciar(rider.sessao, motivo) },
-            )
-        }
-        // O cartão do encontro fica acima do painel inferior (que continua lá); com navegação ativa, só a pílula de resumo.
-        // Navegando: só a pílula de resumo, compacta (retrato: logo abaixo do banner; paisagem: canto superior direito).
+        // O cartão do encontro fica acima do painel inferior (que continua lá); com navegação ativa, só a pílula de resumo,
+        // compacta (retrato: logo abaixo do banner; paisagem: canto superior direito).
         if (el.pilulaEncontro) {
             (encontro as? EncontroUiState.Ativo)?.let { e ->
                 val chipMod = if (landscape) {
-                    Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.End)).padding(8.dp)
+                    Modifier.align(Alignment.TopEnd).windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.End)).padding(8.dp)
                 } else {
-                    Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 112.dp)
+                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top)).padding(top = 112.dp)
                 }
                 NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = chipMod)
             }
         }
-        if (el.ocioso && pv == null && selectedFuelStation == null && rider == null) {
-            val acima = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 200.dp)
-            val e = encontro
-            if (e is EncontroUiState.Ativo) {
-                if (encounterCardShown) {
-                    NearbyEncounterCard(
-                        e,
-                        onSair = nearbyVm::sair,
-                        onMinimizar = { encounterExpanded = false },
-                        modifier = acima,
-                        enviando = nearbyEnviando,
-                        onBloquear = nearbyVm::bloquear,
-                        onDenunciar = nearbyVm::denunciar,
-                        onIrAtePonto = { vm.previewAt(app.hunter.nav.LatLon(e.encontro.ponto.lat, e.encontro.ponto.lon)) },
-                    )
-                }
-            } else if (e is EncontroUiState.Encerrado && encounterCardShown && el.ocioso) {
-                NearbyEndCard(
-                    e.motivo,
-                    onClose = nearbyVm::limparFim,
-                    modifier = acima,
-                    pessoas = fimPessoas,
-                    enviando = nearbyEnviando,
-                    onBloquear = nearbyVm::bloquear,
-                    onDenunciar = nearbyVm::denunciar,
-                    marcadas = amigosMarcados,
-                    onQueroAmigo = nearbyVm::querSerAmigo,
-                )
+
+        if (em.cartoesEmbaixo) {
+            // ----- RETRATO: cartões como folha embaixo -----
+            val embaixo = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+            cartaoPrevia(embaixo)
+            cartaoPosto(embaixo)
+            cartaoMoto(embaixo)
+            // Acima do painel inferior (que continua lá): o cartão pronto compacto tem ~96 dp, o de gravação ~210 dp.
+            cartaoEncontro(Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = if (rec.isRecording) 220.dp else 120.dp))
+            cartaoProposta(embaixo)
+            if (em.busca) {
+                Column(embaixo, verticalArrangement = Arrangement.spacedBy(10.dp)) { painelPronto() }
             }
         }
-        if (nearbyCardShown && el.ocioso && pv == null && selectedFuelStation == null && rider == null) {
-            val cardModifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
-            if (encontro is EncontroUiState.Aguardando || encontro is EncontroUiState.Nenhum) {
-                val ponto = proposalPoint
-                if (ponto != null) {
-                    NearbyCreateProposalCard(
-                        aguardando = encontro is EncontroUiState.Aguardando,
-                        onPropor = { vagas -> nearbyVm.proporPonto(ponto.lat, ponto.lon, vagas) },
-                        onClose = { proposalPoint = null },
-                        modifier = cardModifier,
-                        aviso = avisoPontoLonge(live?.latitude, live?.longitude, ponto.lat, ponto.lon, nearbyPref?.raioKm ?: RAIO_PADRAO_KM),
-                    )
-                } else if (proposal != null) {
-                    NearbyProposalCard(
-                        proposta = proposal,
-                        aguardando = encontro is EncontroUiState.Aguardando,
-                        onEntrar = { nearbyVm.entrar(proposal.id) },
-                        onClose = { selectedProposal = null },
-                        modifier = cardModifier,
-                    )
+
+        // ----- Topo (retrato): busca, depois atalhos em linha rolável, depois faixas de estado e a coluna de botões à direita -----
+        if (!landscape && em.busca) {
+            Column(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(12.dp),
+            ) {
+                SearchPill(onClick = { searching = true })
+                if (em.atalhos) AtalhosRapidos(atalhos, favs, onPick = { vm.previewTo(it) }, emColuna = false, modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f), content = faixasDeEstado)
+                    if (em.botoesFlutuantes) colunaDeBotoes(Modifier.padding(top = 10.dp))
                 }
             }
         }
+
+        // ----- PAISAGEM: coluna esquerda fixa e rolável com busca, atalhos, cartão e cartões selecionados; o mapa fica com o resto -----
+        if (em.colunaLateral) {
+            val coluna = Modifier
+            Surface(
+                Modifier.align(Alignment.CenterStart).fillMaxHeight().width(em.larguraColunaDp.dp),
+                shape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+                shadowElevation = 12.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(seguros.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    cartaoPrevia(coluna)
+                    cartaoPosto(coluna)
+                    if (em.busca) {
+                        SearchPill(onClick = { searching = true })
+                        if (em.atalhos) AtalhosRapidos(atalhos, favs, onPick = { vm.previewTo(it) }, emColuna = true, modifier = Modifier)
+                        Column(Modifier.fillMaxWidth(), content = faixasDeEstado)
+                        cartaoEncontro(coluna)
+                        cartaoMoto(coluna)
+                        cartaoProposta(coluna)
+                        painelPronto()
+                    }
+                }
+            }
+        }
+
         if (showNearbySheet && nearbyAvailable) {
             NearbySheet(
                 estado = nearbyState,
@@ -579,98 +800,6 @@ fun MapScreen(
             )
         }
 
-        // ----- Ocioso / gravando -----
-        if (el.ocioso && pv == null && selectedFuelStation == null) {
-            Column(
-                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).fillMaxWidth(),
-            ) {
-                SearchPill(onClick = { searching = true })
-                if (nearbyAvailable) {
-                    NearbyStrip(nearbyState, onClick = { showNearbySheet = true }, modifier = Modifier.padding(top = 8.dp))
-                    nearbyAviso?.let { NearbyNotice(it, onClose = nearbyVm::limparAviso, modifier = Modifier.padding(top = 8.dp)) }
-                    // Encontro minimizado: pílula com o resumo; tocar reabre o cartão.
-                    val ativo = activeEncounter
-                    if (ativo != null && !encounterExpanded) {
-                        NearbyEncounterChip(ativo, onClick = { encounterExpanded = true }, modifier = Modifier.padding(top = 8.dp))
-                    }
-                }
-                if (!online) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = Warn.copy(alpha = 0.95f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) {
-                        Text(
-                            "Sem internet: rotas e busca indisponíveis",
-                            Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelMedium, color = Color.Black,
-                        )
-                    }
-                }
-                if (fuelLayerEnabled) {
-                    if (isSearchingFuelOnline) {
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
-                            modifier = Modifier.padding(top = 8.dp),
-                        ) {
-                            Text(
-                                "Buscando postos próximos...",
-                                Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
-                    } else {
-                        Surface(
-                            onClick = { vm.searchFuelStationsInArea() },
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                            modifier = Modifier.padding(top = 8.dp),
-                            shadowElevation = 3.dp,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                androidx.compose.material3.Icon(
-                                    painter = androidx.compose.ui.res.painterResource(R.drawable.fa_gas_pump),
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp),
-                                )
-                                Text(
-                                    fuelSearchStatus ?: "Buscar postos nesta área",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Column(
-                Modifier.align(Alignment.BottomCenter).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (rider != null || nearbyCardShown) {
-                    // O cartão da moto tocada (ou o do encontro) ocupa o lugar do painel inferior.
-                } else if (!hasLocation && !locationOk) {
-                    FloatingCard {
-                        Text("Permita a localização", style = MaterialTheme.typography.titleMedium)
-                        Text("O mapa precisa saber onde você está para traçar rotas e gravar suas viagens.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        PrimaryButton("Permitir localização", askLocation)
-                    }
-                } else {
-                    IdleBottom(vm, recording = rec.isRecording, onRecord = startRecording, onStopRecording = { TrackingService.stop(context) }, attention = attention.size)
-                }
-            }
-        }
-
         if (searching) {
             SearchOverlay(vm, onClose = { searching = false }, onPick = { vm.previewTo(it); searching = false })
         }
@@ -693,7 +822,7 @@ private fun DistanceLabel(p: Place, me: app.hunter.model.TrackPoint?) {
 private fun SearchPill(onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(end = 56.dp).height(56.dp),
+        modifier = Modifier.fillMaxWidth().height(56.dp),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
         shadowElevation = 14.dp,
@@ -716,7 +845,7 @@ private fun SearchOverlay(vm: HunterViewModel, onClose: () -> Unit, onPick: (Pla
     DisposableEffect(Unit) { onDispose { vm.clearSearch() } }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.statusBarsPadding()) {
+        Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
             Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") }
                 TextField(
@@ -786,29 +915,88 @@ private fun SearchOverlay(vm: HunterViewModel, onClose: () -> Unit, onPick: (Pla
 
 // ---------------------------------------------------------------- ocioso
 
+/**
+ * Favoritos e recentes. Retrato: linha rolável logo abaixo da busca (nunca sobreposta a ela). Paisagem: lista na coluna esquerda.
+ * Cada alvo tem pelo menos 48 dp de altura.
+ */
 @Composable
-private fun IdleBottom(vm: HunterViewModel, recording: Boolean, onRecord: () -> Unit, onStopRecording: () -> Unit, attention: Int) {
-    val recents by vm.recents.collectAsStateWithLifecycle()
-    val favs by vm.favorites.collectAsStateWithLifecycle()
-    val rec by vm.recording.collectAsStateWithLifecycle()
-    val quick = (favs + recents.filter { r -> favs.none { it.lat == r.lat && it.lon == r.lon } }).take(8)
+private fun AtalhosRapidos(atalhos: List<Place>, favs: List<Place>, onPick: (Place) -> Unit, emColuna: Boolean, modifier: Modifier) {
+    @Composable
+    fun Atalho(p: Place, largura: Boolean) {
+        Surface(
+            onClick = { onPick(p) },
+            modifier = if (largura) Modifier.fillMaxWidth() else Modifier,
+            shape = RoundedCornerShape(if (largura) 16.dp else 24.dp),
+            color = if (largura) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+            shadowElevation = if (largura) 0.dp else 8.dp,
+        ) {
+            Row(
+                Modifier.heightIn(min = 48.dp).padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(if (favs.any { it.lat == p.lat && it.lon == p.lon }) Icons.Default.Star else Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(
+                    p.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = if (largura) Modifier.weight(1f) else Modifier.widthIn(max = 160.dp),
+                )
+            }
+        }
+    }
+    if (emColuna) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            atalhos.take(6).forEach { Atalho(it, largura = true) }
+        }
+    } else {
+        LazyRow(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(atalhos) { Atalho(it, largura = false) }
+        }
+    }
+}
 
-    if (quick.isNotEmpty() && !recording) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(quick) { p ->
+/**
+ * Painel inferior do mapa. Retrato e sem gravar: cartão COMPACTO de uma linha (texto curto + "Gravar viagem"), até ~96 dp.
+ * Em paisagem, ou gravando, o cartão completo.
+ */
+@Composable
+private fun IdleBottom(vm: HunterViewModel, recording: Boolean, compacto: Boolean, onRecord: () -> Unit, onStopRecording: () -> Unit, attention: Int) {
+    val rec by vm.recording.collectAsStateWithLifecycle()
+
+    if (compacto && !recording) {
+        Surface(
+            Modifier.fillMaxWidth().heightIn(min = 72.dp, max = 96.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+            shadowElevation = 16.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+        ) {
+            Row(
+                Modifier.padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Pronto para rodar", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (attention > 0) "$attention item(ns) de manutenção pedem atenção" else "Busque um destino ou grave uma viagem",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (attention > 0) Warn else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Surface(
-                    onClick = { vm.previewTo(p) },
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-                    shadowElevation = 8.dp,
+                    onClick = onRecord,
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Transparent,
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)),
                 ) {
-                    Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(if (favs.any { it.lat == p.lat && it.lon == p.lon }) Icons.Default.Star else Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text(p.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+                    Box(Modifier.height(48.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                        Text("●  Gravar viagem", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
         }
+        return
     }
 
     FloatingCard {
@@ -962,9 +1150,6 @@ private fun FuelAdviceBlock(vm: HunterViewModel, pv: PreviewUi) {
 // ---------------------------------------------------------------- navegação
 
 
-/** Largura do painel lateral da navegação em paisagem (sem contar a área segura à esquerda). */
-private val NAV_PANEL_WIDTH = 224.dp
-
 private val NAV_SHAPE = RoundedCornerShape(22.dp)
 
 @Composable
@@ -989,9 +1174,9 @@ private fun NavWaiting(rerouting: Boolean) {
 }
 
 @Composable
-private fun NavSpeed(kmh: Int) {
+private fun NavSpeed(kmh: Int, tamanho: Int = 32) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("$kmh", fontSize = 32.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+        Text("$kmh", fontSize = tamanho.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
         Text("km/h", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -1124,9 +1309,12 @@ private fun NavBarCompact(vm: HunterViewModel, onStop: () -> Unit, modifier: Mod
     ConfirmStopDialog(confirm, onConfirm = { confirm = false; onStop() }, onDismiss = { confirm = false })
 }
 
-/** Paisagem: coluna estreita à esquerda (manobra, velocidade, chegada, voz e encerrar); o mapa fica com o resto. */
+/**
+ * Paisagem: coluna à esquerda com a MESMA largura da coluna do mapa ocioso. Manobra grande no alto (ícone, distância, via e a
+ * seguinte), velocidade e chegada no meio, voz e encerrar fixos embaixo; o mapa fica com o resto.
+ */
 @Composable
-private fun NavSidePanel(vm: HunterViewModel, onStop: () -> Unit, leftInset: Dp, modifier: Modifier) {
+private fun NavSidePanel(vm: HunterViewModel, onStop: () -> Unit, leftInset: Dp, largura: Dp, modifier: Modifier) {
     val nav by vm.nav.collectAsStateWithLifecycle()
     val rec by vm.recording.collectAsStateWithLifecycle()
     val voice by vm.voice.collectAsStateWithLifecycle()
@@ -1135,33 +1323,45 @@ private fun NavSidePanel(vm: HunterViewModel, onStop: () -> Unit, leftInset: Dp,
     val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
 
     NavSurface(
-        modifier.fillMaxHeight().width(NAV_PANEL_WIDTH + leftInset),
+        modifier.fillMaxHeight().width(largura + leftInset),
         shape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
     ) {
         Column(
             Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(start = leftInset + 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                .windowInsetsPadding(insetsSeguros().only(WindowInsetsSides.Vertical))
+                .padding(start = leftInset + 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (nav.rerouting || p == null) {
-                NavWaiting(nav.rerouting)
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(
-                        Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) { ManeuverGlyph(p.upcoming.type, 40.dp, MaterialTheme.colorScheme.onPrimary) }
-                    Text(fmtDist(p.distanceToUpcomingM), fontSize = 28.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (nav.rerouting || p == null) {
+                    NavWaiting(nav.rerouting)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(
+                            Modifier.size(68.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) { ManeuverGlyph(p.upcoming.type, 48.dp, MaterialTheme.colorScheme.onPrimary) }
+                        Text(fmtDist(p.distanceToUpcomingM), fontSize = 36.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                    }
+                    Text(p.upcoming.instruction, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    p.then?.takeIf { !it.isDestination }?.let { next ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Depois", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            ManeuverGlyph(next.type, 18.dp, MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(next.streetName ?: "", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
-                Text(p.upcoming.instruction, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                NavSpeed(kmh)
+            // Rodapé fixo da coluna: velocidade e chegada, depois Voz/Mudo e Encerrar (sempre à vista, a manobra rola se faltar altura).
+            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                NavSpeed(kmh, tamanho = 44)
                 Column(Modifier.weight(1f)) {
-                    Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                    Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1)
                     Text(
                         p?.let { "${fmtEta(it.remainingS)} · ${fmtDist(it.remainingM)}" } ?: "Calculando…",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,

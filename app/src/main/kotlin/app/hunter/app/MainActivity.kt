@@ -19,13 +19,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -91,6 +88,7 @@ import app.hunter.app.ui.ProfileRoute
 import app.hunter.app.ui.EstadoDaTela
 import app.hunter.app.ui.FormaDasAbas
 import app.hunter.app.ui.classeDeTela
+import app.hunter.app.ui.insetsSeguros
 import app.hunter.app.ui.formaDasAbas
 import app.hunter.app.ui.larguraMaximaDoConteudoDp
 import app.hunter.app.ui.orientacao
@@ -466,10 +464,6 @@ private fun HunterRoot(
         }
     }
 }
-
-/** Insets que todo elemento do app respeita: barra de status, barras de navegação, laterais e recortes (câmera). */
-@Composable
-fun insetsSeguros(): WindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
 
 /**
  * Conteúdo das telas de rolagem: dentro das áreas seguras (topo, laterais e, como o teclado, embaixo no Perfil) e com
