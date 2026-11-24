@@ -1,0 +1,3 @@
+lat,lng,kind,limit_kmh,source,active,end_lat,end_lng,direction_deg
+-25.056361,-48.555666,FIXED,60,ANTT+OSM,1,,,184
+-25.055900,-48.555543,FIXED,,OSM,1,,,

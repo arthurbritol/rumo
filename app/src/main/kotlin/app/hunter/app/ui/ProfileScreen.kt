@@ -625,6 +625,7 @@ fun ProfileScreen(
                                 CategoriaPerigo.RADARES -> R.drawable.fa_gauge_high
                                 CategoriaPerigo.LOMBADAS -> R.drawable.fa_route
                                 CategoriaPerigo.TRAVESSIAS -> R.drawable.fa_traffic_light
+                                CategoriaPerigo.ATENCAO -> R.drawable.fa_bell
                             },
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
                             tintColor = MaterialTheme.colorScheme.primary,

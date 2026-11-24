@@ -26,7 +26,7 @@ fun perigoBitmap(tipo: Perigo, sizePx: Int): Bitmap {
     val s = sizePx.toFloat()
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
     when (tipo) {
-        Perigo.RADAR -> {
+        Perigo.RADAR, Perigo.RADAR_DE_TRECHO -> {
             disco(c, p, s, BRANCO, VERMELHO)
             p.style = Paint.Style.FILL; p.color = ESCURO
             c.drawRoundRect(RectF(s * 0.27f, s * 0.36f, s * 0.73f, s * 0.64f), s * 0.05f, s * 0.05f, p)
@@ -51,6 +51,13 @@ fun perigoBitmap(tipo: Perigo, sizePx: Int): Bitmap {
             } else {
                 for (i in 0..2) c.drawRect(RectF(s * 0.30f, s * (0.52f + i * 0.11f), s * 0.70f, s * (0.58f + i * 0.11f)), p)
             }
+        }
+        Perigo.CURVA_PERIGOSA, Perigo.ZONA_ESCOLAR, Perigo.TRAVESSIA_DE_ANIMAIS, Perigo.CRUZAMENTO_PERIGOSO, Perigo.QUEDA_DE_PEDRAS -> {
+            // triângulo de advertência com "!" (um desenho por tipo fica para depois)
+            triangulo(c, p, s)
+            p.style = Paint.Style.FILL; p.color = ESCURO
+            c.drawRoundRect(RectF(s * 0.46f, s * 0.32f, s * 0.54f, s * 0.64f), s * 0.03f, s * 0.03f, p)
+            c.drawCircle(s * 0.5f, s * 0.74f, s * 0.045f, p)
         }
         Perigo.TRAVESSIA_FERROVIARIA -> {
             disco(c, p, s, AMARELO, ESCURO)

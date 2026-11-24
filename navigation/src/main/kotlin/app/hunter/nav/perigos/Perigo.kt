@@ -4,10 +4,21 @@ import app.hunter.nav.LatLon
 import kotlin.math.roundToInt
 
 /** Grupos que o usuário liga/desliga nas configurações. */
-enum class CategoriaPerigo(val rotulo: String, val explicacao: String) {
-    RADARES("Radares e semáforos com câmera", "Radar de velocidade e câmera de semáforo"),
+enum class CategoriaPerigo(val rotulo: String, val explicacao: String, val ligadaPorPadrao: Boolean = true) {
+    RADARES("Radares e semáforos com câmera", "Radar de velocidade, radar de trecho e câmera de semáforo"),
     LOMBADAS("Lombadas", "Quebra-molas, lombadas, platôs e faixas sonoras"),
     TRAVESSIAS("Travessias de trem", "Passagens de nível (ferrovia cruza a via)"),
+    ATENCAO(
+        "Pontos de atenção",
+        "Curva perigosa, zona escolar, travessia de animais, cruzamento perigoso e queda de pedras",
+        ligadaPorPadrao = false,
+    ),
+    ;
+
+    companion object {
+        /** Categorias ligadas quando a pessoa ainda não mexeu em nada. */
+        fun padrao(): Set<CategoriaPerigo> = values().filter { it.ligadaPorPadrao }.toSet()
+    }
 }
 
 /**
@@ -28,7 +39,14 @@ enum class Perigo(
     SEMAFORO_COM_CAMERA(CategoriaPerigo.RADARES, "Semáforo com câmera", intArrayOf(400, 150), soEixo = true),
     LOMBADA(CategoriaPerigo.LOMBADAS, "Lombada", intArrayOf(300, 100)),
     FAIXA_SONORA(CategoriaPerigo.LOMBADAS, "Faixa sonora", intArrayOf(150)),
-    TRAVESSIA_FERROVIARIA(CategoriaPerigo.TRAVESSIAS, "Travessia de trem", intArrayOf(400));
+    TRAVESSIA_FERROVIARIA(CategoriaPerigo.TRAVESSIAS, "Travessia de trem", intArrayOf(400)),
+    /** Radar de velocidade média (Pardal `SECTION`): avisa na entrada do trecho, como o radar, sem o "adiante" curto. */
+    RADAR_DE_TRECHO(CategoriaPerigo.RADARES, "Radar de trecho", intArrayOf(800, 300)),
+    CURVA_PERIGOSA(CategoriaPerigo.ATENCAO, "Curva perigosa", intArrayOf(300)),
+    ZONA_ESCOLAR(CategoriaPerigo.ATENCAO, "Zona escolar", intArrayOf(300)),
+    TRAVESSIA_DE_ANIMAIS(CategoriaPerigo.ATENCAO, "Travessia de animais", intArrayOf(400)),
+    CRUZAMENTO_PERIGOSO(CategoriaPerigo.ATENCAO, "Cruzamento perigoso", intArrayOf(200)),
+    QUEDA_DE_PEDRAS(CategoriaPerigo.ATENCAO, "Queda de pedras", intArrayOf(300));
 
     /** Maior distância de aviso (m): fora disso o perigo nem entra no cartão. */
     val alcanceM: Int get() = limiaresM.max()
@@ -38,6 +56,9 @@ enum class Perigo(
  * Um ponto de aviso vindo do OpenStreetMap.
  * [id] é "n123" (nó), "w123" (via) ou "r123" (relação): estável entre consultas.
  * [limiteKmh] só em radares com `maxspeed` numérico. [direcaoGraus] (0..360) quando a tag existe em forma usável.
+ * [sentido]: true quando [direcaoGraus] é o rumo do trânsito fiscalizado (Pardal `direction_deg`): o aviso só vale a até 60º dele.
+ * false (OpenStreetMap) mantém o comportamento antigo (eixo para câmeras, 100º para os demais).
+ * [fimLat]/[fimLon]: fim do trecho, só em radar de trecho (o ponto é a entrada).
  */
 data class PerigoPonto(
     val id: String,
@@ -46,6 +67,9 @@ data class PerigoPonto(
     val lon: Double,
     val limiteKmh: Int? = null,
     val direcaoGraus: Double? = null,
+    val sentido: Boolean = false,
+    val fimLat: Double? = null,
+    val fimLon: Double? = null,
 ) {
     val latLon get() = LatLon(lat, lon)
 }

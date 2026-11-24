@@ -20,8 +20,8 @@ object PerigoStatus {
     val alerta: StateFlow<AlertaPerigo?> = _alerta.asStateFlow()
     fun publicar(a: AlertaPerigo?) { _alerta.value = a }
 
-    private val _categorias = MutableStateFlow(CategoriaPerigo.values().toSet())
-    /** Categorias ligadas (padrão: todas). A UI de configurações grava aqui e persiste nas preferências. */
+    private val _categorias = MutableStateFlow(CategoriaPerigo.padrao())
+    /** Categorias ligadas (padrão: todas menos "Pontos de atenção"). A UI de configurações grava aqui e persiste nas preferências. */
     val categorias: StateFlow<Set<CategoriaPerigo>> = _categorias.asStateFlow()
     fun definirCategorias(c: Set<CategoriaPerigo>) { _categorias.value = c }
 

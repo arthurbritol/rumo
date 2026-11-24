@@ -47,6 +47,8 @@ object PerigosAdiante {
     private const val SENTIDO_MAX_DIF = 100.0
     /** Câmera: só o eixo importa; mais de 60º fora do eixo da via ela mira outra rua. */
     private const val EIXO_MAX_DIF = 60.0
+    /** Ponto com [PerigoPonto.sentido] (Pardal): só vale se o rumo de quem anda está a até 60º do rumo fiscalizado. */
+    const val SENTIDO_PARDAL_MAX_DIF = 60.0
 
     /**
      * Perigos adiante, do mais perto ao mais longe.
@@ -183,11 +185,12 @@ object PerigosAdiante {
         return difAngular(rumoGraus, rumoAoPerigo) > 90.0
     }
 
-    /** O perigo vale para quem anda com [rumoViaGraus]? Sem `direction` ou sem rumo, vale. */
+    /** O perigo vale para quem anda com [rumoViaGraus]? Sem `direction` ou sem rumo, vale (ambos os sentidos). */
     fun vale(p: PerigoPonto, rumoViaGraus: Double?): Boolean {
         val dir = p.direcaoGraus ?: return true
         val rumo = rumoViaGraus ?: return true
         val dif = difAngular(rumo, dir)
+        if (p.sentido) return dif <= SENTIDO_PARDAL_MAX_DIF
         return if (p.tipo.soEixo) min(dif, 180.0 - dif) <= EIXO_MAX_DIF else dif <= SENTIDO_MAX_DIF
     }
 

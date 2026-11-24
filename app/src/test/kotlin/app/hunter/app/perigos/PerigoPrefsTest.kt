@@ -23,8 +23,8 @@ class PerigoPrefsTest {
     }
 
     @Test
-    fun `padrao e tudo ligado`() {
-        assertEquals(CategoriaPerigo.values().toSet(), PerigoPrefs.ler(memoryPrefs()))
+    fun `padrao e tudo ligado menos pontos de atencao`() {
+        assertEquals(CategoriaPerigo.values().toSet() - CategoriaPerigo.ATENCAO, PerigoPrefs.ler(memoryPrefs()))
     }
 
     @Test
@@ -32,6 +32,9 @@ class PerigoPrefsTest {
         val p = memoryPrefs()
         PerigoPrefs.gravar(p, CategoriaPerigo.LOMBADAS, false)
         assertEquals(setOf(CategoriaPerigo.RADARES, CategoriaPerigo.TRAVESSIAS), PerigoPrefs.ler(p))
+        PerigoPrefs.gravar(p, CategoriaPerigo.ATENCAO, true)
+        assertEquals(setOf(CategoriaPerigo.RADARES, CategoriaPerigo.TRAVESSIAS, CategoriaPerigo.ATENCAO), PerigoPrefs.ler(p))
+        PerigoPrefs.gravar(p, CategoriaPerigo.ATENCAO, false)
         PerigoPrefs.gravar(p, CategoriaPerigo.RADARES, false)
         assertEquals(setOf(CategoriaPerigo.TRAVESSIAS), PerigoPrefs.ler(p))
         PerigoPrefs.gravar(p, CategoriaPerigo.LOMBADAS, true)
@@ -40,7 +43,7 @@ class PerigoPrefsTest {
 
     @Test
     fun `chaves sao distintas`() {
-        assertEquals(3, CategoriaPerigo.values().map(PerigoPrefs::chave).toSet().size)
+        assertEquals(4, CategoriaPerigo.values().map(PerigoPrefs::chave).toSet().size)
     }
 
     @Test
