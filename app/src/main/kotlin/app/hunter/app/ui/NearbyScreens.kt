@@ -325,7 +325,7 @@ fun NearbyCreateProposalCard(
     FloatingCard(modifier) {
         CardHeader("Propor encontro neste ponto", onClose)
         Text(
-            "Quem estiver por perto vê o ponto no mapa e pode entrar. Vagas contando com você:",
+            "Quem está por perto vê o ponto e pode entrar. Vagas (com você):",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

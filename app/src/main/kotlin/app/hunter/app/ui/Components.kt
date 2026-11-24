@@ -428,12 +428,32 @@ fun RumoBadge(
     }
 }
 
-/** Cartão flutuante sobre o mapa. */
+/** Dentro de um cartão flutuante compacto (tela baixa ou deitada): botões, chips e textos encolhem. */
+val LocalCartaoCompacto = androidx.compose.runtime.compositionLocalOf { false }
+
+private fun androidx.compose.material3.Typography.escalada(f: Float): androidx.compose.material3.Typography {
+    fun androidx.compose.ui.text.TextStyle.e() = copy(
+        fontSize = if (fontSize.isSp) fontSize * f else fontSize,
+        lineHeight = if (lineHeight.isSp) lineHeight * f else lineHeight,
+    )
+    return copy(
+        titleLarge = titleLarge.e(), titleMedium = titleMedium.e(), titleSmall = titleSmall.e(),
+        bodyLarge = bodyLarge.e(), bodyMedium = bodyMedium.e(), bodySmall = bodySmall.e(),
+        labelLarge = labelLarge.e(), labelMedium = labelMedium.e(), labelSmall = labelSmall.e(),
+    )
+}
+
+/**
+ * Cartão flutuante sobre o mapa. Em tela baixa (< 520 dp, como o celular deitado) ou deitada, vira compacto:
+ * menos margem, textos ~15% menores e botões mais baixos, para caber sem rolar tanto.
+ */
 @Composable
 fun FloatingCard(modifier: Modifier = Modifier, scrollable: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    val compacto = cfg.screenHeightDp < 520 || cfg.screenWidthDp > cfg.screenHeightDp
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(if (compacto) 20.dp else 28.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
         shadowElevation = 16.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
@@ -441,7 +461,23 @@ fun FloatingCard(modifier: Modifier = Modifier, scrollable: Boolean = false, con
         // Rolagem própria só com altura limitada: dentro de uma coluna rolável (altura infinita) `verticalScroll` derruba o app.
         androidx.compose.foundation.layout.BoxWithConstraints {
             val inner = if (rolagemPropria(scrollable, constraints.hasBoundedHeight)) Modifier.verticalScroll(rememberScrollState()) else Modifier
-            Column(inner.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+            val coluna: @Composable () -> Unit = {
+                Column(
+                    inner.padding(if (compacto) 12.dp else 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (compacto) 6.dp else 10.dp),
+                    content = content,
+                )
+            }
+            androidx.compose.runtime.CompositionLocalProvider(LocalCartaoCompacto provides compacto) {
+                if (compacto) {
+                    MaterialTheme(
+                        colorScheme = MaterialTheme.colorScheme,
+                        typography = MaterialTheme.typography.escalada(0.87f),
+                        shapes = MaterialTheme.shapes,
+                        content = coluna,
+                    )
+                } else coluna()
+            }
         }
     }
 }
@@ -461,14 +497,14 @@ fun PrimaryButton(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.fillMaxWidth().height(60.dp),
+        modifier = modifier.fillMaxWidth().height(if (LocalCartaoCompacto.current) 44.dp else 60.dp),
         shape = shape,
         color = Color.Transparent,
         contentColor = content,
         shadowElevation = if (enabled) 6.dp else 0.dp,
     ) {
         Box(Modifier.background(bg, shape), contentAlignment = Alignment.Center) {
-            Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(text, fontSize = if (LocalCartaoCompacto.current) 15.sp else 18.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -477,7 +513,7 @@ fun PrimaryButton(
 fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurface) {
     Surface(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(52.dp),
+        modifier = modifier.fillMaxWidth().height(if (LocalCartaoCompacto.current) 40.dp else 52.dp),
         shape = RoundedCornerShape(18.dp),
         color = Color.Transparent,
         border = BorderStroke(1.5.dp, color.copy(alpha = 0.35f)),
@@ -554,7 +590,8 @@ fun SelectChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: M
         contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
         border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
     ) {
-        Text(text, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        val c = LocalCartaoCompacto.current
+        Text(text, Modifier.padding(horizontal = if (c) 12.dp else 16.dp, vertical = if (c) 6.dp else 10.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
 
