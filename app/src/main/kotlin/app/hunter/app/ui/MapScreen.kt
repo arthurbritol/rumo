@@ -327,7 +327,7 @@ fun MapScreen(
     // Altura (a partir de baixo) do botão de centralizar na navegação e do cartão de perigo (do outro lado).
     // Fora da navegação, em paisagem, não há cartões embaixo; em retrato o cartão de gravação ocupa ~210 dp.
     val controlsBottom = when {
-        navigating -> if (landscape) 16.dp else 104.dp
+        navigating -> if (landscape) 16.dp else 88.dp
         landscape -> 16.dp
         // Retrato gravando: acima do cartão de baixo, pela altura medida (210 dp enquanto ainda não mediu).
         else -> if (alturaEmbaixoPx > 0) (with(density) { alturaEmbaixoPx.toDp() } + 8.dp) else 210.dp
@@ -616,14 +616,14 @@ fun MapScreen(
             camera = camera,
             cameraNonce = nonce,
             paddingTopDp = when {
-                el.bannerManobra -> 172
+                el.bannerManobra -> 120
                 navigating -> 24
                 em.colunaLateral -> 24
                 preview != null -> 110
                 else -> 0
             },
             paddingBottomDp = when {
-                el.barraInferior -> 100
+                el.barraInferior -> 84
                 navigating -> 24
                 em.colunaLateral -> 24
                 preview != null -> 440
@@ -717,7 +717,15 @@ fun MapScreen(
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                 )
             }
-            if (el.barraInferior) NavBarCompact(vm, onStop = stopNav, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp))
+            if (el.barraInferior) {
+                // Respeita a barra de gestos/navegação do sistema (antes a barra podia ficar por baixo dela).
+                NavBarCompact(
+                    vm, onStop = stopNav,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .windowInsetsPadding(seguros.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                        .padding(8.dp),
+                )
+            }
             if (el.painelLateral) NavSidePanel(vm, onStop = stopNav, leftInset = leftInset, largura = larguraPainel, modifier = Modifier.align(Alignment.CenterStart))
             if (nav.arrived) {
                 AlertDialog(
@@ -736,7 +744,7 @@ fun MapScreen(
                 val chipMod = if (landscape) {
                     Modifier.align(Alignment.TopEnd).windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.End)).padding(8.dp)
                 } else {
-                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top)).padding(top = 140.dp)
+                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(seguros.only(WindowInsetsSides.Top)).padding(top = 100.dp)
                 }
                 NearbyEncounterChip(e, onClick = { encounterExpanded = true }, modifier = chipMod)
             }
@@ -1297,21 +1305,20 @@ private fun NavBannerCompact(vm: HunterViewModel, modifier: Modifier) {
         if (nav.rerouting || p == null) {
             Box(Modifier.padding(16.dp)) { NavWaiting(nav.rerouting) }
         } else {
-            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Enxuto: ícone, distância e UMA linha de via; a manobra seguinte vai na mesma linha da distância (sem 3ª linha).
+            Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(
-                    Modifier.size(64.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
+                    Modifier.size(52.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center,
-                ) { ManeuverGlyph(p.upcoming.type, 44.dp, MaterialTheme.colorScheme.onPrimary) }
+                ) { ManeuverGlyph(p.upcoming.type, 36.dp, MaterialTheme.colorScheme.onPrimary) }
                 Column(Modifier.weight(1f)) {
-                    Text(fmtDist(p.distanceToUpcomingM), fontSize = 30.sp, fontWeight = FontWeight.Black)
-                    Text(p.upcoming.instruction, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    p.then?.takeIf { !it.isDestination }?.let { next ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Depois", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(fmtDist(p.distanceToUpcomingM), fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                        p.then?.takeIf { !it.isDestination }?.let { next ->
                             ManeuverGlyph(next.type, 16.dp, MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(next.streetName ?: "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                    Text(p.upcoming.instruction, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -1360,10 +1367,10 @@ private fun NavBarCompact(vm: HunterViewModel, onStop: () -> Unit, modifier: Mod
     val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
 
     NavSurface(modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            NavSpeed(kmh)
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NavSpeed(kmh, tamanho = 26)
             Column(Modifier.weight(1f)) {
-                Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1)
                 Text(
                     p?.let { "${fmtEta(it.remainingS)} · ${fmtDist(it.remainingM)}" } ?: "Calculando…",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
