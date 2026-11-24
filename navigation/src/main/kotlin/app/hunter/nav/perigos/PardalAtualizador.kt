@@ -108,6 +108,9 @@ class PardalAtualizador(
     /** O catálogo já foi baixado nesta execução (só então [ufsPara] conhece UFs que ainda não têm `.meta`). */
     fun catalogoCarregado(): Boolean = catalogo != null
 
+    /** Siglas das UFs do catálogo carregado, em ordem alfabética (vazio se o catálogo ainda não foi baixado). */
+    fun ufsDoCatalogo(): List<String> = catalogo?.ufs?.keys?.sorted().orEmpty()
+
     /** Baixa só o catálogo (pequeno), sem zip nenhum: permite descobrir a UF antes do primeiro download. false = indisponível ou schema não suportado. */
     suspend fun carregarCatalogo(): Boolean = trava.withLock {
         try {

@@ -24,6 +24,16 @@ object PardalGraph {
     @Volatile var atualizador: PardalAtualizador? = null
         private set
 
+    @Volatile private var armazenamento: PardalArmazenamento? = null
+    @Volatile private var fonte: PardalSource? = null
+
+    /** Apaga os dados da UF e invalida o índice em memória. */
+    fun remover(uf: String) {
+        armazenamento?.remover(uf)
+        fonte?.invalidar(uf)
+        status?.atualizar()
+    }
+
     /** Cria tudo e também o repositório de perigos (com o Pardal como fonte local). Chamar uma vez, em `Application.onCreate`. */
     fun iniciar(app: Application, versaoApp: String) {
         if (gatilho != null) return
@@ -31,6 +41,8 @@ object PardalGraph {
         val armazenamento = PardalArmazenamento(java.io.File(app.filesDir, "pardal-v1"))
         val fonte = PardalSource(armazenamento)
         val estado = PardalStatus(armazenamento)
+        this.armazenamento = armazenamento
+        this.fonte = fonte
         val rede = RedePoliticaAndroid(app)
         val repositorioPronto = { PerigoStatus.repositorio }
 

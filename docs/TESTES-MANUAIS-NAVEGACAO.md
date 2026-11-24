@@ -62,3 +62,18 @@ Fonte: OpenStreetMap. **No Brasil a cobertura é incompleta**: radar móvel/blit
 - [ ] **Parar no sinal**: parado a ~100 m de uma lombada ou semáforo com câmera, o cartão continua; ao arrancar ele segue até passar e some só depois. Em pista dupla o aviso pode vir da pista contrária (limitação conhecida).
 - [ ] **Sem consulta ao mexer no mapa**: arraste e dê zoom no mapa à vontade: não deve gerar consultas (só a mudança de quadrado da posição e o cálculo de rota consultam).
 - [ ] **Bateria**: uma hora de navegação com os avisos ligados não pesa mais que sem eles (a checagem roda a ~1 Hz no GPS que já existe).
+
+## 6. Dados do Pardal (radares, lombadas e pontos de atenção)
+
+Perfil > Avisos na estrada > "Dados de radares". Use um aparelho com Wi-Fi e, para os testes de rota, um trecho de pista dupla de SP com radar fixo conhecido.
+
+- [ ] **Baixar SP no Wi-Fi**: Perfil > Dados de radares > "Escolher estados", marque SP. A linha vira "SP: baixando…" e depois "SP: atualizado hoje · N pontos". Feche e abra o app: continua baixado.
+- [ ] **Modo avião, pista dupla**: com SP baixado, ligue o modo avião e navegue numa pista dupla com radar que fiscaliza um só sentido: avisa no sentido certo e não avisa no sentido contrário (nem pelo cartão, nem pela voz).
+- [ ] **Estado não baixado cai no Overpass**: remova SP (ou rode em outra UF não baixada) com internet: os avisos continuam vindo do Overpass como antes (cobertura menor, sem sentido).
+- [ ] **Dados móveis pedem confirmação**: com "Baixar só no Wi-Fi" ligado, desligue o Wi-Fi e toque "Atualizar agora": aparece "Usar dados móveis para baixar? ... (cerca de X MB)". "Agora não" não baixa; repetir e "Baixar" baixa. Desligando "só no Wi-Fi" o download segue sem perguntar.
+- [ ] **Nunca pergunta navegando/gravando**: cruzando para outra UF durante a navegação ou gravação com dados móveis, o diálogo não aparece (aparece depois de encerrar, se ainda pendente).
+- [ ] **Remover estado**: "Escolher estados", desmarque SP: some da lista; os radares de SP passam a vir do Overpass; o app não trava.
+- [ ] **Usar dados do Pardal desligado**: nada novo é baixado e os avisos usam só o OpenStreetMap.
+- [ ] **Estado desatualizado**: um estado baixado há mais de 14 dias aparece como "desatualizado" e os avisos usam o Overpass nele até atualizar.
+- [ ] **Pontos de atenção**: a categoria "Pontos de atenção" vem desligada por padrão; ligando, curvas, cruzamentos, escolas etc. do Pardal aparecem no mapa e avisam; desligando, somem.
+- [ ] **Atribuição**: o texto de licença aparece na seção e os botões "Pardal" e "OpenStreetMap (ODbL)" abrem o navegador.

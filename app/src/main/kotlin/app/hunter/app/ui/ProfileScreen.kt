@@ -655,6 +655,7 @@ fun ProfileScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            SecaoDadosRadares()
         }
 
         // 5. Seção: Aplicativo & Atualizações

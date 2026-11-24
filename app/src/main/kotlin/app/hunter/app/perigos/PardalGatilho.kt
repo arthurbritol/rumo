@@ -139,6 +139,11 @@ class PardalGatilho(
         scope.launch { baixar(p.uf, permitirMoveis = true) }
     }
 
+    /** Pedido do usuário (Perfil): baixa/atualiza a UF agora. Fora do Wi-Fi com "só Wi-Fi" ligado, vira [pedido]. */
+    fun baixarAgora(uf: String) {
+        scope.launch { baixar(uf, permitirMoveis = permitirDadosMoveis()) }
+    }
+
     fun dispensarPedido() { _pedido.value = null }
 
     private suspend fun ufDe(lat: Double, lon: Double): String? {

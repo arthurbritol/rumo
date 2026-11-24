@@ -40,6 +40,21 @@ class PardalArmazenamentoTest {
     }
 
     @Test
+    fun `remover apaga so a UF pedida e e idempotente`() {
+        val a = PardalArmazenamento(dir)
+        a.gravar(meta("PR"), pontos)
+        a.gravar(meta("SP"), pontos)
+        a.remover("PR")
+        assertNull(a.lerMeta("PR"))
+        assertNull(a.ler("PR"))
+        assertEquals(listOf("SP"), a.ufsBaixadas())
+        assertNotNull(a.ler("SP"))
+        a.remover("PR")
+        a.remover("XX")
+        assertEquals(listOf("SP"), a.ufsBaixadas())
+    }
+
+    @Test
     fun `UF inexistente ou vazia nao lanca e conta como nao baixada`() {
         val a = PardalArmazenamento(dir)
         assertNull(a.ler("SP"))

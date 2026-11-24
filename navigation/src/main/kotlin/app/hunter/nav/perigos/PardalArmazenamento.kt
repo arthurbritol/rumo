@@ -81,6 +81,14 @@ class PardalArmazenamento(
         }
     }
 
+    /** Apaga os arquivos da UF (csv, meta e temporários). Nunca lança; a UF passa a "não baixada". */
+    fun remover(uf: String) {
+        // O meta primeiro: sem ele a UF já conta como não baixada, mesmo que o csv resista.
+        for (f in listOf(meta(uf), csv(uf), File(dir, "$uf.csv.tmp"), File(dir, "$uf.meta.tmp"))) {
+            try { f.delete() } catch (e: Exception) { /* sem permissão: ignora */ }
+        }
+    }
+
     /** Dado conferido de novo contra o catálogo: só atualiza o instante em que foi confirmado em dia. */
     fun renovar(uf: String, baixadoEm: Long) {
         val m = lerMeta(uf) ?: return

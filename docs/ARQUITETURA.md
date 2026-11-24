@@ -282,6 +282,18 @@ quadrado da posição (3x3) pela prévia de rota (10 primeiros quadrados da rota
 O mapa desenha a camada `hazards` (zoom 13+) a partir de uma fonte GeoJSON atualizada só quando os quadrados mudam. Interruptores por categoria
 em Perfil (`PerigoPrefs`). Design completo: [spec](superpowers/specs/2026-11-24-radares-lombadas-design.md).
 
+## Dados do Pardal (radares, lombadas e pontos de atenção)
+
+Fonte principal dos avisos de perigo; o Overpass vira reserva. Dados de [murkiriel/pardal](https://github.com/murkiriel/pardal) (base derivada do OpenStreetMap, ODbL 1.0; DNIT, PRF, ANTT, Inmetro, órgãos estaduais e municipais). Atribuição em Perfil > Avisos na estrada > Dados de radares e em `NOTICE-DADOS.md`. Design: [spec](superpowers/specs/2026-11-24-integracao-pardal-design.md).
+
+- **Ordem das fontes por quadrado de 0,1°** (`PerigoRepositorio`): Pardal se a UF do quadrado está baixada e **recente (até 14 dias)**; senão cache do Overpass (30 dias); senão consulta ao Overpass. Nunca mistura as duas no mesmo quadrado (o Pardal já inclui o OSM). Estado não baixado ou vencido cai no Overpass sem o usuário notar.
+- **Frescor**: "recente" = baixado/renovado há até 14 dias (`PardalSource.RECENTE_MS`); o gatilho pede atualização quando passa de 7 dias (`PardalGatilho.VENCE_MS`), com no máximo uma verificação por UF por hora.
+- **Formato em disco** (`PardalArmazenamento`, `files/pardal-v1/`): `<UF>.csv` (TSV nosso: id, tipo, lat, lon, limite, direção, sentido, fim lat/lon) e `<UF>.meta` (JSON: `artifact_built_at`, sha256 dos CSVs de origem, `baixadoEm`, contagens, bbox, sha256 e total do nosso csv). Escrita em temporários, relidos e só então renomeados; leitura tolerante (arquivo ruim = UF não baixada). `remover(uf)` apaga os arquivos da UF.
+- **Download** (`PardalAtualizador`): lê `catalogo.json` (pequeno), compara `artifact_built_at` e sha256 com o `.meta` e só baixa `pardal-<UF>.zip` se mudou; zip lido em fluxo (limites, buracos etc. descartados), sha256 conferido contra o catálogo, limite de bytes, recuo exponencial em falha, um download por vez.
+- **Gatilhos** (`PardalGatilho`, montado em `PardalGraph`): mudança de UF da posição (quadrado de 0,1°), prévia/início de rota (todas as UFs da rota) e "Atualizar agora"/"Escolher estados" no Perfil. Só com `pardalAtivo`, alguma categoria ligada e fora da economia de dados do sistema. Por padrão só Wi-Fi (`pardalSoWifi`); fora dele o gatilho publica um `pedido` e a raiz do app mostra "Usar dados móveis para baixar X MB?" (nunca navegando ou gravando).
+- **Sentido**: `direction_deg` do Pardal vale como sentido de verdade (`PerigoPonto.sentido`); aviso só se o rumo estiver a até 60° dele. OSM continua valendo só como eixo.
+- **Privacidade**: o app só baixa arquivos públicos de estado inteiro (catálogo e zips do GitHub Releases) e não envia posição: a UF é escolhida localmente pelo bbox do catálogo. O servidor vê só o que qualquer download HTTPS expõe (IP, `User-Agent` com a versão do app). Com o Pardal baixado, o Overpass deixa de receber consultas por posição naquelas UFs. O app não republica o banco.
+
 ## Serviços externos
 
 | Serviço | Uso |
@@ -290,6 +302,7 @@ em Perfil (`PerigoPrefs`). Design completo: [spec](superpowers/specs/2026-11-24-
 | Valhalla (valhalla1.openstreetmap.de) | Rotas para moto, com alternativas e paradas |
 | Photon (photon.komoot.io) | Busca de endereços e lugares |
 | Overpass | Postos de combustível (`amenity=fuel`) sob demanda e radares, lombadas e travessias de trem (cache por quadrado de 0,1°, 30 dias) |
+| Pardal (GitHub Releases) | Catálogo e zips por estado de radares, lombadas e pontos de atenção (arquivos públicos, baixados no Wi-Fi e guardados no aparelho); reserva: Overpass |
 | Dados Abertos ANP / GitHub Releases | Série histórica de preços de combustíveis compactada (`anp-fuel-latest.json.gz`) |
 | Cloudflare Workers + Durable Objects (plano gratuito), `workers/nearby` | Rolê por perto: posições aproximadas, encontros, bloqueios e denúncias em tempo real |
 | Firebase (Authentication + Firestore, plano gratuito) | Conta, sincronização e amigos/rolê, só quando o `google-services.json` está no build; sem Storage nem Functions |

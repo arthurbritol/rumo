@@ -81,6 +81,7 @@ import app.hunter.app.ui.AccountNotice
 import app.hunter.app.ui.FriendMarker
 import app.hunter.app.ui.FriendsRoute
 import app.hunter.app.ui.GarageScreen
+import app.hunter.app.ui.PardalPedidoDialogo
 import app.hunter.app.ui.HunterTheme
 import app.hunter.app.ui.MapScreen
 import app.hunter.app.ui.PodScreen
@@ -231,6 +232,9 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                 onOpenProfile = { overlay = Overlay.PROFILE.name },
                 onCreateAccount = { overlay = Overlay.LOGIN.name },
             )
+            val navAtiva by vmProvider().nav.collectAsStateWithLifecycle()
+            val gravandoAgora by vmProvider().recording.collectAsStateWithLifecycle()
+            PardalPedidoDialogo(navegando = navAtiva.active, gravando = gravandoAgora.isRecording)
             when (Overlay.valueOf(overlay)) {
                 Overlay.NONE -> Unit
                 Overlay.PROFILE -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
