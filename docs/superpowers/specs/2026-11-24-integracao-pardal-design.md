@@ -54,7 +54,14 @@ Ordem: 1 → 2 → 3 → 4 → 5 → 6. Estimativa: 6 tarefas pequenas a médias
 - Tamanho e bateria: um estado por vez, só em Wi-Fi, em segundo plano curto; índice em memória só do estado em uso.
 - Licença: atribuição visível no app e no repositório; não publicamos o banco derivado.
 
-## Perguntas para o dono
+## Decisões do dono (2026-11-24): sim às quatro recomendações
+
+1. Só Wi-Fi por padrão; "Atualizar agora" avisa o tamanho antes de usar dados móveis.
+2. Categoria nova "Pontos de atenção" (curva perigosa, escola, animais, cruzamento perigoso, queda de pedras), desligada por padrão.
+3. Automático: estado da posição e os da rota; mais uma lista para escolher estados antes de viajar.
+4. Conferência jurídica da ODbL fica para o projeto da Play Store; por ora só atribuição.
+
+## Perguntas (respondidas acima)
 
 1. Baixar também com dados móveis? Recomendo só Wi-Fi, com botão "Atualizar agora" que avisa o tamanho antes de usar dados móveis.
 2. Incluir "pontos de atenção" além de passagem de nível (curva perigosa, escola, animais, cruzamento perigoso) como categoria nova, desligada por padrão? Recomendo sim, desligada.
