@@ -13,4 +13,8 @@ class RedePoliticaAndroid(context: Context) : RedePolitica {
         val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
+
+    /** Modo "Economia de dados" do Android ligado numa rede com tarifa: não baixa nada em segundo plano. */
+    fun economiaDeDados(): Boolean =
+        cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED && cm.isActiveNetworkMetered
 }

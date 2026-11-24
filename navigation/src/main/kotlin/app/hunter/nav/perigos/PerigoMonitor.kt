@@ -30,7 +30,13 @@ object PerigoStatus {
     val repositorio: PerigoRepositorio? get() = repo
 
     /** Cria o repositório com cache em [dirCache] e o Overpass como fonte. Chamar uma vez, na Application. */
-    fun iniciar(dirCache: File, versaoApp: String = "0") {
+    fun iniciar(
+        dirCache: File,
+        versaoApp: String = "0",
+        /** Pardal (radares/lombadas/pontos de atenção baixados); nulo = só Overpass. */
+        local: PardalSource? = null,
+        pardalAtivo: () -> Boolean = { true },
+    ) {
         if (repo != null) return
         val cache = ArquivoPerigoCache(dirCache)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -42,8 +48,13 @@ object PerigoStatus {
             ),
             cache = cache,
             scope = scope,
+            local = local,
+            pardalAtivo = pardalAtivo,
         )
     }
+
+    /** Quem quiser saber de cada posição válida do serviço (o app liga o gatilho de download do Pardal aqui). */
+    @Volatile var aoPosicaoValida: ((Double, Double) -> Unit)? = null
 
     /** Identificação para os servidores públicos do Overpass (política de uso justo pede um contato). */
     fun userAgent(versaoApp: String) = "Rumo/$versaoApp (app de navegação para motos; https://github.com/arthurbritol/rumo)"
@@ -80,6 +91,7 @@ class PerigoMonitor(
         // Sem nenhuma categoria ligada não há motivo para consultar a rede. O serviço só roda navegando/gravando: 3x3.
         val ligado = categorias().isNotEmpty()
         if (ligado) repo?.aoMudarPosicao(p.latitude, p.longitude, amplo = true)
+        if (ligado) PerigoStatus.aoPosicaoValida?.invoke(p.latitude, p.longitude)
         if (ligado && t - ultimaTentativa >= RETENTAR_MS) { ultimaTentativa = t; repo?.tentarDeNovo() }
         val route = nav.route
         // Janela de ~25 km à frente: ao iniciar/recalcular a rota e de novo a cada 10 km andados.

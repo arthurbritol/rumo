@@ -105,6 +105,23 @@ class PardalAtualizador(
         return out.toList()
     }
 
+    /** O catálogo já foi baixado nesta execução (só então [ufsPara] conhece UFs que ainda não têm `.meta`). */
+    fun catalogoCarregado(): Boolean = catalogo != null
+
+    /** Baixa só o catálogo (pequeno), sem zip nenhum: permite descobrir a UF antes do primeiro download. false = indisponível ou schema não suportado. */
+    suspend fun carregarCatalogo(): Boolean = trava.withLock {
+        try {
+            val cat = withContext(Dispatchers.IO) { baixarCatalogo() }
+            if (cat.schema != SCHEMA) return@withLock false
+            catalogo = cat
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     // ---------- Atualização ----------
 
     suspend fun atualizar(uf: String, permitirDadosMoveis: Boolean): ResultadoPardal = trava.withLock {

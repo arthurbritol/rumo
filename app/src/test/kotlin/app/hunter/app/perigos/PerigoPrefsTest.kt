@@ -52,4 +52,15 @@ class PerigoPrefsTest {
         assertEquals(todas - CategoriaPerigo.RADARES, PerigoPrefs.alternar(todas, CategoriaPerigo.RADARES, false))
         assertEquals(todas, PerigoPrefs.alternar(todas - CategoriaPerigo.RADARES, CategoriaPerigo.RADARES, true))
     }
+
+    @Test
+    fun `preferencias do Pardal tem padrao true e persistem`() {
+        val p = memoryPrefs()
+        assertEquals(true, PerigoPrefs.pardalAtivo(p))
+        assertEquals(true, PerigoPrefs.pardalSoWifi(p))
+        PerigoPrefs.gravarPardalAtivo(p, false)
+        PerigoPrefs.gravarPardalSoWifi(p, false)
+        assertEquals(false, PerigoPrefs.pardalAtivo(p))
+        assertEquals(false, PerigoPrefs.pardalSoWifi(p))
+    }
 }

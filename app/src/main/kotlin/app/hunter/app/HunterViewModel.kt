@@ -469,6 +469,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                         // Sem categoria ligada não consulta; fora de viagem só o quadrado atual (o 3x3 é do serviço, navegando/gravando).
                         if (PerigoStatus.categorias.value.isNotEmpty()) {
                             PerigoStatus.repositorio?.aoMudarPosicao(it.latitude, it.longitude, amplo = recording.value.isRecording || nav.value.active)
+                            app.hunter.app.perigos.PardalGraph.gatilho?.aoPosicao(it.latitude, it.longitude)
                         }
                     }
                 }
@@ -584,7 +585,10 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectRoute(i: Int) {
         _preview.update { it?.copy(selected = i) }
-        if (PerigoStatus.categorias.value.isNotEmpty()) _preview.value?.routes?.getOrNull(i)?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
+        if (PerigoStatus.categorias.value.isNotEmpty()) _preview.value?.routes?.getOrNull(i)?.let {
+            PerigoStatus.repositorio?.aoPreviaDeRota(it.shape)
+            app.hunter.app.perigos.PardalGraph.gatilho?.aoRota(it)
+        }
         refreshFuelAdvice()
     }
 
@@ -665,7 +669,10 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                     else cur.copy(routes = routes, selected = 0, loading = false, error = if (routes.isEmpty()) "Nenhuma rota encontrada." else null)
                 }
                 // Prévia: só os primeiros quadrados da rota escolhida (alternativas não carregam; na navegação a janela de 25 km é reposta).
-                if (PerigoStatus.categorias.value.isNotEmpty()) routes.firstOrNull()?.let { PerigoStatus.repositorio?.aoPreviaDeRota(it.shape) }
+                if (PerigoStatus.categorias.value.isNotEmpty()) routes.firstOrNull()?.let {
+                    PerigoStatus.repositorio?.aoPreviaDeRota(it.shape)
+                    app.hunter.app.perigos.PardalGraph.gatilho?.aoRota(it)
+                }
                 refreshFuelAdvice()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -686,6 +693,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         val route = p.route ?: return false
         viewModelScope.launch { rememberPlace(p.place) }
         NavStatus.start(route, p.place, via = listOfNotNull(p.via?.latLon))
+        if (PerigoStatus.categorias.value.isNotEmpty()) app.hunter.app.perigos.PardalGraph.gatilho?.aoRota(route)
         adviceJob?.cancel()
         _preview.value = null
         return true

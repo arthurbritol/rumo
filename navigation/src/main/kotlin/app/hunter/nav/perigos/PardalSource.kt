@@ -16,6 +16,7 @@ class PardalSource(
     private val armazenamento: PardalArmazenamento,
     private val agora: () -> Long = System::currentTimeMillis,
     private val maxUfs: Int = 3,
+    private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) : PerigoSource {
     private class Indice(val porQuadrado: Map<TileId, List<PerigoPonto>>)
 
@@ -41,7 +42,7 @@ class PardalSource(
     /** Alguma UF baixada, e recente, cobre o quadrado. */
     fun cobre(tile: TileId): Boolean = candidatas(tile).any { agora() - it.baixadoEm <= RECENTE_MS }
 
-    override suspend fun buscar(tile: TileId): List<PerigoPonto> = withContext(Dispatchers.IO) {
+    override suspend fun buscar(tile: TileId): List<PerigoPonto> = withContext(io) {
         val ufs = candidatas(tile)
         if (ufs.isEmpty()) throw SemDadosPardal("nenhuma UF do Pardal baixada cobre o quadrado ${tile.ix},${tile.iy}")
         val vistos = HashSet<String>()

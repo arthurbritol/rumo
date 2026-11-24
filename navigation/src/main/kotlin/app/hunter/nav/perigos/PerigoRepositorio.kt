@@ -23,6 +23,9 @@ import kotlinx.coroutines.withContext
  *   e nada é gravado no cache; enquanto isso só o cache (mesmo vencido) é usado.
  * - Quadrado vazio também é cacheado. Nunca é chamado pelo movimento do mapa: só por mudança de quadrado da posição,
  *   prévia de rota (primeiros quadrados da rota escolhida) e janela de ~25 km à frente na navegação.
+ * - Com [local]: quadrado coberto pelo Pardal vem dele (sem entrar na fila de rede, sem recuo/intervalo, sem gravar no cache
+ *   em disco) e tem prioridade sobre o cache do Overpass; as duas fontes nunca se misturam no mesmo quadrado.
+ *   [aoPardalAtualizado] reavalia os quadrados em memória e os da fila quando uma UF nova é gravada.
  * - Fila e quadrados em memória são protegidos pela mesma trava ([lock]); só o trabalhador mexe na rede.
  */
 class PerigoRepositorio(
@@ -33,6 +36,10 @@ class PerigoRepositorio(
     private val intervaloMinMs: Long = 2_000,
     private val maxQuadrados: Int = 150,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Fonte local (Pardal): quadrado coberto por UF baixada e recente vem dela, sem rede e sem cache em disco. */
+    private val local: PardalSource? = null,
+    /** false = nunca usa o [local] (só Overpass). */
+    private val pardalAtivo: () -> Boolean = { true },
 ) {
     private val lock = Any()
 
@@ -48,6 +55,9 @@ class PerigoRepositorio(
     // Quadrados que esperam o fim do recuo de falha (na ordem da fila: posição antes de rota) e a retomada agendada.
     private val aguardandoRede = LinkedHashSet<TileId>()
     private var retomadaAgendada = false
+    // Quadrados em memória cujo conteúdo veio do Pardal, e classificações (Pardal x rede) em andamento.
+    private val deLocal = HashSet<TileId>()
+    private var classificando = 0
 
     // Só o trabalhador (uma coroutine por vez) mexe nestes.
     private var falhasSeguidas = 0
@@ -60,7 +70,7 @@ class PerigoRepositorio(
     val perigos: StateFlow<List<PerigoPonto>> = _perigos.asStateFlow()
 
     /** Fila vazia e trabalhador parado (útil em testes). */
-    fun ocioso(): Boolean = synchronized(lock) { !rodando && fila.isEmpty() }
+    fun ocioso(): Boolean = synchronized(lock) { !rodando && fila.isEmpty() && classificando == 0 }
 
     internal fun estado(): String = synchronized(lock) { "rodando=$rodando fila=${fila.size} naFila=${naFila.size} mem=${carregados.size}" }
 
@@ -106,8 +116,69 @@ class PerigoRepositorio(
         pedir(if (amplo) TileId.aoRedor(lat, lon) else listOf(c), urgente = true)
     }
 
-    /** Insere na fila ([urgente] vai para a frente, mantendo a ordem). Quadrados já carregados e válidos são ignorados. */
+    /**
+     * Insere na fila ([urgente] vai para a frente, mantendo a ordem). Quadrados já carregados e válidos são ignorados.
+     * Com [local] ativo, antes separa os que o Pardal cobre (carregados na hora, fora da fila de rede).
+     */
     fun pedir(tiles: List<TileId>, urgente: Boolean) {
+        val pardal = local?.takeIf { pardalAtivo() }
+        if (pardal == null) {
+            enfileirar(tiles, urgente)
+            return
+        }
+        val precisam = synchronized(lock) {
+            val t = agora()
+            classificando++
+            tiles.filter { !(carregados[it]?.valido(t) ?: false) }
+        }
+        if (precisam.isEmpty()) {
+            synchronized(lock) { classificando-- }
+            return
+        }
+        scope.launch(io) {
+            try {
+                val rede = ArrayList<TileId>()
+                for (t in precisam) if (!carregarDoPardal(pardal, t)) rede += t
+                enfileirar(rede, urgente)
+            } finally {
+                synchronized(lock) { classificando-- }
+            }
+        }
+    }
+
+    /** true se o Pardal cobre o quadrado e ele foi carregado dessa fonte. Falha de leitura = false (cai para a rede). */
+    private suspend fun carregarDoPardal(pardal: PardalSource, tile: TileId): Boolean {
+        return try {
+            if (!pardal.cobre(tile)) return false
+            guardar(tile, QuadradoEmCache(agora(), pardal.buscar(tile)), doPardal = true)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Uma UF do Pardal acabou de ser gravada: os quadrados em memória e os da fila que o Pardal agora cobre passam a vir dele
+     * (os já carregados são substituídos no lugar, sem piscar). Chamar depois de [PardalSource.invalidar].
+     */
+    fun aoPardalAtualizado() {
+        val pardal = local?.takeIf { pardalAtivo() } ?: return
+        scope.launch(io) {
+            val alvos = synchronized(lock) { (carregados.keys + fila + aguardandoRede).toSet() }
+            for (t in alvos) {
+                if (!carregarDoPardal(pardal, t)) continue
+                synchronized(lock) {
+                    fila.remove(t)
+                    naFila.remove(t)
+                    aguardandoRede.remove(t)
+                }
+            }
+        }
+    }
+
+    private fun enfileirar(tiles: List<TileId>, urgente: Boolean) {
         synchronized(lock) {
             val t = agora()
             val precisam = tiles.filter { !(carregados[it]?.valido(t) ?: false) }
@@ -157,8 +228,13 @@ class PerigoRepositorio(
                 try {
                     val lista = source.buscar(tile)
                     val novo = QuadradoEmCache(agora(), lista)
-                    withContext(io) { cache.gravar(tile, novo) }
-                    guardar(tile, novo)
+                    // O Pardal pode ter assumido o quadrado durante a consulta (UF baixada agora): o resultado do Overpass é descartado.
+                    val pardal = local?.takeIf { pardalAtivo() }
+                    val assumido = synchronized(lock) { tile in deLocal } || (pardal != null && withContext(io) { carregarDoPardal(pardal, tile) })
+                    if (!assumido) {
+                        withContext(io) { cache.gravar(tile, novo) }
+                        guardar(tile, novo)
+                    }
                     falhasSeguidas = 0
                 } catch (e: CancellationException) {
                     throw e
@@ -193,15 +269,16 @@ class PerigoRepositorio(
         }
     }
 
-    private fun guardar(tile: TileId, q: QuadradoEmCache) {
+    private fun guardar(tile: TileId, q: QuadradoEmCache, doPardal: Boolean = false) {
         val lista = synchronized(lock) {
             carregados.remove(tile)
             carregados[tile] = q
+            if (doPardal) deLocal += tile else deLocal -= tile
             if (carregados.size > maxQuadrados) {
                 val it = carregados.keys.iterator()
                 while (carregados.size > maxQuadrados && it.hasNext()) {
                     val k = it.next()
-                    if (k !in protegidosPosicao && k !in protegidosJanela) it.remove()
+                    if (k !in protegidosPosicao && k !in protegidosJanela) { it.remove(); deLocal -= k }
                 }
             }
             // distinctBy: perigo na divisa pode vir nos dois quadrados com o mesmo id.
