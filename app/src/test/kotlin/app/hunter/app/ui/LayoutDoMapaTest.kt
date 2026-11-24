@@ -74,7 +74,7 @@ class LayoutDoMapaTest {
             assertFalse(e.colunaLateral || e.busca || e.atalhos || e.botoesFlutuantes || e.prontoCompacto)
             assertTrue(e.centralizarNavegando)
         }
-        assertTrue(mapa(ClasseDeTela.PaisagemCompacta, navegando = true).base.painelLateral)
+        assertTrue(mapa(ClasseDeTela.PaisagemCompacta, navegando = true).base.barraInferior)
         assertTrue(mapa(ClasseDeTela.Retrato, navegando = true).base.bannerManobra)
         assertFalse(mapa(ClasseDeTela.Retrato, navegando = true, seguindo = true).centralizarNavegando)
         for (c in ClasseDeTela.entries) assertTrue(mapa(c, navegando = true).base.alertaPerigo)

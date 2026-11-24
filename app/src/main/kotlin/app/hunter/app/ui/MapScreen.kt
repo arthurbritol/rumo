@@ -299,9 +299,6 @@ fun MapScreen(
         }
     }
     val leftInset = seguros.asPaddingValues().calculateLeftPadding(LayoutDirection.Ltr)
-    // O painel da navegação tem a mesma largura da coluna esquerda do mapa ocioso.
-    val larguraPainel = larguraColunaLateralDp(classe).dp
-    val sidePanelDp = if (el.painelLateral) larguraPainel.value.toInt() + leftInset.value.toInt() + 8 else 0
     // Estes valores são lembrados: sem isso a lista era recriada a cada fix de GPS (1 Hz) e o mapa
     // reenviava as rotas inteiras ao motor de renderização a cada segundo.
     val previewRoute = preview?.route
@@ -616,6 +613,7 @@ fun MapScreen(
             camera = camera,
             cameraNonce = nonce,
             paddingTopDp = when {
+                el.bannerManobra && landscape -> 24
                 el.bannerManobra -> 120
                 navigating -> 24
                 em.colunaLateral -> 24
@@ -623,6 +621,7 @@ fun MapScreen(
                 else -> 0
             },
             paddingBottomDp = when {
+                el.barraInferior && landscape -> 24
                 el.barraInferior -> 84
                 navigating -> 24
                 em.colunaLateral -> 24
@@ -630,7 +629,7 @@ fun MapScreen(
                 selectedFuelStation != null -> 360
                 else -> 0
             },
-            paddingStartDp = if (em.colunaLateral) em.larguraColunaDp + 8 else sidePanelDp,
+            paddingStartDp = if (em.colunaLateral) em.larguraColunaDp + 8 else 0,
             onLongPress = {
                 if (!navigating) {
                     // Procurando rolê e fora de um encontro, segurar no mapa marca o ponto de uma proposta.
@@ -697,11 +696,11 @@ fun MapScreen(
                     .windowInsetsPadding(seguros.only(WindowInsetsSides.Start + WindowInsetsSides.Bottom))
                     .padding(
                         start = when {
-                            el.painelLateral -> larguraPainel + 12.dp
+                            landscape && navigating -> 16.dp
                             em.colunaLateral -> em.larguraColunaDp.dp + 12.dp
                             else -> 16.dp
                         },
-                        bottom = controlsBottom,
+                        bottom = if (landscape && navigating) 92.dp else controlsBottom,
                     ),
             )
         }
@@ -712,7 +711,8 @@ fun MapScreen(
             if (el.bannerManobra) {
                 NavBannerCompact(
                     vm,
-                    Modifier.align(Alignment.TopCenter)
+                    // Em paisagem fica estreito no canto esquerdo (o mapa ocupa o resto); em retrato, largura total.
+                    (if (landscape) Modifier.align(Alignment.TopStart).widthIn(max = 400.dp) else Modifier.align(Alignment.TopCenter))
                         .windowInsetsPadding(seguros.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                 )
@@ -721,12 +721,11 @@ fun MapScreen(
                 // Respeita a barra de gestos/navegação do sistema (antes a barra podia ficar por baixo dela).
                 NavBarCompact(
                     vm, onStop = stopNav,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    modifier = (if (landscape) Modifier.align(Alignment.BottomStart).widthIn(max = 440.dp) else Modifier.align(Alignment.BottomCenter))
                         .windowInsetsPadding(seguros.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                         .padding(8.dp),
                 )
             }
-            if (el.painelLateral) NavSidePanel(vm, onStop = stopNav, leftInset = leftInset, largura = larguraPainel, modifier = Modifier.align(Alignment.CenterStart))
             if (nav.arrived) {
                 AlertDialog(
                     onDismissRequest = {},
@@ -1384,71 +1383,3 @@ private fun NavBarCompact(vm: HunterViewModel, onStop: () -> Unit, modifier: Mod
     ConfirmStopDialog(confirm, onConfirm = { confirm = false; onStop() }, onDismiss = { confirm = false })
 }
 
-/**
- * Paisagem: coluna à esquerda com a MESMA largura da coluna do mapa ocioso. Manobra grande no alto (ícone, distância, via e a
- * seguinte), velocidade e chegada no meio, voz e encerrar fixos embaixo; o mapa fica com o resto.
- */
-@Composable
-private fun NavSidePanel(vm: HunterViewModel, onStop: () -> Unit, leftInset: Dp, largura: Dp, modifier: Modifier) {
-    val nav by vm.nav.collectAsStateWithLifecycle()
-    val rec by vm.recording.collectAsStateWithLifecycle()
-    val voice by vm.voice.collectAsStateWithLifecycle()
-    var confirm by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    val p = nav.progress
-    val kmh = ((rec.lastPoint?.speedMps ?: 0f) * 3.6f).toInt()
-
-    NavSurface(
-        modifier.fillMaxHeight().width(largura + leftInset),
-        shape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp),
-    ) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(insetsSeguros().only(WindowInsetsSides.Vertical))
-                .padding(start = leftInset + 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (nav.rerouting || p == null) {
-                    NavWaiting(nav.rerouting)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(
-                            Modifier.size(68.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) { ManeuverGlyph(p.upcoming.type, 48.dp, MaterialTheme.colorScheme.onPrimary) }
-                        Text(fmtDist(p.distanceToUpcomingM), fontSize = 36.sp, fontWeight = FontWeight.Black, maxLines = 1)
-                    }
-                    Text(p.upcoming.instruction, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    p.then?.takeIf { !it.isDestination }?.let { next ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Depois", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ManeuverGlyph(next.type, 18.dp, MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(next.streetName ?: "", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
-            // Rodapé fixo da coluna: velocidade e chegada, depois Voz/Mudo e Encerrar (sempre à vista, a manobra rola se faltar altura).
-            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                NavSpeed(kmh, tamanho = 44)
-                Column(Modifier.weight(1f)) {
-                    Text(p?.let { fmtArrival(it.remainingS) } ?: "--:--", fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1)
-                    Text(
-                        p?.let { "${fmtEta(it.remainingS)} · ${fmtDist(it.remainingM)}" } ?: "Calculando…",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NavVoiceToggle(voice, vm::toggleVoice)
-                NavStopButton({ confirm = true }, Modifier.weight(1f))
-            }
-        }
-    }
-    ConfirmStopDialog(confirm, onConfirm = { confirm = false; onStop() }, onDismiss = { confirm = false })
-}

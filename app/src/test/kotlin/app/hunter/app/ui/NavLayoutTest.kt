@@ -16,7 +16,7 @@ class NavLayoutTest {
         for (o in Orientacao.entries) {
             val e = fora(o)
             assertTrue(e.ocioso && e.camadas && e.abas)
-            assertFalse(e.bannerManobra || e.barraInferior || e.painelLateral || e.pilulaEncontro)
+            assertFalse(e.bannerManobra || e.barraInferior || e.pilulaEncontro)
             assertFalse(e.recentralizar)
         }
     }
@@ -30,15 +30,13 @@ class NavLayoutTest {
     fun `navegando em retrato mostra banner e barra inferior e esconde o resto`() {
         val e = nav(Orientacao.Retrato)
         assertTrue(e.bannerManobra && e.barraInferior)
-        assertFalse(e.painelLateral)
         assertFalse(e.ocioso || e.camadas || e.abas)
     }
 
     @Test
-    fun `navegando em paisagem mostra so o painel lateral`() {
+    fun `navegando em paisagem mostra o mesmo banner e barra do retrato`() {
         val e = nav(Orientacao.Paisagem)
-        assertTrue(e.painelLateral)
-        assertFalse(e.bannerManobra || e.barraInferior)
+        assertTrue(e.bannerManobra && e.barraInferior)
         assertFalse(e.ocioso || e.camadas || e.abas)
     }
 

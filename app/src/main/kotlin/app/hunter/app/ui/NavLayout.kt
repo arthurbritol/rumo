@@ -21,7 +21,6 @@ data class ElementosDaTela(
     val abas: Boolean,
     val bannerManobra: Boolean,
     val barraInferior: Boolean,
-    val painelLateral: Boolean,
     val pilulaEncontro: Boolean,
     val recentralizar: Boolean,
     /** Cartão do próximo radar/lombada: faz parte do essencial, na navegação e na gravação. */
@@ -30,15 +29,14 @@ data class ElementosDaTela(
 
 /**
  * Modo de navegação enxuto: com o GPS ativo ficam só manobra, velocidade, ETA, encerrar e recentralizar
- * (mais a pílula do encontro, se houver e o aviso do próximo radar/lombada, que também vale gravando). Em retrato, banner no topo + barra fina embaixo; em paisagem,
- * um painel lateral estreito. Fora da navegação nada muda.
+ * (mais a pílula do encontro, se houver e o aviso do próximo radar/lombada, que também vale gravando). Em retrato e em paisagem: banner no topo + barra fina embaixo
+ * (em paisagem os dois ficam estreitos, no canto esquerdo, e o mapa ocupa o resto). Fora da navegação nada muda.
  */
 fun navegacaoEnxuta(estado: EstadoDaTela, orientacao: Orientacao): ElementosDaTela {
     val nav = estado.navegando
-    val paisagem = orientacao == Orientacao.Paisagem
     return ElementosDaTela(
         ocioso = !nav, camadas = !nav, abas = !nav,
-        bannerManobra = nav && !paisagem, barraInferior = nav && !paisagem, painelLateral = nav && paisagem,
+        bannerManobra = nav, barraInferior = nav,
         pilulaEncontro = nav && estado.encontroAtivo,
         recentralizar = !estado.seguindo,
         alertaPerigo = nav || estado.gravando,
