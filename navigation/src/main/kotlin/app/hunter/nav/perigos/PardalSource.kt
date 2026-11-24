@@ -1,0 +1,70 @@
+package app.hunter.nav.perigos
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.IOException
+
+/** Nenhuma UF baixada cobre o quadrado: quem chama cai para o Overpass. */
+class SemDadosPardal(message: String) : IOException(message)
+
+/**
+ * Perigos do Pardal por quadrado, a partir do [PardalArmazenamento]. Índice em memória por UF (por quadrado), carregado sob
+ * demanda e só das UFs usadas (LRU de [maxUfs]). Cobertura pelo bbox guardado no `.meta` de cada UF baixada.
+ * "Recente" = baixado há no máximo [RECENTE_MS] (14 dias); [buscar] usa o dado mesmo vencido, [cobre] só o recente.
+ */
+class PardalSource(
+    private val armazenamento: PardalArmazenamento,
+    private val agora: () -> Long = System::currentTimeMillis,
+    private val maxUfs: Int = 3,
+) : PerigoSource {
+    private class Indice(val porQuadrado: Map<TileId, List<PerigoPonto>>)
+
+    private val lock = Any()
+    private val lru = object : LinkedHashMap<String, Indice>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Indice>) = size > maxUfs
+    }
+
+    /** UFs com índice em memória agora (para testes e diagnóstico). */
+    fun ufsEmMemoria(): Set<String> = synchronized(lock) { lru.keys.toSet() }
+
+    /** O app chama depois de gravar uma UF nova, para o índice em memória não ficar velho. */
+    fun invalidar(uf: String) {
+        synchronized(lock) { lru.remove(uf) }
+    }
+
+    /** UFs baixadas cujo bbox toca o quadrado. */
+    private fun candidatas(tile: TileId): List<PardalMeta> =
+        armazenamento.ufsBaixadas().mapNotNull { armazenamento.lerMeta(it) }.filter { m ->
+            m.bbox.size == 4 && m.bbox[0] <= tile.norte && m.bbox[2] >= tile.sul && m.bbox[1] <= tile.leste && m.bbox[3] >= tile.oeste
+        }
+
+    /** Alguma UF baixada, e recente, cobre o quadrado. */
+    fun cobre(tile: TileId): Boolean = candidatas(tile).any { agora() - it.baixadoEm <= RECENTE_MS }
+
+    override suspend fun buscar(tile: TileId): List<PerigoPonto> = withContext(Dispatchers.IO) {
+        val ufs = candidatas(tile)
+        if (ufs.isEmpty()) throw SemDadosPardal("nenhuma UF do Pardal baixada cobre o quadrado ${tile.ix},${tile.iy}")
+        val vistos = HashSet<String>()
+        val out = ArrayList<PerigoPonto>()
+        var algum = false
+        for (m in ufs) {
+            val idx = indice(m.uf) ?: continue
+            algum = true
+            idx.porQuadrado[tile]?.forEach { if (vistos.add(it.id)) out += it }
+        }
+        if (!algum) throw SemDadosPardal("dados do Pardal ilegíveis para o quadrado ${tile.ix},${tile.iy}")
+        out
+    }
+
+    private fun indice(uf: String): Indice? {
+        synchronized(lock) { lru[uf]?.let { return it } }
+        val (_, pontos) = armazenamento.ler(uf) ?: return null
+        val idx = Indice(pontos.groupBy { TileId.de(it.lat, it.lon) })
+        synchronized(lock) { lru[uf] = idx }
+        return idx
+    }
+
+    companion object {
+        const val RECENTE_MS = 14L * 24 * 3600 * 1000
+    }
+}
