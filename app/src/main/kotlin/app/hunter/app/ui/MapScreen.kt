@@ -1344,8 +1344,9 @@ private fun PerigoCard(a: app.hunter.nav.perigos.AlertaPerigo, modifier: Modifie
                 Text(fmtDist(a.distanciaM.toDouble()), fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 1, color = if (acima) Bad else MaterialTheme.colorScheme.onSurface)
                 Text(a.perigo.tipo.nome, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 a.limiteKmh?.let {
+                    val rotulo = if (a.perigo.tipo == app.hunter.nav.perigos.Perigo.RADAR_DE_TRECHO) "Média" else "Limite"
                     Text(
-                        if (acima) "Limite $it km/h · acima" else "Limite $it km/h",
+                        if (acima) "$rotulo $it km/h · acima" else "$rotulo $it km/h",
                         style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (acima) Bad else MaterialTheme.colorScheme.onSurfaceVariant,
                     )

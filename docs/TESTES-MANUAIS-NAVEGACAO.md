@@ -72,8 +72,12 @@ Perfil > Avisos na estrada > "Dados de radares". Use um aparelho com Wi-Fi e, pa
 - [ ] **Estado não baixado cai no Overpass**: remova SP (ou rode em outra UF não baixada) com internet: os avisos continuam vindo do Overpass como antes (cobertura menor, sem sentido).
 - [ ] **Dados móveis pedem confirmação**: com "Baixar só no Wi-Fi" ligado, desligue o Wi-Fi e toque "Atualizar agora": aparece "Usar dados móveis para baixar? ... (cerca de X MB)". "Agora não" não baixa; repetir e "Baixar" baixa. Desligando "só no Wi-Fi" o download segue sem perguntar.
 - [ ] **Nunca pergunta navegando/gravando**: cruzando para outra UF durante a navegação ou gravação com dados móveis, o diálogo não aparece (aparece depois de encerrar, se ainda pendente).
+- [ ] **Fronteira SP/MG**: com SÓ SP baixado, vá a Pouso Alegre (MG), no sul de MG e dentro do retângulo de SP: os avisos continuam vindo do Overpass (sem sentido). Baixe também MG: os radares passam a vir do Pardal (a cobertura exige SP e MG). Idem Brasília (DF dentro de GO): só com DF e GO baixados. Com dados móveis, a rota que cruza as duas UFs baixa as duas.
+- [ ] **Só Wi-Fi, automático**: fora do Wi-Fi com "Baixar só no Wi-Fi" ligado, rodar em UF não baixada NÃO mostra diálogo nenhum; ao voltar o Wi-Fi e entrar noutro quadrado, baixa sozinho. Wi-Fi de hotspot do celular conta como dados móveis.
+- [ ] **Pedido com várias UFs**: com dados móveis, "Atualizar agora" com SP e MG baixados abre UM diálogo com as duas UFs; "Baixar" baixa as duas. Tocar várias vezes seguidas na mesma UF não duplica.
+- [ ] **Reserva vencida**: com SP baixado há mais de 14 dias e sem internet, os avisos de SP ainda aparecem (dado vencido como reserva).
 - [ ] **Remover estado**: "Escolher estados", desmarque SP: some da lista; os radares de SP passam a vir do Overpass; o app não trava.
-- [ ] **Usar dados do Pardal desligado**: nada novo é baixado e os avisos usam só o OpenStreetMap.
+- [ ] **Usar dados do Pardal desligado**: nada novo é baixado e os avisos usam só o OpenStreetMap (os quadrados já no mapa trocam de fonte na hora). A seção mostra "Espaço usado" dos estados baixados.
 - [ ] **Estado desatualizado**: um estado baixado há mais de 14 dias aparece como "desatualizado" e os avisos usam o Overpass nele até atualizar.
 - [ ] **Pontos de atenção**: a categoria "Pontos de atenção" vem desligada por padrão; ligando, curvas, cruzamentos, escolas etc. do Pardal aparecem no mapa e avisam; desligando, somem.
 - [ ] **Atribuição**: o texto de licença aparece na seção e os botões "Pardal" e "OpenStreetMap (ODbL)" abrem o navegador.

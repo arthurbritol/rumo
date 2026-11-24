@@ -25,10 +25,16 @@ data class PardalUfStatus(
     val recente: Boolean = false,
     val baixando: Boolean = false,
     val erro: String? = null,
+    /** Espaço ocupado em disco (csv + meta); 0 se não baixada. */
+    val bytes: Long = 0,
 )
 
-/** Pedido de confirmação de dados móveis guardado pelo [PardalGatilho] (a UI mostra e chama confirmar ou dispensar). */
-data class PardalPedidoDadosMoveis(val uf: String, val bytes: Long?)
+/**
+ * Pedido de confirmação de dados móveis guardado pelo [PardalGatilho] (a UI mostra e chama confirmar ou dispensar).
+ * Só nasce de ação manual (Atualizar agora / Escolher estados); [ufs] junta todas as UFs pedidas, [bytes] a soma dos tamanhos
+ * conhecidos (null = nenhum conhecido).
+ */
+data class PardalPedidoDadosMoveis(val ufs: List<String>, val bytes: Long?)
 
 /**
  * Estado por UF do Pardal. Reconstrói a parte "em disco" do [PardalArmazenamento] e mantém "baixando"/"erro" em memória.
@@ -56,6 +62,7 @@ class PardalStatus(
                     uf = uf,
                     baixadaEm = m?.baixadoEm,
                     contagem = m?.total ?: 0,
+                    bytes = if (m != null) armazenamento.bytesEmDisco(uf) else 0L,
                     recente = m != null && agora() - m.baixadoEm <= PardalSource.RECENTE_MS,
                     baixando = uf in baixando,
                     erro = erros[uf],
@@ -76,9 +83,13 @@ class PardalStatus(
 }
 
 /**
- * Decide quando baixar o Pardal: ao mudar a UF da posição atual (ou na primeira posição) e ao abrir a prévia de rota / iniciar
- * a navegação (todas as UFs da rota). Baixa a UF que falta ou está vencida (mais de [VENCE_MS]); no máximo uma verificação por UF
- * a cada [VERIFICACAO_MS] e um download por vez. Dependências injetadas (sem Android).
+ * Decide quando baixar o Pardal: ao entrar em um quadrado novo de 0,1 grau (todas as UFs cujo bbox contém a posição; a verificação de
+ * cada UF é limitada a uma por [VERIFICACAO_MS], o que também pega o Wi-Fi que voltou) e ao abrir a prévia de rota / iniciar a navegação
+ * (todas as UFs da rota). Baixa a UF que falta ou está vencida (mais de [VENCE_MS]); um download por vez.
+ *
+ * Gatilhos AUTOMÁTICOS (posição/rota) fora do Wi-Fi com "só Wi-Fi" nunca perguntam nada: apenas esperam (a UF nem é marcada como
+ * verificada, então a próxima mudança de quadrado tenta de novo). Só a ação manual ([baixarAgora]) gera [pedido].
+ * Dependências injetadas (sem Android).
  */
 class PardalGatilho(
     private val scope: CoroutineScope,
@@ -87,8 +98,10 @@ class PardalGatilho(
     /** `!pardalSoWifi`: pode usar dados móveis sem perguntar. */
     private val permitirDadosMoveis: () -> Boolean,
     private val emWifi: () -> Boolean,
-    private val ufDoPonto: (Double, Double) -> String?,
+    /** TODAS as UFs cujo bbox contém o ponto (vazia se fora ou se não há bbox conhecido). */
+    private val ufDoPonto: (Double, Double) -> List<String>,
     private val ufsDaRota: (Route) -> List<String>,
+    /** Há bbox conhecidos (catálogo carregado agora ou guardado em disco). */
     private val catalogoCarregado: () -> Boolean,
     private val carregarCatalogo: suspend () -> Boolean,
     /** Instante do último download da UF; null = não baixada. */
@@ -100,11 +113,11 @@ class PardalGatilho(
     private val lock = Any()
     private val verificadoEm = HashMap<String, Long>()
     private var ultimoQuadrado: TileId? = null
-    private var ufAtual: String? = null
+    private val naFila = HashSet<String>()
     private val trava = Mutex()
 
     private val _pedido = MutableStateFlow<PardalPedidoDadosMoveis?>(null)
-    /** Download parado por falta de Wi-Fi: a UI pergunta ao usuário e chama [confirmarDadosMoveis] ou [dispensarPedido]. */
+    /** Download parado por falta de Wi-Fi numa ação manual: a UI pergunta ao usuário e chama [confirmarDadosMoveis] ou [dispensarPedido]. */
     val pedido: StateFlow<PardalPedidoDadosMoveis?> = _pedido.asStateFlow()
 
     /** Posição válida do GPS (chamar à vontade: só trabalha quando o quadrado de 0,1 grau muda). */
@@ -115,11 +128,7 @@ class PardalGatilho(
             if (q == ultimoQuadrado) return
             ultimoQuadrado = q
         }
-        scope.launch {
-            val uf = ufDe(lat, lon) ?: return@launch
-            val mudou = synchronized(lock) { (uf != ufAtual).also { ufAtual = uf } }
-            if (mudou) verificar(uf)
-        }
+        scope.launch { ufsDe(lat, lon).forEach { verificar(it) } }
     }
 
     /** Prévia de rota aberta ou navegação iniciada: todas as UFs da rota. */
@@ -132,23 +141,27 @@ class PardalGatilho(
         }
     }
 
-    /** O usuário aceitou usar dados móveis para o pedido pendente. */
+    /** O usuário aceitou usar dados móveis: baixa TODAS as UFs do pedido pendente. */
     fun confirmarDadosMoveis() {
         val p = _pedido.value ?: return
         _pedido.value = null
-        scope.launch { baixar(p.uf, permitirMoveis = true) }
+        for (uf in p.ufs) {
+            if (!reservar(uf)) continue
+            scope.launch { executar(uf, permitirMoveis = true, interativo = true) }
+        }
     }
 
-    /** Pedido do usuário (Perfil): baixa/atualiza a UF agora. Fora do Wi-Fi com "só Wi-Fi" ligado, vira [pedido]. */
+    /** Pedido do usuário (Perfil): baixa/atualiza a UF agora. Fora do Wi-Fi com "só Wi-Fi" ligado, vira [pedido]. Toque repetido não duplica. */
     fun baixarAgora(uf: String) {
-        scope.launch { baixar(uf, permitirMoveis = permitirDadosMoveis()) }
+        if (!reservar(uf)) return
+        scope.launch { executar(uf, permitirMoveis = permitirDadosMoveis(), interativo = true) }
     }
 
     fun dispensarPedido() { _pedido.value = null }
 
-    private suspend fun ufDe(lat: Double, lon: Double): String? {
-        ufDoPonto(lat, lon)?.let { return it }
-        if (catalogoCarregado() || !tentarCatalogo()) return null
+    private suspend fun ufsDe(lat: Double, lon: Double): List<String> {
+        ufDoPonto(lat, lon).takeIf { it.isNotEmpty() }?.let { return it }
+        if (catalogoCarregado() || !tentarCatalogo()) return emptyList()
         return ufDoPonto(lat, lon)
     }
 
@@ -166,34 +179,51 @@ class PardalGatilho(
 
     private suspend fun verificar(uf: String) {
         val t = agora()
+        val permitir = permitirDadosMoveis()
         synchronized(lock) {
             val ult = verificadoEm[uf]
             if (ult != null && t - ult < VERIFICACAO_MS) return
             val em = baixadoEm(uf)
             // Em dia: só marca a verificação (nada a baixar).
             if (em != null && t - em <= VENCE_MS) { verificadoEm[uf] = t; return }
+            // Automático, precisa baixar, mas sem Wi-Fi e só-Wi-Fi: espera (não pergunta e não marca como verificada).
+            if (!permitir && !emWifi()) return
             verificadoEm[uf] = t
         }
-        baixar(uf, permitirMoveis = permitirDadosMoveis())
+        if (reservar(uf)) executar(uf, permitirMoveis = permitir, interativo = false)
     }
 
-    private suspend fun baixar(uf: String, permitirMoveis: Boolean) {
-        trava.withLock {
-            status?.baixando(uf, true)
-            try {
+    /** Marca a UF como na fila/baixando (aparece já na tela); false = já está na fila. */
+    private fun reservar(uf: String): Boolean {
+        if (!synchronized(lock) { naFila.add(uf) }) return false
+        status?.baixando(uf, true)
+        return true
+    }
+
+    private suspend fun executar(uf: String, permitirMoveis: Boolean, interativo: Boolean) {
+        try {
+            trava.withLock {
                 when (val r = atualizar(uf, permitirMoveis)) {
                     is ResultadoPardal.Atualizada, is ResultadoPardal.JaEmDia -> status?.erro(uf, null)
                     is ResultadoPardal.Falhou -> status?.erro(uf, r.motivo)
-                    is ResultadoPardal.PrecisaConfirmarDadosMoveis -> _pedido.update { PardalPedidoDadosMoveis(uf, r.bytes) }
+                    is ResultadoPardal.PrecisaConfirmarDadosMoveis -> if (interativo) _pedido.update { juntar(it, uf, r.bytes) }
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                status?.erro(uf, e.message ?: e.javaClass.simpleName)
-            } finally {
-                status?.baixando(uf, false)
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            status?.erro(uf, e.message ?: e.javaClass.simpleName)
+        } finally {
+            synchronized(lock) { naFila.remove(uf) }
+            status?.baixando(uf, false)
         }
+    }
+
+    private fun juntar(antigo: PardalPedidoDadosMoveis?, uf: String, bytes: Long?): PardalPedidoDadosMoveis {
+        if (antigo == null) return PardalPedidoDadosMoveis(listOf(uf), bytes)
+        if (uf in antigo.ufs) return antigo
+        val soma = if (antigo.bytes == null && bytes == null) null else (antigo.bytes ?: 0L) + (bytes ?: 0L)
+        return PardalPedidoDadosMoveis(antigo.ufs + uf, soma)
     }
 
     companion object {

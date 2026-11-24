@@ -1,6 +1,9 @@
 package app.hunter.nav.perigos
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -37,6 +40,8 @@ class PardalArmazenamento(
     private val escrever: (File, ByteArray) -> Unit = { f, b -> f.writeBytes(b) },
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val bboxSerializer = MapSerializer(String.serializer(), ListSerializer(Double.serializer()))
 
     private fun csv(uf: String) = File(dir, "$uf.csv")
     private fun meta(uf: String) = File(dir, "$uf.meta")
@@ -81,6 +86,31 @@ class PardalArmazenamento(
         }
     }
 
+    /**
+     * Bbox ([latMin, lonMin, latMax, lonMax]) de TODAS as UFs do último catálogo carregado (`catalogo-bbox.json`), mesmo das não
+     * baixadas: é o que permite saber offline quais UFs tocam um quadrado. Vazio = catálogo nunca carregado (ou arquivo ruim).
+     */
+    fun lerBboxes(): Map<String, List<Double>> = try {
+        json.decodeFromString(bboxSerializer, File(dir, ARQ_BBOX).readText()).filterValues { it.size == 4 }
+    } catch (e: Exception) { emptyMap() }
+
+    /** Grava os bbox do catálogo (atômico; não reescreve se nada mudou). Lança se falhar, sem mexer no que havia. */
+    fun gravarBboxes(bboxes: Map<String, List<Double>>) {
+        if (bboxes.isEmpty() || lerBboxes() == bboxes) return
+        dir.mkdirs()
+        val tmp = File(dir, "$ARQ_BBOX.tmp")
+        try {
+            escrever(tmp, json.encodeToString(bboxSerializer, bboxes).toByteArray(Charsets.UTF_8))
+            check(json.decodeFromString(bboxSerializer, tmp.readText()) == bboxes) { "bbox gravado não confere" }
+            trocar(tmp, File(dir, ARQ_BBOX))
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    /** Bytes ocupados em disco pela UF (csv + meta). */
+    fun bytesEmDisco(uf: String): Long = csv(uf).length() + meta(uf).length()
+
     /** Apaga os arquivos da UF (csv, meta e temporários). Nunca lança; a UF passa a "não baixada". */
     fun remover(uf: String) {
         // O meta primeiro: sem ele a UF já conta como não baixada, mesmo que o csv resista.
@@ -110,6 +140,8 @@ class PardalArmazenamento(
     }
 
     companion object {
+        const val ARQ_BBOX = "catalogo-bbox.json"
+
         private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 
         private fun num(d: Double?) = d?.toString().orEmpty()

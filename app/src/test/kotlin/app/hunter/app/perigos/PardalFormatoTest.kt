@@ -49,11 +49,26 @@ class PardalFormatoTest {
     }
 
     @Test fun `dialogo de dados moveis so fora de navegacao e gravacao`() {
-        val p = PardalPedidoDadosMoveis("SP", 5_000_000)
+        val p = PardalPedidoDadosMoveis(listOf("SP", "MG"), 5_000_000)
         assertTrue(PardalFormato.mostrarPedido(p, navegando = false, gravando = false))
         assertFalse(PardalFormato.mostrarPedido(p, navegando = true, gravando = false))
         assertFalse(PardalFormato.mostrarPedido(p, navegando = false, gravando = true))
         assertFalse(PardalFormato.mostrarPedido(null, navegando = false, gravando = false))
-        assertTrue(PardalFormato.textoPedido(p).contains("SP") && PardalFormato.textoPedido(p).contains("5 MB"))
+        assertTrue(PardalFormato.textoPedido(p).contains("SP, MG") && PardalFormato.textoPedido(p).contains("5 MB"))
+    }
+
+    @Test fun `espaco usado soma os estados baixados`() {
+        assertEquals("Espaço usado: nenhum", PardalFormato.espacoUsado(emptyList()))
+        val a = PardalUfStatus("SP", baixadaEm = 1L, bytes = 3_000_000)
+        val b = PardalUfStatus("MG", baixadaEm = 1L, bytes = 1_250_000)
+        assertEquals("Espaço usado: 4,3 MB", PardalFormato.espacoUsado(listOf(a, b)))
+        assertEquals("Espaço usado: menos de 1 MB", PardalFormato.espacoUsado(listOf(PardalUfStatus("AC", baixadaEm = 1L, bytes = 20_000))))
+    }
+
+    @Test fun `rede so e sem tarifa se Wi-Fi ou Ethernet e nao medida`() {
+        assertTrue(redeSemTarifa(wifi = true, ethernet = false, naoMedida = true))
+        assertTrue(redeSemTarifa(wifi = false, ethernet = true, naoMedida = true))
+        assertFalse(redeSemTarifa(wifi = true, ethernet = false, naoMedida = false)) // hotspot / roteador 4G
+        assertFalse(redeSemTarifa(wifi = false, ethernet = false, naoMedida = true)) // outra rede
     }
 }

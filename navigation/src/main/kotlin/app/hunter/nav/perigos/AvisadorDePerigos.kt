@@ -71,7 +71,7 @@ class AvisadorDePerigos {
         val st = estados.getOrPut(p.id) { Estado(p) }
 
         val velKmh = velocidadeMps * 3.6
-        val acima = p.tipo == Perigo.RADAR && p.limiteKmh != null && velKmh > p.limiteKmh + MARGEM_KMH
+        val acima = (p.tipo == Perigo.RADAR || p.tipo == Perigo.RADAR_DE_TRECHO) && p.limiteKmh != null && velKmh > p.limiteKmh + MARGEM_KMH
         val alerta = AlertaPerigo(p, (alvo.distanciaM / 10).roundToInt() * 10, p.limiteKmh, acima)
 
         val limiares = p.tipo.limiaresM
@@ -92,11 +92,12 @@ class AvisadorDePerigos {
         /** Tolerância do GPS ao comparar velocidade com o limite (km/h). */
         const val MARGEM_KMH = 2.0
 
-        /** "Radar à frente, 300 metros, limite 60. Você está acima do limite." (distância real, arredondada de 50 em 50 m) / "Radar adiante" (último limiar do radar). */
+        /** Radar de trecho: "..., média de 80 km/h. Você está acima da média." "Radar à frente, 300 metros, limite 60. Você está acima do limite." (distância real, arredondada de 50 em 50 m) / "Radar adiante" (último limiar do radar). */
         fun texto(p: PerigoPonto, distanciaM: Double, acima: Boolean, curto: Boolean): String {
             val base = if (curto) "${p.tipo.nome} adiante" else "${p.tipo.nome} à frente, ${distanciaFalada(distanciaM)}"
-            val limite = p.limiteKmh?.takeIf { p.tipo == Perigo.RADAR }?.let { ", limite $it" }.orEmpty()
-            val aviso = if (acima) ". Você está acima do limite." else "."
+            val trecho = p.tipo == Perigo.RADAR_DE_TRECHO
+            val limite = p.limiteKmh?.takeIf { p.tipo == Perigo.RADAR || trecho }?.let { if (trecho) ", média de $it km/h" else ", limite $it" }.orEmpty()
+            val aviso = if (acima) (if (trecho) ". Você está acima da média." else ". Você está acima do limite.") else "."
             return base + limite + aviso
         }
     }

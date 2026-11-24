@@ -27,11 +27,17 @@ object PardalGraph {
     @Volatile private var armazenamento: PardalArmazenamento? = null
     @Volatile private var fonte: PardalSource? = null
 
-    /** Apaga os dados da UF e invalida o índice em memória. */
+    /** Apaga os dados da UF, invalida o índice em memória e reavalia os quadrados do mapa. Mexe em disco: chamar fora da thread principal. */
     fun remover(uf: String) {
         armazenamento?.remover(uf)
         fonte?.invalidar(uf)
         status?.atualizar()
+        PerigoStatus.repositorio?.aoPardalAtualizado()
+    }
+
+    /** O interruptor "Usar dados do Pardal" mudou: os quadrados em memória trocam de fonte. */
+    fun aoMudarAtivo() {
+        PerigoStatus.repositorio?.aoPardalAtualizado()
     }
 
     /** Cria tudo e também o repositório de perigos (com o Pardal como fonte local). Chamar uma vez, em `Application.onCreate`. */
@@ -67,7 +73,7 @@ object PardalGraph {
             emWifi = rede::emWifi,
             ufDoPonto = atu::ufsPara,
             ufsDaRota = atu::ufsParaRota,
-            catalogoCarregado = atu::catalogoCarregado,
+            catalogoCarregado = atu::bboxesConhecidos,
             carregarCatalogo = atu::carregarCatalogo,
             baixadoEm = { armazenamento.lerMeta(it)?.baixadoEm },
             atualizar = atu::atualizar,

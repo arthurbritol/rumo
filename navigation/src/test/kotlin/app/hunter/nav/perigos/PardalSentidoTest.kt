@@ -67,10 +67,28 @@ class PardalSentidoTest {
         val av = AvisadorDePerigos()
         val ps = listOf(trecho)
         assertTrue(av.atualizar(ll(1_100.0), 90.0, 15.0, rota, 1_100.0, ps).falas.isEmpty())
-        assertEquals(listOf("Radar de trecho à frente, 800 metros."), av.atualizar(ll(1_210.0), 90.0, 15.0, rota, 1_210.0, ps).falas)
-        assertEquals(listOf("Radar de trecho à frente, 300 metros."), av.atualizar(ll(1_710.0), 90.0, 15.0, rota, 1_710.0, ps).falas)
+        assertEquals(listOf("Radar de trecho à frente, 800 metros, média de 60 km/h."), av.atualizar(ll(1_210.0), 90.0, 15.0, rota, 1_210.0, ps).falas)
+        assertEquals(listOf("Radar de trecho à frente, 300 metros, média de 60 km/h."), av.atualizar(ll(1_710.0), 90.0, 15.0, rota, 1_710.0, ps).falas)
         assertTrue(av.atualizar(ll(1_905.0), 90.0, 15.0, rota, 1_905.0, ps).falas.isEmpty()) // sem "adiante" curto
         // Sentido contrário não avisa.
         assertTrue(livre(2_300.0, 270.0, listOf(trecho)).isEmpty())
+    }
+
+    @Test fun `radar de trecho tolera 100 graus do rumo derivado, radar fixo so 60`() {
+        // Trecho com sentido 190º: o rumo 90º dá 100º de diferença (vale); o radar fixo com o mesmo sentido não vale.
+        assertEquals(listOf("t"), livre(1_700.0, 90.0, listOf(radarLeste("t", dir = 190.0, tipo = Perigo.RADAR_DE_TRECHO))))
+        assertTrue(livre(1_700.0, 90.0, listOf(radarLeste("t2", dir = 191.0, tipo = Perigo.RADAR_DE_TRECHO))).isEmpty())
+        assertTrue(livre(1_700.0, 90.0, listOf(radarLeste("f", dir = 190.0))).isEmpty())
+    }
+
+    @Test fun `radar de trecho fala media de X km por hora e acima da media`() {
+        val trecho = radarLeste("t", tipo = Perigo.RADAR_DE_TRECHO).copy(fimLat = 0.0, fimLon = 5_000.0 / 111_194.9)
+        val ps = listOf(trecho)
+        val lento = AvisadorDePerigos().atualizar(ll(1_210.0), 90.0, 15.0, rota, 1_210.0, ps)
+        assertEquals(listOf("Radar de trecho à frente, 800 metros, média de 60 km/h."), lento.falas)
+        assertEquals(false, lento.alerta!!.acimaDoLimite)
+        val rapido = AvisadorDePerigos().atualizar(ll(1_210.0), 90.0, 70 / 3.6, rota, 1_210.0, ps)
+        assertEquals(listOf("Radar de trecho à frente, 800 metros, média de 60 km/h. Você está acima da média."), rapido.falas)
+        assertEquals(true, rapido.alerta!!.acimaDoLimite)
     }
 }

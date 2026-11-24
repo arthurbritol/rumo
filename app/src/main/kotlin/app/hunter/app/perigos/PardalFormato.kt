@@ -55,9 +55,23 @@ object PardalFormato {
     fun tituloPedido(p: PardalPedidoDadosMoveis) = "Usar dados móveis para baixar?"
 
     fun textoPedido(p: PardalPedidoDadosMoveis) =
-        "Sem Wi-Fi agora. Baixar os radares e lombadas de ${p.uf} (${tamanho(p.bytes)}) usando dados móveis?"
+        "Sem Wi-Fi agora. Baixar os radares e lombadas de ${p.ufs.joinToString(", ")} (${tamanho(p.bytes)}) usando dados móveis?"
 
-    /** O diálogo de dados móveis aparece só com pedido pendente e nunca navegando ou gravando. */
+    /** "Espaço usado: 4,2 MB" (soma dos estados baixados). Vírgula decimal, sem depender do locale. */
+    fun espacoUsado(ufs: Collection<PardalUfStatus>): String {
+        val total = ufs.sumOf { it.bytes }
+        val texto = when {
+            total <= 0 -> "nenhum"
+            total < 100_000 -> "menos de 1 MB"
+            else -> "%.1f".format(java.util.Locale.ROOT, total / 1_000_000.0).replace('.', ',') + " MB"
+        }
+        return "Espaço usado: $texto"
+    }
+
+    /**
+     * O diálogo de dados móveis aparece só com pedido pendente e nunca navegando ou gravando. O pedido só nasce de uma ação manual
+     * (Perfil), então navegar/gravar quase nunca coincide com ele; fica guardado e aparece depois.
+     */
     fun mostrarPedido(pedido: PardalPedidoDadosMoveis?, navegando: Boolean, gravando: Boolean): Boolean =
         pedido != null && !navegando && !gravando
 

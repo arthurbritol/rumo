@@ -25,7 +25,9 @@ import kotlinx.coroutines.withContext
  *   prévia de rota (primeiros quadrados da rota escolhida) e janela de ~25 km à frente na navegação.
  * - Com [local]: quadrado coberto pelo Pardal vem dele (sem entrar na fila de rede, sem recuo/intervalo, sem gravar no cache
  *   em disco) e tem prioridade sobre o cache do Overpass; as duas fontes nunca se misturam no mesmo quadrado.
- *   [aoPardalAtualizado] reavalia os quadrados em memória e os da fila quando uma UF nova é gravada.
+ *   [aoPardalAtualizado] reavalia os quadrados em memória e os da fila quando uma UF é gravada, removida ou o Pardal é
+ *   ligado/desligado (quadrados que deixaram de ser cobertos saem da memória e voltam pelo caminho antigo).
+ * - Reserva: sem cache para o quadrado e com o Overpass falhando ou em recuo, usa o Pardal mesmo vencido (se a UF está em disco).
  * - Fila e quadrados em memória são protegidos pela mesma trava ([lock]); só o trabalhador mexe na rede.
  */
 class PerigoRepositorio(
@@ -160,12 +162,20 @@ class PerigoRepositorio(
     }
 
     /**
-     * Uma UF do Pardal acabou de ser gravada: os quadrados em memória e os da fila que o Pardal agora cobre passam a vir dele
-     * (os já carregados são substituídos no lugar, sem piscar). Chamar depois de [PardalSource.invalidar].
+     * O conjunto de dados do Pardal mudou (UF gravada ou removida, Pardal ligado/desligado). Quadrados que vinham do Pardal e deixaram
+     * de ser cobertos saem da memória e voltam pelo caminho antigo (cache/Overpass); os em memória e os da fila que o Pardal agora
+     * cobre passam a vir dele (os já carregados são substituídos no lugar, sem piscar). Chamar depois de [PardalSource.invalidar].
      */
     fun aoPardalAtualizado() {
-        val pardal = local?.takeIf { pardalAtivo() } ?: return
         scope.launch(io) {
+            val pardal = local?.takeIf { pardalAtivo() }
+            val soltar = synchronized(lock) { deLocal.toList() }.filter { pardal == null || !pardal.cobre(it) }
+            if (soltar.isNotEmpty()) {
+                synchronized(lock) { soltar.forEach { if (it in deLocal) { carregados.remove(it); deLocal.remove(it) } } }
+                publicar()
+                pedir(soltar, urgente = false)
+            }
+            if (pardal == null) return@launch
             val alvos = synchronized(lock) { (carregados.keys + fila + aguardandoRede).toSet() }
             for (t in alvos) {
                 if (!carregarDoPardal(pardal, t)) continue
@@ -175,6 +185,19 @@ class PerigoRepositorio(
                     aguardandoRede.remove(t)
                 }
             }
+        }
+    }
+
+    /** Reserva: o Pardal mesmo vencido, se a UF está em disco. true = o quadrado foi carregado dele. */
+    private suspend fun reservaDoPardal(tile: TileId): Boolean {
+        val pardal = local?.takeIf { pardalAtivo() } ?: return false
+        return try {
+            withContext(io) { guardar(tile, QuadradoEmCache(agora(), pardal.buscar(tile)), doPardal = true) }
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -212,12 +235,17 @@ class PerigoRepositorio(
                 var q = synchronized(lock) { carregados[tile] }
                 if (q == null) {
                     q = withContext(io) { cache.ler(tile) }
+                    // Se o Pardal assumiu o quadrado enquanto o cache era lido, o cache do Overpass não sobrescreve.
                     if (q != null) guardar(tile, q)
                 }
                 if (q != null && q.valido(agora())) continue
+                // Quadrado do Pardal que venceu (30 dias) e não é mais coberto: o Overpass pode substituí-lo.
+                synchronized(lock) { deLocal -= tile }
                 // Falta ou venceu: só vai à rede fora do recuo de falha.
                 if (agora() < bloqueadoAte) {
-                    // Em recuo: não descarta; guarda na ordem e retoma sozinho quando o recuo acabar.
+                    // Em recuo: não descarta; guarda na ordem e retoma sozinho quando o recuo acabar. Sem nada em memória,
+                    // o Pardal vencido serve de reserva enquanto isso.
+                    if (q == null && reservaDoPardal(tile)) continue
                     synchronized(lock) { aguardandoRede += tile }
                     agendarRetomada()
                     continue
@@ -242,6 +270,7 @@ class PerigoRepositorio(
                     // Nada vai para o cache; o recuo vale o maior entre o exponencial e o Retry-After do servidor.
                     falhasSeguidas++
                     bloqueadoAte = agora() + maxOf(recuoMs(falhasSeguidas), (e as? HttpFailure)?.retryAfterMs ?: 0L)
+                    if (q == null) reservaDoPardal(tile)
                 }
             }
         } catch (e: Throwable) {
@@ -269,8 +298,13 @@ class PerigoRepositorio(
         }
     }
 
-    private fun guardar(tile: TileId, q: QuadradoEmCache, doPardal: Boolean = false) {
+    /**
+     * Põe o quadrado em memória. Conteúdo que NÃO é do Pardal não sobrescreve um quadrado que o Pardal assumiu (corrida entre a
+     * leitura do cache/Overpass e a chegada do Pardal). Devolve false se foi ignorado por isso.
+     */
+    private fun guardar(tile: TileId, q: QuadradoEmCache, doPardal: Boolean = false): Boolean {
         val lista = synchronized(lock) {
+            if (!doPardal && tile in deLocal && carregados[tile]?.valido(agora()) == true) return false
             carregados.remove(tile)
             carregados[tile] = q
             if (doPardal) deLocal += tile else deLocal -= tile
@@ -285,6 +319,11 @@ class PerigoRepositorio(
             carregados.values.flatMap { it.perigos }.distinctBy { it.id }
         }
         _perigos.value = lista
+        return true
+    }
+
+    private fun publicar() {
+        _perigos.value = synchronized(lock) { carregados.values.flatMap { it.perigos }.distinctBy { it.id } }
     }
 
     companion object {

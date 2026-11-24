@@ -22,6 +22,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +36,10 @@ import app.hunter.app.perigos.PardalFormato
 import app.hunter.app.perigos.PardalGraph
 import app.hunter.app.perigos.PerigoPrefs
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+private const val CATALOGO_PRAZO_MS = 35_000L
 
 /** Perfil > Avisos na estrada > "Dados de radares" (Pardal): interruptores, estados baixados, atualizar, escolher estados e atribuição. */
 @Composable
@@ -46,7 +51,7 @@ fun SecaoDadosRadares() {
     if (status == null || gatilho == null) return
     var ativo by remember { mutableStateOf(PerigoPrefs.pardalAtivo(prefs)) }
     var soWifi by remember { mutableStateOf(PerigoPrefs.pardalSoWifi(prefs)) }
-    var escolhendo by remember { mutableStateOf(false) }
+    var escolhendo by rememberSaveable { mutableStateOf(false) }
     val ufs by status.ufs.collectAsStateWithLifecycle()
     val agora = System.currentTimeMillis()
     val lista = PardalFormato.ordenar(ufs.values)
@@ -62,7 +67,7 @@ fun SecaoDadosRadares() {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = ativo, onCheckedChange = { ativo = it; PerigoPrefs.gravarPardalAtivo(prefs, it) })
+            Switch(checked = ativo, onCheckedChange = { ativo = it; PerigoPrefs.gravarPardalAtivo(prefs, it); PardalGraph.aoMudarAtivo() })
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -80,6 +85,7 @@ fun SecaoDadosRadares() {
             lista.forEach {
                 Text(PardalFormato.linhaUf(it, agora), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
             }
+            Text(PardalFormato.espacoUsado(lista), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         val paraAtualizar = PardalFormato.ufsParaAtualizar(lista)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -107,9 +113,11 @@ private fun EscolherEstadosDialogo(onFechar: () -> Unit) {
     val ufs by status.ufs.collectAsStateWithLifecycle()
     var catalogo by remember { mutableStateOf(atu.ufsDoCatalogo()) }
     var carregando by remember { mutableStateOf(catalogo.isEmpty()) }
+    val escopo = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         if (catalogo.isEmpty()) {
-            withContext(Dispatchers.IO) { atu.carregarCatalogo() }
+            // O catálogo usa trava própria (não espera um download de zip) e tem prazo: sem resposta, mostra "indisponível".
+            withTimeoutOrNull(CATALOGO_PRAZO_MS) { atu.carregarCatalogo() }
             catalogo = atu.ufsDoCatalogo()
             carregando = false
         }
@@ -131,7 +139,9 @@ private fun EscolherEstadosDialogo(onFechar: () -> Unit) {
                             Checkbox(
                                 checked = baixado || s?.baixando == true,
                                 enabled = s?.baixando != true,
-                                onCheckedChange = { marcar -> if (marcar) gatilho.baixarAgora(uf) else PardalGraph.remover(uf) },
+                                onCheckedChange = { marcar ->
+                                    if (marcar) gatilho.baixarAgora(uf) else escopo.launch(Dispatchers.IO) { PardalGraph.remover(uf) }
+                                },
                             )
                             Text(
                                 if (s?.baixando == true) "$uf (baixando…)" else uf,

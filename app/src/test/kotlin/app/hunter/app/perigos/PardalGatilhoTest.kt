@@ -33,6 +33,8 @@ class PardalGatilhoTest {
         var maxSimultaneas = 0
         var resultado: (String) -> ResultadoPardal = { ResultadoPardal.Atualizada(it, 10) }
         var catalogosBaixados = 0
+        /** Troca a escolha de UFs do ponto (fronteira: várias UFs). */
+        var ufsDoPonto: ((Double) -> List<String>)? = null
     }
 
     private fun rota() = Route(listOf(LatLon(-8.0, -35.0), LatLon(-23.5, -46.6)), emptyList(), 1.0, 1.0, false, false, RouteProfile.FASTEST)
@@ -42,7 +44,9 @@ class PardalGatilhoTest {
         ativo = { a.ativo },
         permitirDadosMoveis = { a.moveis },
         emWifi = { a.wifi },
-        ufDoPonto = { lat, _ -> if (!a.catalogo) null else if (lat > -10) "PE" else "SP" },
+        ufDoPonto = { lat, _ ->
+            if (!a.catalogo) emptyList() else a.ufsDoPonto?.invoke(lat) ?: if (lat > -10) listOf("PE") else listOf("SP")
+        },
         ufsDaRota = { listOf("PE", "SP") },
         catalogoCarregado = { a.catalogo },
         carregarCatalogo = { a.catalogosBaixados++; a.catalogo = true; true },
@@ -113,19 +117,112 @@ class PardalGatilhoTest {
         assertEquals(1, a.maxSimultaneas)
     }
 
-    @Test fun `fora do Wi-Fi o pedido de dados moveis fica guardado e nao baixa sozinho`() = runTest {
+    @Test fun `acao manual fora do Wi-Fi guarda o pedido e so baixa depois de confirmar`() = runTest {
         val a = Ambiente()
         a.resultado = { ResultadoPardal.PrecisaConfirmarDadosMoveis(40_000_000L) }
         val g = gatilho(a)
-        g.aoPosicao(-8.05, -34.95)
+        g.baixarAgora("PE")
         advanceUntilIdle()
-        assertEquals(PardalPedidoDadosMoveis("PE", 40_000_000L), g.pedido.value)
+        assertEquals(PardalPedidoDadosMoveis(listOf("PE"), 40_000_000L), g.pedido.value)
         assertEquals(listOf("PE" to false), a.chamadas)
         a.resultado = { ResultadoPardal.Atualizada(it, 5) }
         g.confirmarDadosMoveis()
         advanceUntilIdle()
         assertNull(g.pedido.value)
         assertEquals(listOf("PE" to false, "PE" to true), a.chamadas)
+    }
+
+    @Test fun `pedido de dados moveis guarda a lista de UFs com a soma dos bytes e confirmar baixa todas`() = runTest {
+        val a = Ambiente()
+        a.resultado = { ResultadoPardal.PrecisaConfirmarDadosMoveis(if (it == "PE") 10_000_000L else 30_000_000L) }
+        val g = gatilho(a)
+        g.baixarAgora("PE")
+        g.baixarAgora("SP")
+        advanceUntilIdle()
+        assertEquals(PardalPedidoDadosMoveis(listOf("PE", "SP"), 40_000_000L), g.pedido.value)
+        a.resultado = { ResultadoPardal.Atualizada(it, 5) }
+        a.chamadas.clear()
+        g.confirmarDadosMoveis()
+        advanceUntilIdle()
+        assertNull(g.pedido.value)
+        assertEquals(setOf("PE" to true, "SP" to true), a.chamadas.toSet())
+        assertEquals(2, a.chamadas.size)
+    }
+
+    @Test fun `tamanho desconhecido de uma UF nao apaga o das outras`() = runTest {
+        val a = Ambiente()
+        a.resultado = { ResultadoPardal.PrecisaConfirmarDadosMoveis(if (it == "PE") null else 5_000_000L) }
+        val g = gatilho(a)
+        g.baixarAgora("PE"); g.baixarAgora("SP")
+        advanceUntilIdle()
+        assertEquals(5_000_000L, g.pedido.value!!.bytes)
+    }
+
+    @Test fun `gatilho automatico fora do Wi-Fi com so Wi-Fi nao pergunta nem chama o atualizador`() = runTest {
+        val a = Ambiente().apply { wifi = false }
+        val g = gatilho(a)
+        g.aoPosicao(-8.05, -34.95)
+        g.aoRota(rota())
+        advanceUntilIdle()
+        assertTrue(a.chamadas.isEmpty())
+        assertNull(g.pedido.value)
+    }
+
+    @Test fun `o Wi-Fi que volta e aproveitado no proximo quadrado, sem esperar uma hora`() = runTest {
+        val a = Ambiente().apply { wifi = false }
+        val g = gatilho(a)
+        g.aoPosicao(-8.05, -34.95)
+        advanceUntilIdle()
+        assertTrue(a.chamadas.isEmpty())
+        a.wifi = true
+        g.aoPosicao(-8.25, -34.95)
+        advanceUntilIdle()
+        assertEquals(listOf("PE" to false), a.chamadas)
+    }
+
+    @Test fun `reverifica a UF atual quando o quadrado muda depois de uma hora`() = runTest {
+        val a = Ambiente()
+        a.resultado = { ResultadoPardal.Falhou("sem rede") }
+        val g = gatilho(a)
+        g.aoPosicao(-8.05, -34.95)
+        advanceUntilIdle()
+        assertEquals(1, a.chamadas.size)
+        // Mesma UF, outro quadrado, dentro da hora: nada.
+        g.aoPosicao(-8.25, -34.95)
+        advanceUntilIdle()
+        assertEquals(1, a.chamadas.size)
+        // Passada a hora, mesmo sem trocar de UF, tenta de novo.
+        advanceTimeBy(3_600_001)
+        g.aoPosicao(-8.45, -34.95)
+        advanceUntilIdle()
+        assertEquals(2, a.chamadas.size)
+    }
+
+    @Test fun `fronteira baixa todas as UFs cujo bbox contem a posicao`() = runTest {
+        val a = Ambiente().apply { ufsDoPonto = { listOf("MG", "SP") } }
+        val g = gatilho(a)
+        g.aoPosicao(-22.23, -45.94)
+        advanceUntilIdle()
+        assertEquals(listOf("MG", "SP"), a.chamadas.map { it.first })
+    }
+
+    @Test fun `toque repetido em Atualizar agora nao duplica e a UF aparece baixando na hora`() = runTest {
+        val dir = java.nio.file.Files.createTempDirectory("pardal-status2").toFile()
+        try {
+            val st = PardalStatus(app.hunter.nav.perigos.PardalArmazenamento(dir), agora = { base })
+            val a = Ambiente()
+            val g = gatilho(a, st)
+            g.baixarAgora("PE")
+            assertEquals(true, st.ufs.value["PE"]?.baixando) // antes mesmo de a coroutine rodar
+            g.baixarAgora("PE")
+            g.baixarAgora("PE")
+            advanceUntilIdle()
+            assertEquals(1, a.chamadas.size)
+            assertTrue(st.ufs.value["PE"]?.baixando != true)
+            g.baixarAgora("PE") // depois de terminar, pode de novo
+            advanceUntilIdle()
+            assertEquals(2, a.chamadas.size)
+        } finally { dir.deleteRecursively() }
     }
 
     @Test fun `preferencia de dados moveis liberada e repassada ao atualizador`() = runTest {

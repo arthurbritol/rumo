@@ -38,8 +38,10 @@ class PerigoRepositorioPardalTest {
     @AfterTest fun limpar() { dir.deleteRecursively() }
 
     // Bbox padrão cobre o Recife (-8.05, -34.95) e arredores.
-    private fun gravarUf(arm: PardalArmazenamento, uf: String, em: Long, pontos: List<PerigoPonto>, bbox: List<Double> = listOf(-9.0, -36.0, -7.0, -34.0)) =
+    private fun gravarUf(arm: PardalArmazenamento, uf: String, em: Long, pontos: List<PerigoPonto>, bbox: List<Double> = listOf(-9.0, -36.0, -7.0, -34.0)) {
+        arm.gravarBboxes(arm.lerBboxes() + (uf to bbox)) // o catálogo (bbox de todas as UFs) é o que diz ao Pardal o que cobre
         arm.gravar(PardalMeta(uf, "2026-11-23T09:21:49Z", mapOf("radares.csv" to "x"), em, mapOf("radares.csv" to pontos.size), bbox), pontos)
+    }
 
     private fun ponto(id: String, lat: Double, lon: Double) = PerigoPonto(id, Perigo.RADAR, lat, lon, 60, null, true)
 
@@ -176,5 +178,100 @@ class PerigoRepositorioPardalTest {
         r.aoMudarPosicao(-8.45, -35.45, amplo = true)
         advanceUntilIdle()
         assertEquals(9, r.quadradosEmMemoria())
+    }
+
+    private class FonteQueFalha : PerigoSource {
+        var chamadas = 0
+        override suspend fun buscar(tile: TileId): List<PerigoPonto> { chamadas++; throw IOException("sem rede") }
+    }
+
+    @Test fun `Pardal vencido serve de reserva quando o Overpass falha e nao ha cache`() = runTest {
+        val arm = PardalArmazenamento(dir)
+        gravarUf(arm, "PE", base - 15L * 24 * 3600 * 1000, listOf(ponto("pA", -8.05, -34.95)))
+        val src = FonteQueFalha()
+        val r = montar(src, MemCache(), pardal(arm))
+        r.aoMudarPosicao(-8.05, -34.95, amplo = false)
+        advanceUntilIdle()
+        assertEquals(1, src.chamadas)
+        assertEquals(listOf("pA"), r.perigos.value.map { it.id })
+    }
+
+    @Test fun `Pardal vencido serve de reserva tambem com o Overpass em recuo`() = runTest {
+        val arm = PardalArmazenamento(dir)
+        gravarUf(arm, "PE", base - 15L * 24 * 3600 * 1000, listOf(ponto("pA", -8.05, -34.95)))
+        val src = FonteQueFalha()
+        val r = montar(src, MemCache(), pardal(arm))
+        r.aoMudarPosicao(-8.05, -34.95, amplo = true) // o 1º quadrado falha e liga o recuo; os outros 8 cairiam em espera
+        advanceUntilIdle()
+        assertEquals(1, src.chamadas)
+        assertEquals(9, r.quadradosEmMemoria())
+        assertTrue(r.perigos.value.any { it.id == "pA" })
+    }
+
+    @Test fun `sem Pardal em disco e com o Overpass falhando nada aparece`() = runTest {
+        val arm = PardalArmazenamento(dir)
+        val r = montar(FonteQueFalha(), MemCache(), pardal(arm))
+        r.aoMudarPosicao(-8.05, -34.95, amplo = false)
+        advanceUntilIdle()
+        assertTrue(r.perigos.value.isEmpty())
+    }
+
+    @Test fun `desligar o Pardal troca os quadrados em memoria pelo caminho do Overpass`() = runTest {
+        val arm = PardalArmazenamento(dir)
+        gravarUf(arm, "PE", base, listOf(ponto("pA", -8.05, -34.95)))
+        var ativo = true
+        val r = montar(FonteOverpass(), MemCache(), pardal(arm), ativo = { ativo })
+        r.aoMudarPosicao(-8.05, -34.95, amplo = false)
+        advanceUntilIdle()
+        assertEquals(listOf("pA"), r.perigos.value.map { it.id })
+        ativo = false
+        r.aoPardalAtualizado()
+        advanceUntilIdle()
+        assertTrue(r.perigos.value.none { it.id == "pA" })
+        assertTrue(r.perigos.value.single().id.startsWith("o"))
+        assertTrue(r.ocioso())
+        // Ligar de novo: volta para o Pardal.
+        ativo = true
+        r.aoPardalAtualizado()
+        advanceUntilIdle()
+        assertEquals(listOf("pA"), r.perigos.value.map { it.id })
+    }
+
+    @Test fun `remover a UF tira os quadrados do Pardal e recarrega pelo caminho antigo`() = runTest {
+        val arm = PardalArmazenamento(dir)
+        gravarUf(arm, "PE", base, listOf(ponto("pA", -8.05, -34.95)))
+        val local = pardal(arm)
+        val src = FonteOverpass()
+        val r = montar(src, MemCache(), local)
+        r.aoMudarPosicao(-8.05, -34.95, amplo = false)
+        advanceUntilIdle()
+        assertEquals(listOf("pA"), r.perigos.value.map { it.id })
+        arm.remover("PE")
+        local.invalidar("PE")
+        r.aoPardalAtualizado()
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size)
+        assertTrue(r.perigos.value.none { it.id == "pA" })
+        assertTrue(r.perigos.value.single().id.startsWith("o"))
+    }
+
+    @Test fun `fronteira so com SP baixado vai ao Overpass e com SP e MG usa o Pardal`() = runTest {
+        val arm = PardalArmazenamento(dir)
+        val bboxSP = listOf(-25.31, -53.11, -19.78, -44.16)
+        val bboxMG = listOf(-22.92, -51.05, -14.23, -39.86)
+        arm.gravarBboxes(mapOf("SP" to bboxSP, "MG" to bboxMG))
+        gravarUf(arm, "SP", base, listOf(ponto("pS", -22.2, -45.9)), bboxSP)
+        val src = FonteOverpass()
+        val local = pardal(arm)
+        val r = montar(src, MemCache(), local)
+        r.aoMudarPosicao(-22.23, -45.94, amplo = false) // Pouso Alegre (MG)
+        advanceUntilIdle()
+        assertEquals(1, src.buscados.size)
+        gravarUf(arm, "MG", base + currentTime, listOf(ponto("pM", -22.23, -45.94)), bboxMG)
+        local.invalidar("MG")
+        r.aoPardalAtualizado()
+        advanceUntilIdle()
+        assertTrue(r.perigos.value.any { it.id == "pM" })
+        assertTrue(r.perigos.value.none { it.id.startsWith("o") })
     }
 }

@@ -110,7 +110,8 @@ class PardalCsvTest {
 
             -26.0,-48.5,FIXED
         """.trimIndent()
-        assertEquals(listOf(-25.0, -26.0), PardalCsv.radares(csv).map { it.lat })
+        // A linha curta "-26.0,-48.5,FIXED" tem menos campos que o cabeçalho: descartada.
+        assertEquals(listOf(-25.0), PardalCsv.radares(csv).map { it.lat })
     }
 
     @Test
@@ -138,5 +139,38 @@ class PardalCsvTest {
     fun `id estavel com seis casas e sem repeticao`() {
         val r = PardalCsv.lombadas("lat,lng,kind\n-25.1,-48.5,BUMP\n-25.100000,-48.500000,BUMP\n")
         assertEquals(listOf("pBUMP:-25.100000,-48.500000"), r.map { it.id })
+    }
+
+    @Test
+    fun `linha com numero de campos diferente do cabecalho e descartada`() {
+        val csv = """
+            lat,lng,kind,limit_kmh,source,active,end_lat,end_lng,direction_deg
+            -23.100000,-46.200000,FIXED,60,PRF,1,,,90
+            -23.200000,-46.200000,FIXED,60,PRF,1,,
+            -23.300000,-46.200000,FIXED,60,PRF,1,,,90,extra
+            -23.400000,-46.200000,FIXED,60,PRF,1,,,
+        """.trimIndent()
+        assertEquals(listOf(-23.1, -23.4), PardalCsv.radares(csv).map { it.lat })
+    }
+
+    @Test
+    fun `radar de trecho sem direction_deg deriva o sentido do rumo entrada para fim`() {
+        val csv = """
+            lat,lng,kind,limit_kmh,source,active,end_lat,end_lng,direction_deg
+            -23.000000,-46.000000,SECTION,80,PRF,1,-23.000000,-45.900000,
+            -23.000000,-46.000000,FIXED,60,PRF,1,-23.000000,-45.900000,
+            -22.900000,-46.000000,SECTION,80,PRF,1,-22.900000,-46.000000,
+            -22.800000,-46.000000,SECTION,80,PRF,1,-22.700000,-46.000000,45
+        """.trimIndent()
+        val r = PardalCsv.radares(csv)
+        val leste = r[0]
+        assertTrue(leste.sentido)
+        assertEquals(90.0, leste.direcaoGraus!!, 0.5)
+        // Radar fixo não deriva nada; trecho sem fim distinto também não.
+        assertEquals(null, r[1].direcaoGraus)
+        assertTrue(!r[1].sentido)
+        assertEquals(null, r[2].direcaoGraus)
+        // Com direction_deg na fonte, vale o da fonte.
+        assertEquals(45.0, r[3].direcaoGraus)
     }
 }

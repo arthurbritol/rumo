@@ -49,6 +49,8 @@ object PerigosAdiante {
     private const val EIXO_MAX_DIF = 60.0
     /** Ponto com [PerigoPonto.sentido] (Pardal): só vale se o rumo de quem anda está a até 60º do rumo fiscalizado. */
     const val SENTIDO_PARDAL_MAX_DIF = 60.0
+    /** Radar de trecho: o sentido pode ser o rumo médio entrada→fim (não o da via no ponto), então a folga é maior. */
+    const val SENTIDO_TRECHO_MAX_DIF = 100.0
 
     /**
      * Perigos adiante, do mais perto ao mais longe.
@@ -190,7 +192,7 @@ object PerigosAdiante {
         val dir = p.direcaoGraus ?: return true
         val rumo = rumoViaGraus ?: return true
         val dif = difAngular(rumo, dir)
-        if (p.sentido) return dif <= SENTIDO_PARDAL_MAX_DIF
+        if (p.sentido) return dif <= (if (p.tipo == Perigo.RADAR_DE_TRECHO) SENTIDO_TRECHO_MAX_DIF else SENTIDO_PARDAL_MAX_DIF)
         return if (p.tipo.soEixo) min(dif, 180.0 - dif) <= EIXO_MAX_DIF else dif <= SENTIDO_MAX_DIF
     }
 
