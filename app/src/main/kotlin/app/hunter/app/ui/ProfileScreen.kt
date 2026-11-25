@@ -96,6 +96,10 @@ fun ProfileRoute(
     /** Avisos de radar, lombada e travessia ligados; nulo esconde a seção. */
     avisosPerigo: Set<CategoriaPerigo>? = null,
     onAvisoPerigoChange: (CategoriaPerigo, Boolean) -> Unit = { _, _ -> },
+    /** Veículos e o ativo (linha "Veículo ativo" que abre a lista para trocar). */
+    veiculos: List<app.hunter.model.Veiculo> = emptyList(),
+    veiculoAtivo: app.hunter.model.Veiculo? = null,
+    onEscolherVeiculo: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val versionName = remember {
@@ -156,6 +160,9 @@ fun ProfileRoute(
         onSearchableChange = onSearchableChange,
         avisosPerigo = avisosPerigo,
         onAvisoPerigoChange = onAvisoPerigoChange,
+        veiculos = veiculos,
+        veiculoAtivo = veiculoAtivo,
+        onEscolherVeiculo = onEscolherVeiculo,
     )
 }
 
@@ -230,6 +237,9 @@ fun ProfileScreen(
     avisosPerigo: Set<CategoriaPerigo>? = null,
     onAvisoPerigoChange: (CategoriaPerigo, Boolean) -> Unit = { _, _ -> },
     profile: UserProfile? = null,
+    veiculos: List<app.hunter.model.Veiculo> = emptyList(),
+    veiculoAtivo: app.hunter.model.Veiculo? = null,
+    onEscolherVeiculo: (String) -> Unit = {},
 ) {
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -434,6 +444,8 @@ fun ProfileScreen(
                 )
             }
         }
+
+        VeiculoAtivoLinha(veiculos = veiculos, ativo = veiculoAtivo, onEscolher = onEscolherVeiculo)
 
         // 3. Seção: Dados da Moto
         HCard {

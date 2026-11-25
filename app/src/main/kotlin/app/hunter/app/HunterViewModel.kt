@@ -501,6 +501,28 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     /** Veículo ativo: abastecimentos, manutenção, hodômetro e autonomia são sempre dele. */
     private val veiculoAtivoId: StateFlow<String?> = hunter.veiculos.veiculoAtivo.map { it?.id }.distinctUntilChanged().hot(null)
 
+    /** Veículos da conta (não removidos) e o ativo: a Garagem e o Perfil listam e trocam por aqui. */
+    val veiculos: StateFlow<List<app.hunter.model.Veiculo>> = hunter.veiculos.veiculos.hot(emptyList())
+    val veiculoAtivo: StateFlow<app.hunter.model.Veiculo?> = hunter.veiculos.veiculoAtivo
+
+    fun definirVeiculoAtivo(id: String) = viewModelScope.launch { hunter.veiculos.definirAtivo(id) }
+
+    /** Cadastra o veículo do formulário (já validado) e o torna o ativo. */
+    fun adicionarVeiculo(f: app.hunter.app.veiculo.VeiculoForm) = viewModelScope.launch {
+        val v = f.paraVeiculo(id = "", criadoEm = 0L)
+        hunter.veiculos.adicionar(
+            tipo = v.tipo, apelido = v.apelido, marca = v.marca, modelo = v.modelo, ano = v.ano,
+            tanqueLitros = v.tanqueLitros, tornarAtivo = true,
+        )
+    }
+
+    fun editarVeiculo(base: app.hunter.model.Veiculo, f: app.hunter.app.veiculo.VeiculoForm) = viewModelScope.launch {
+        hunter.veiculos.editar(f.paraVeiculo(base.id, base.criadoEm, base))
+    }
+
+    /** Remoção lógica: os registros do veículo ficam guardados. */
+    fun removerVeiculo(id: String) = viewModelScope.launch { hunter.veiculos.remover(id) }
+
     val fuelups: StateFlow<List<Fuelup>> = veiculoAtivoId
         .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else dao.observeFuelups(id) }
         .map { l -> l.map { it.toModel() } }.hot(emptyList())

@@ -21,7 +21,7 @@ import app.hunter.sync.Step
  * para a MainActivity): [signedIn] e [flow] vêm de fora; cada tela de passo é um slot.
  *
  * [initialStep]: use `flow.reopenIntro()` para reabrir a apresentação pelo menu de ajuda (com [flow] visto).
- * [hasBikeInAccount] é lido a cada transição: Task 13 deve devolver o valor atual depois da primeira sincronização.
+ * [hasVehicleInAccount] é lido a cada transição: Task 13 deve devolver o valor atual depois da primeira sincronização.
  *
  * Ao chegar em DONE grava a preferência e chama [onFinished]. [login] recebe `onSkip` (Pular o login) e
  * `onDone` (conta pronta; a tela de login chama quando quiser, p.ex. depois do aviso de e-mail de confirmação).
@@ -30,7 +30,7 @@ import app.hunter.sync.Step
 fun OnboardingScreen(
     flow: OnboardingFlow,
     signedIn: Boolean,
-    hasBikeInAccount: () -> Boolean,
+    hasVehicleInAccount: () -> Boolean,
     prefs: OnboardingPrefs,
     onFinished: () -> Unit,
     login: @Composable (onSkip: () -> Unit, onDone: () -> Unit) -> Unit,
@@ -43,7 +43,7 @@ fun OnboardingScreen(
     var skippedLogin by rememberSaveable { mutableStateOf(false) }
     val currentFlow by rememberUpdatedState(flow)
     val currentSignedIn by rememberUpdatedState(signedIn)
-    val currentHasBike by rememberUpdatedState(hasBikeInAccount)
+    val currentHasBike by rememberUpdatedState(hasVehicleInAccount)
     val finish by rememberUpdatedState(onFinished)
 
     fun advance() {

@@ -20,43 +20,43 @@ class OnboardingFlowTest {
 
     @Test
     fun `Pular na apresentação vai ao login`() {
-        assertEquals(Step.LOGIN, flow().next(Step.INTRO, signedIn = false, skippedLogin = false, hasBikeInAccount = false))
+        assertEquals(Step.LOGIN, flow().next(Step.INTRO, signedIn = false, skippedLogin = false, hasVehicleInAccount = false))
     }
 
     @Test
     fun `Pular o login vai às permissões e depois ao cadastro curto`() {
         val f = flow()
-        assertEquals(Step.PERMISSIONS, f.next(Step.LOGIN, signedIn = false, skippedLogin = true, hasBikeInAccount = false))
-        assertEquals(Step.BIKE, f.next(Step.PERMISSIONS, signedIn = false, skippedLogin = true, hasBikeInAccount = false))
+        assertEquals(Step.PERMISSIONS, f.next(Step.LOGIN, signedIn = false, skippedLogin = true, hasVehicleInAccount = false))
+        assertEquals(Step.BIKE, f.next(Step.PERMISSIONS, signedIn = false, skippedLogin = true, hasVehicleInAccount = false))
         assertTrue(f.shortBike(signedIn = false))
-        assertEquals(Step.DONE, f.next(Step.BIKE, signedIn = false, skippedLogin = true, hasBikeInAccount = false))
+        assertEquals(Step.DONE, f.next(Step.BIKE, signedIn = false, skippedLogin = true, hasVehicleInAccount = false))
     }
 
     @Test
     fun `login com conta que já tem moto pula o cadastro`() {
         val f = flow()
-        assertEquals(Step.PERMISSIONS, f.next(Step.LOGIN, signedIn = true, skippedLogin = false, hasBikeInAccount = false))
-        assertEquals(Step.DONE, f.next(Step.PERMISSIONS, signedIn = true, skippedLogin = false, hasBikeInAccount = true))
+        assertEquals(Step.PERMISSIONS, f.next(Step.LOGIN, signedIn = true, skippedLogin = false, hasVehicleInAccount = false))
+        assertEquals(Step.DONE, f.next(Step.PERMISSIONS, signedIn = true, skippedLogin = false, hasVehicleInAccount = true))
     }
 
     @Test
     fun `a moto da conta vale no momento da transição, não na construção`() {
         val f = flow()
         // Logo após o login o perfil ainda não chegou; ao sair das permissões já chegou.
-        assertEquals(Step.PERMISSIONS, f.next(Step.LOGIN, signedIn = true, skippedLogin = false, hasBikeInAccount = false))
-        assertEquals(Step.DONE, f.next(Step.PERMISSIONS, signedIn = true, skippedLogin = false, hasBikeInAccount = true))
+        assertEquals(Step.PERMISSIONS, f.next(Step.LOGIN, signedIn = true, skippedLogin = false, hasVehicleInAccount = false))
+        assertEquals(Step.DONE, f.next(Step.PERMISSIONS, signedIn = true, skippedLogin = false, hasVehicleInAccount = true))
     }
 
     @Test
     fun `login sem moto leva ao cadastro completo`() {
         val f = flow()
-        assertEquals(Step.BIKE, f.next(Step.PERMISSIONS, signedIn = true, skippedLogin = false, hasBikeInAccount = false))
+        assertEquals(Step.BIKE, f.next(Step.PERMISSIONS, signedIn = true, skippedLogin = false, hasVehicleInAccount = false))
         assertFalse(f.shortBike(signedIn = true))
     }
 
     @Test
     fun `sem login nem pulo o login continua`() {
-        assertEquals(Step.LOGIN, flow().next(Step.LOGIN, signedIn = false, skippedLogin = false, hasBikeInAccount = false))
+        assertEquals(Step.LOGIN, flow().next(Step.LOGIN, signedIn = false, skippedLogin = false, hasVehicleInAccount = false))
     }
 
     @Test
@@ -65,18 +65,18 @@ class OnboardingFlowTest {
         assertEquals(Step.DONE, f.first()) // início normal: nada a mostrar
         val start = f.reopenIntro()
         assertEquals(Step.INTRO, start)
-        assertEquals(Step.DONE, f.next(start, signedIn = true, skippedLogin = false, hasBikeInAccount = true))
-        assertEquals(Step.DONE, f.next(start, signedIn = true, skippedLogin = false, hasBikeInAccount = false))
+        assertEquals(Step.DONE, f.next(start, signedIn = true, skippedLogin = false, hasVehicleInAccount = true))
+        assertEquals(Step.DONE, f.next(start, signedIn = true, skippedLogin = false, hasVehicleInAccount = false))
     }
 
     @Test
     fun `reabrir a apresentação como visitante também termina nela, sem login nem permissões nem moto`() {
         val f = flow(seen = true)
-        assertEquals(Step.DONE, f.next(f.reopenIntro(), signedIn = false, skippedLogin = false, hasBikeInAccount = false))
+        assertEquals(Step.DONE, f.next(f.reopenIntro(), signedIn = false, skippedLogin = false, hasVehicleInAccount = false))
     }
 
     @Test
     fun `primeira vez como visitante continua indo ao login`() {
-        assertEquals(Step.LOGIN, flow(seen = false).next(Step.INTRO, signedIn = false, skippedLogin = false, hasBikeInAccount = false))
+        assertEquals(Step.LOGIN, flow(seen = false).next(Step.INTRO, signedIn = false, skippedLogin = false, hasVehicleInAccount = false))
     }
 }

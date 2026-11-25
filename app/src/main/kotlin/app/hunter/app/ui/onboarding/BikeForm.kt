@@ -1,11 +1,12 @@
 package app.hunter.app.ui.onboarding
 
+import app.hunter.app.veiculo.RegrasVeiculo
 import app.hunter.maintenance.Odometer
+import app.hunter.model.TipoVeiculo
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.UserProfile
-import java.time.Year
 
-enum class FormField { NAME, BRAND, MODEL, YEAR, ODOMETER, TANK }
+enum class FormField { NAME, NICKNAME, BRAND, MODEL, YEAR, ODOMETER, TANK }
 
 data class FormError(val field: FormField, val message: String)
 
@@ -14,6 +15,9 @@ data class FormError(val field: FormField, val message: String)
  * e a validação acontecem em [validate], [toProfile] e [toOdometer]. Kotlin puro (testável na JVM).
  */
 class BikeForm(val short: Boolean) {
+    var tipo: TipoVeiculo = TipoVeiculo.MOTO
+        private set
+    var apelido: String = ""
     var brand: String = ""
     var model: String = ""
     var year: String = ""
@@ -23,11 +27,22 @@ class BikeForm(val short: Boolean) {
 
     private var tankEdited = false
 
-    /** Escolha de marca e modelo: sugere o tanque do modelo, a menos que o usuário já tenha editado. */
+    /** Troca o tipo (moto/carro): marca e modelo são do outro catálogo e limpam; o tanque volta ao padrão do tipo, se não editado. */
+    fun escolherTipo(novo: TipoVeiculo) {
+        if (novo == tipo) return
+        tipo = novo
+        brand = ""
+        model = ""
+        if (!tankEdited) tankLiters = formatLiters(RegrasVeiculo.tanquePadrao(novo))
+    }
+
+    /** Escolha de marca e modelo: sugere o tanque (moto pelo modelo; carro, padrão), a menos que o usuário já tenha editado. */
     fun selectBike(brand: String, model: String) {
         this.brand = brand
         this.model = model
-        if (!tankEdited) tankLiters = formatLiters(defaultTankLiters(brand, model))
+        if (!tankEdited) {
+            tankLiters = formatLiters(if (tipo == TipoVeiculo.MOTO) defaultTankLiters(brand, model) else RegrasVeiculo.tanquePadrao(tipo))
+        }
     }
 
     /** Edição manual do tanque: passa a valer sobre a sugestão do modelo. */
@@ -36,25 +51,19 @@ class BikeForm(val short: Boolean) {
         tankLiters = text
     }
 
-    fun validate(currentYear: Int = Year.now().value): List<FormError> = buildList {
+    /** [currentYear] ficou só por compatibilidade: o ano segue as regras do Firestore (1900 a 2100). */
+    @Suppress("UNUSED_PARAMETER")
+    fun validate(currentYear: Int = 0): List<FormError> = buildList {
+        RegrasVeiculo.erroApelido(apelido)?.let { add(FormError(FormField.NICKNAME, it)) }
         if (!short) {
-            if (brand.isBlank()) add(FormError(FormField.BRAND, "Escolha a marca."))
-            else if (brand.trim().length > MAX_TEXT) add(FormError(FormField.BRAND, "A marca deve ter no máximo $MAX_TEXT caracteres."))
-            if (model.isBlank()) add(FormError(FormField.MODEL, "Informe o modelo."))
-            else if (model.trim().length > MAX_TEXT) add(FormError(FormField.MODEL, "O modelo deve ter no máximo $MAX_TEXT caracteres."))
-            if (year.isNotBlank()) {
-                val y = year.trim().toIntOrNull()
-                if (y == null || y < MIN_YEAR || y > currentYear) {
-                    add(FormError(FormField.YEAR, "O ano deve estar entre $MIN_YEAR e $currentYear."))
-                }
-            }
+            RegrasVeiculo.erroMarca(brand)?.let { add(FormError(FormField.BRAND, it)) }
+            RegrasVeiculo.erroModelo(model)?.let { add(FormError(FormField.MODEL, it)) }
+            RegrasVeiculo.erroAno(year)?.let { add(FormError(FormField.YEAR, it)) }
         }
         val km = parseNumber(odometerKm)
         if (odometerKm.isBlank()) add(FormError(FormField.ODOMETER, "Informe os km do painel."))
         else if (km == null || km > MAX_KM) add(FormError(FormField.ODOMETER, "Km inválido. Use um número de 0 a 2.000.000."))
-        val tank = parseNumber(tankLiters)
-        if (tankLiters.isBlank()) add(FormError(FormField.TANK, "Informe a capacidade do tanque."))
-        else if (tank == null || tank <= 0 || tank > MAX_TANK_L) add(FormError(FormField.TANK, "Tanque inválido. Informe os litros, por exemplo 13."))
+        RegrasVeiculo.erroTanque(tankLiters, tipo)?.let { add(FormError(FormField.TANK, it)) }
     }
 
     /** No cadastro curto o perfil não leva marca, modelo nem ano. */
@@ -80,11 +89,9 @@ class BikeForm(val short: Boolean) {
         const val MIN_YEAR = 1950
 
         /** Limite de marca, modelo e nome (o mesmo das regras do Firestore). */
-        const val MAX_TEXT = 60
-        const val DEFAULT_TANK_L = 13.0
-        private const val MAX_TANK_L = 60.0
+        const val MAX_TEXT = RegrasVeiculo.TEXTO_MAX
+        const val DEFAULT_TANK_L = RegrasVeiculo.TANQUE_PADRAO_MOTO
         private const val MAX_KM = 2_000_000.0
-        private val NUMBER = Regex("""\d+([.,]\d+)?""")
 
         /** Capacidades aproximadas do tanque por modelo (L); o usuário pode ajustar. Sem o modelo na tabela, 13 L. */
         private val TANKS: Map<String, Double> = mapOf(
@@ -107,11 +114,8 @@ class BikeForm(val short: Boolean) {
 
         fun defaultTankLiters(brand: String, model: String): Double = TANKS[model] ?: DEFAULT_TANK_L
 
-        /** Aceita vírgula ou ponto decimal. */
-        private fun parseNumber(text: String): Double? =
-            text.trim().takeIf { NUMBER.matches(it) }?.replace(',', '.')?.toDoubleOrNull()?.takeIf { it.isFinite() }
+        private fun parseNumber(text: String): Double? = RegrasVeiculo.parseNumero(text)
 
-        fun formatLiters(l: Double): String =
-            if (l == Math.floor(l)) l.toInt().toString() else l.toString().replace('.', ',')
+        fun formatLiters(l: Double): String = RegrasVeiculo.formatarLitros(l)
     }
 }

@@ -102,6 +102,7 @@ import app.hunter.app.ui.TripsScreen
 import app.hunter.app.ui.UpdateBanner
 import app.hunter.app.ui.formatFriendElapsed
 import app.hunter.app.ui.onboarding.AppBikeSaver
+import app.hunter.app.veiculo.temVeiculo
 import app.hunter.app.ui.onboarding.BikeSetupScreen
 import app.hunter.app.ui.onboarding.EXISTING_USER_NOTICE_KEY
 import app.hunter.app.ui.onboarding.EntryRoute
@@ -180,8 +181,8 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
 
     val bikeSaver = remember { AppBikeSaver(app.maintenanceDao, app.tripDao, app.veiculos, prefs, account.scheduler::requestSync) }
     // Avaliado a cada transição, depois da primeira sincronização do login: o perfil vindo da conta já está gravado.
-    val hasBikeInAccount: () -> Boolean = {
-        ProfilePrefs.read(prefs)?.let { it.brand != null && it.model != null } == true
+    val hasVehicleInAccount: () -> Boolean = {
+        temVeiculo(app.veiculos.veiculoAtivo.value, ProfilePrefs.read(prefs))
     }
 
     @Composable
@@ -189,7 +190,7 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
         OnboardingScreen(
             flow = flow,
             signedIn = signedIn,
-            hasBikeInAccount = hasBikeInAccount,
+            hasVehicleInAccount = hasVehicleInAccount,
             prefs = onboardingPrefs,
             onFinished = onFinished,
             initialStep = initialStep,
@@ -261,6 +262,9 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             onSearchableChange = socialVm::answerSearchPrompt,
                             avisosPerigo = vmProvider().categoriasPerigo.collectAsStateWithLifecycle().value,
                             onAvisoPerigoChange = { c, on -> vmProvider().definirCategoriaPerigo(c, on) },
+                            veiculos = vmProvider().veiculos.collectAsStateWithLifecycle().value,
+                            veiculoAtivo = vmProvider().veiculoAtivo.collectAsStateWithLifecycle().value,
+                            onEscolherVeiculo = { vmProvider().definirVeiculoAtivo(it) },
                         )
                     }
                     BackHandler { overlay = Overlay.NONE.name }

@@ -58,7 +58,7 @@ import app.hunter.app.R
 import app.hunter.app.ReminderWorker
 import app.hunter.app.fuel.FuelPriceReference
 import app.hunter.app.fuel.PriceSource
-import app.hunter.app.sync.ProfilePrefs
+import app.hunter.app.veiculo.nomeExibicao
 import app.hunter.model.DueState
 import app.hunter.model.FuelMath
 import app.hunter.model.FuelSegment
@@ -100,10 +100,9 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                val p = ProfilePrefs.read(context.getSharedPreferences("app", 0))
-                val bikeModel = listOfNotNull(p?.brand, p?.model).joinToString(" ").ifEmpty { "Hunter 350" }
+                val veiculoAtivo by vm.veiculoAtivo.collectAsStateWithLifecycle()
                 Text(
-                    bikeModel,
+                    veiculoAtivo?.nomeExibicao() ?: "Sem veículo",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -155,6 +154,9 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
                 )
             }
         }
+
+        // Veículo ativo: o conteúdo da Garagem é sempre dele; toque para trocar, adicionar, editar ou remover.
+        SeletorDeVeiculoDaGaragem(vm)
 
         // 2. Cockpit Fixo Hero: Hodômetro em destaque
         HeroMetricCard(

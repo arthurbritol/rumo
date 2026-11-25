@@ -1,20 +1,17 @@
 package app.hunter.app.ui.onboarding
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,14 +30,14 @@ import androidx.compose.ui.unit.dp
 import app.hunter.app.ui.HunterTheme
 import app.hunter.app.ui.NumberField
 import app.hunter.app.ui.PrimaryButton
-import app.hunter.sync.BikeCatalog
+import app.hunter.app.ui.MarcaModeloCampos
+import app.hunter.app.ui.TipoVeiculoSelector
+import app.hunter.app.ui.VeiculoIcone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-private const val OTHER_MODEL = "Outro modelo…"
-
 /**
- * Cadastro da moto. [short] (sem conta): só km e tanque. [name] é o nome da conta, usado no perfil.
+ * Cadastro do veículo (moto ou carro). [short] (sem conta): só km e tanque. [name] é o nome da conta, usado no perfil.
  * Salva por [saver] e então chama [onDone]; "Preencher depois" chama [onDone] sem gravar nada.
  */
 @Composable
@@ -55,7 +52,6 @@ fun BikeSetupScreen(
     // BikeForm não é observável pelo Compose: cada mudança incrementa a versão para recompor.
     var version by remember { mutableIntStateOf(0) }
     var errors by remember { mutableStateOf<List<FormError>>(emptyList()) }
-    var customModel by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saveFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -71,49 +67,26 @@ fun BikeSetupScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("🏍", style = MaterialTheme.typography.displaySmall)
-        Text("Sua moto", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        VeiculoIcone(form.tipo, Modifier.size(40.dp), MaterialTheme.colorScheme.primary)
+        Text("Seu veículo", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
             if (short) "Informe os km do painel e o tanque para o hodômetro e a autonomia."
-            else "Com a moto cadastrada, o hodômetro e a autonomia já funcionam.",
+            else "Com o veículo cadastrado, o hodômetro e a autonomia já funcionam.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        TipoVeiculoSelector(form.tipo, { form.escolherTipo(it); changed() })
 
         if (!short) {
-            Picker(
-                label = "Marca", value = form.brand, options = BikeCatalog.brands.map { it.name },
-                error = errorOf(FormField.BRAND),
-            ) { picked ->
-                customModel = picked == "Outra"
-                form.selectBike(picked, "")
-                changed()
-            }
-            val models = BikeCatalog.models(form.brand)
-            if (form.brand.isNotEmpty()) {
-                if (models.isEmpty() || customModel) {
-                    OutlinedTextField(
-                        form.model, { form.selectBike(form.brand, it.take(BikeForm.MAX_TEXT)); changed() },
-                        label = { Text("Modelo") }, singleLine = true, isError = errorOf(FormField.MODEL) != null,
-                        supportingText = errorOf(FormField.MODEL)?.let { { Text(it) } },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    Picker(
-                        label = "Modelo", value = form.model, options = models + OTHER_MODEL,
-                        error = errorOf(FormField.MODEL),
-                    ) { picked ->
-                        if (picked == OTHER_MODEL) {
-                            customModel = true
-                            form.selectBike(form.brand, "")
-                        } else {
-                            form.selectBike(form.brand, picked)
-                        }
-                        changed()
-                    }
-                }
-            } else if (errorOf(FormField.MODEL) != null) {
-                Text(errorOf(FormField.MODEL)!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
+            OutlinedTextField(
+                form.apelido, { form.apelido = it.take(BikeForm.MAX_TEXT); changed() },
+                label = { Text("Apelido (opcional)") }, singleLine = true, isError = errorOf(FormField.NICKNAME) != null,
+                supportingText = errorOf(FormField.NICKNAME)?.let { { Text(it) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            MarcaModeloCampos(
+                tipo = form.tipo, marca = form.brand, modelo = form.model,
+                erroMarca = errorOf(FormField.BRAND), erroModelo = errorOf(FormField.MODEL),
+            ) { m, mo -> form.selectBike(m, mo); changed() }
             OutlinedTextField(
                 form.year, { form.year = it.filter(Char::isDigit).take(4); changed() },
                 label = { Text("Ano (opcional)") }, singleLine = true, isError = errorOf(FormField.YEAR) != null,
@@ -166,28 +139,6 @@ fun BikeSetupScreen(
 private fun FieldWithError(error: String?, field: @Composable () -> Unit) {
     Column {
         field()
-        if (error != null) {
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 16.dp, top = 2.dp))
-        }
-    }
-}
-
-/** Campo de escolha: botão que mostra o valor e abre um menu com as [options]. */
-@Composable
-private fun Picker(label: String, value: String, options: List<String>, error: String?, onPick: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Column {
-        Box {
-            OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text(if (value.isEmpty()) label else "$label: $value", modifier = Modifier.weight(1f))
-                Text("▾")
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                options.forEach { o ->
-                    DropdownMenuItem(text = { Text(o) }, onClick = { open = false; onPick(o) })
-                }
-            }
-        }
         if (error != null) {
             Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 16.dp, top = 2.dp))
         }

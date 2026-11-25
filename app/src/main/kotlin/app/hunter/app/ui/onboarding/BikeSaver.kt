@@ -16,6 +16,19 @@ interface BikeSaver {
     suspend fun save(form: BikeForm, name: String)
 }
 
+/** Mapeamento do formulário do onboarding para o [app.hunter.model.Veiculo] (puro, testável). */
+object BikeFormMapping {
+    /** Apelido digitado; no cadastro curto (sem marca nem modelo) um nome padrão do tipo, para a lista não ficar sem nome. */
+    fun apelido(form: BikeForm): String =
+        form.apelido.trim().ifEmpty { if (form.short) (if (form.tipo == TipoVeiculo.CARRO) "Meu carro" else "Minha moto") else "" }
+
+    /** Aplica tipo, marca, modelo e ano do formulário completo a um veículo existente; o apelido só muda se foi digitado. */
+    fun aplicar(v: app.hunter.model.Veiculo, form: BikeForm): app.hunter.model.Veiculo = v.copy(
+        tipo = form.tipo, marca = form.brand.trim(), modelo = form.model.trim(), ano = form.year.trim().toIntOrNull(),
+        apelido = form.apelido.trim().ifEmpty { v.apelido },
+    )
+}
+
 /** Monta o perfil a gravar a partir do formulário (puro, testável). */
 object BikeProfileMerge {
     const val MAX_NAME = 60
@@ -46,17 +59,22 @@ class AppBikeSaver(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : BikeSaver {
     override suspend fun save(form: BikeForm, name: String) {
-        // O cadastro é do veículo ativo; sem nenhum veículo (instalação nova) cria a moto do cadastro.
+        // O cadastro é do veículo ativo; sem nenhum veículo (instalação nova) cria o veículo do cadastro.
+        val tanque = form.toOdometer(clock(), 0.0).tankLiters
+        val criado = veiculos.ativoAgora() == null
         val ativo = veiculos.ativoAgora() ?: veiculos.adicionar(
-            tipo = TipoVeiculo.MOTO, apelido = "Minha moto",
+            tipo = form.tipo, apelido = BikeFormMapping.apelido(form),
             marca = if (form.short) "" else form.brand.trim(), modelo = if (form.short) "" else form.model.trim(),
             ano = if (form.short) null else form.year.trim().toIntOrNull(),
-            tanqueLitros = form.toOdometer(clock(), 0.0).tankLiters,
+            tanqueLitros = tanque,
         )
+        // Veículo já existente (migrado, sem marca/modelo): o cadastro completa os dados que o usuário digitou.
+        if (!criado && !form.short) veiculos.editar(BikeFormMapping.aplicar(ativo, form))
         val tripsM = tripDao.observeDistanceM(ativo.id).first()
         val doc = form.toOdometer(clock(), tripsM)
         dao.putOdometerRaw(OdometerEntity(ativo.id, doc.offsetKm, doc.tankLiters, doc.updatedAtMs, dirty = true))
-        if (ativo.tanqueLitros != doc.tankLiters) veiculos.editar(ativo.copy(tanqueLitros = doc.tankLiters))
+        val atual = veiculos.ativoAgora() ?: ativo
+        if (atual.tanqueLitros != doc.tankLiters) veiculos.editar(atual.copy(tanqueLitros = doc.tankLiters))
         if (!form.short) {
             val existing = ProfilePrefs.read(prefs)
             val voice = existing?.voice ?: prefs.getBoolean(ProfilePrefs.VOICE, true)

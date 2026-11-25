@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -101,6 +102,18 @@ class VeiculoRepositoryTest {
         assertEquals("v1", ativo.ler(), "a preferencia acompanha o veiculo que sobrou")
         assertNotNull(store.getVeiculo("v2")?.removidoEm, "remocao e logica: a linha continua")
         assertTrue(store.getVeiculo("v2")!!.dirty)
+    }
+
+    @Test
+    fun `remover um veiculo que nao e o ativo mantem o ativo e some da lista`() = runTest {
+        val r = repo()
+        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
+        advanceUntilIdle()
+        r.remover("v2")
+        advanceUntilIdle()
+        assertEquals("v1", r.veiculoAtivo.value?.id)
+        assertEquals(listOf("v1"), r.veiculos.first().map { it.id })
     }
 
     @Test
