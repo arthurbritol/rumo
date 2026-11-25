@@ -10,6 +10,9 @@ import app.hunter.sync.UserProfile
  */
 object ProfilePrefs {
     const val VOICE = "voice"
+
+    /** Veículo ativo; compartilhado com `VeiculoAtivoStore` (a escolha viaja no perfil). */
+    const val VEICULO_ATIVO = "veiculo_ativo_id"
     private const val NAME = "profile_name"
     private const val BRAND = "profile_brand"
     private const val MODEL = "profile_model"
@@ -28,6 +31,7 @@ object ProfilePrefs {
             model = p.getString(MODEL, null),
             year = if (p.contains(YEAR)) p.getInt(YEAR, 0) else null,
             voice = p.getBoolean(VOICE, true),
+            veiculoAtivoId = p.getString(VEICULO_ATIVO, null),
         )
     }
 
@@ -47,6 +51,8 @@ object ProfilePrefs {
             if (profile.model != null) putString(MODEL, profile.model) else remove(MODEL)
             profile.year?.let { putInt(YEAR, it) } ?: remove(YEAR)
             putBoolean(VOICE, profile.voice)
+            // Perfil sem veículo ativo (app antigo na nuvem) não apaga a escolha local.
+            profile.veiculoAtivoId?.let { putString(VEICULO_ATIVO, it) }
             putBoolean(DIRTY, dirty)
         }.commit()
     }
@@ -64,6 +70,6 @@ object ProfilePrefs {
     fun isDirty(p: SharedPreferences): Boolean = p.getBoolean(DIRTY, false) && p.contains(NAME)
 
     fun clear(p: SharedPreferences) {
-        p.edit().remove(NAME).remove(BRAND).remove(MODEL).remove(YEAR).remove(DIRTY).commit()
+        p.edit().remove(NAME).remove(BRAND).remove(MODEL).remove(YEAR).remove(VEICULO_ATIVO).remove(DIRTY).commit()
     }
 }

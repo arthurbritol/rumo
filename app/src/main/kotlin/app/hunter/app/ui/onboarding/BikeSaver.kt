@@ -5,6 +5,8 @@ import app.hunter.app.sync.ProfilePrefs
 import app.hunter.maintenance.data.MaintenanceDao
 import app.hunter.maintenance.data.OdometerEntity
 import app.hunter.sync.UserProfile
+import app.hunter.app.veiculo.VeiculoRepository
+import app.hunter.model.TipoVeiculo
 import app.hunter.trips.data.TripDao
 import kotlinx.coroutines.flow.first
 
@@ -38,14 +40,23 @@ object BikeProfileMerge {
 class AppBikeSaver(
     private val dao: MaintenanceDao,
     private val tripDao: TripDao,
+    private val veiculos: VeiculoRepository,
     private val prefs: SharedPreferences,
     private val requestSync: () -> Unit,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : BikeSaver {
     override suspend fun save(form: BikeForm, name: String) {
-        val tripsM = tripDao.observeTrips().first().sumOf { it.distanceM }
+        // O cadastro é do veículo ativo; sem nenhum veículo (instalação nova) cria a moto do cadastro.
+        val ativo = veiculos.ativoAgora() ?: veiculos.adicionar(
+            tipo = TipoVeiculo.MOTO, apelido = "Minha moto",
+            marca = if (form.short) "" else form.brand.trim(), modelo = if (form.short) "" else form.model.trim(),
+            ano = if (form.short) null else form.year.trim().toIntOrNull(),
+            tanqueLitros = form.toOdometer(clock(), 0.0).tankLiters,
+        )
+        val tripsM = tripDao.observeDistanceM(ativo.id).first()
         val doc = form.toOdometer(clock(), tripsM)
-        dao.putOdometerRaw(OdometerEntity(1, doc.offsetKm, doc.tankLiters, doc.updatedAtMs, dirty = true))
+        dao.putOdometerRaw(OdometerEntity(ativo.id, doc.offsetKm, doc.tankLiters, doc.updatedAtMs, dirty = true))
+        if (ativo.tanqueLitros != doc.tankLiters) veiculos.editar(ativo.copy(tanqueLitros = doc.tankLiters))
         if (!form.short) {
             val existing = ProfilePrefs.read(prefs)
             val voice = existing?.voice ?: prefs.getBoolean(ProfilePrefs.VOICE, true)

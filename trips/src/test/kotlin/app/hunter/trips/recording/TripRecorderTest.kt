@@ -43,6 +43,7 @@ private class FakeStore : TripStore {
     override suspend fun points(tripId: Long) = points[tripId].orEmpty().sortedBy { it.first }.map { it.second }
     override fun observeTrips(): Flow<List<TripSummary>> =
         MutableStateFlow(trips.map { TripSummary(it.id, it.startedAtMs, it.endedAtMs, it.stats) })
+    override fun observeDistanceM(veiculoId: String): Flow<Double> = MutableStateFlow(0.0)
     override fun observePoints(tripId: Long): Flow<List<TrackPoint>> = MutableStateFlow(points[tripId].orEmpty()).map { l -> l.map { it.second } }
 }
 

@@ -32,9 +32,11 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
     override suspend fun doWork(): Result {
         val app = applicationContext as HunterApp
         val dao = app.maintenanceDao
-        val items = dao.observeItems().first().map { it.toModel() }
-        val offset = dao.getOdometer()?.offsetKm ?: 0.0
-        val tripsM = app.tripStore.observeTrips().first().sumOf { it.stats.distanceM }
+        // Lembretes do veículo ativo (sem veículo cadastrado, nada a avisar).
+        val veiculoId = app.veiculos.ativoAgora()?.id ?: return Result.success()
+        val items = dao.observeItems(veiculoId).first().map { it.toModel() }
+        val offset = dao.getOdometer(veiculoId)?.offsetKm ?: 0.0
+        val tripsM = app.tripStore.observeDistanceM(veiculoId).first()
         val km = Odometer.currentKm(offset, tripsM)
         val now = System.currentTimeMillis()
 

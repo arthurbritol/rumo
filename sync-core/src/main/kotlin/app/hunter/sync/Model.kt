@@ -5,6 +5,8 @@ enum class Kind(val path: String) {
     MAINTENANCE("manutencao"),
     PLACE("locais"),
     TRIP("viagens"),
+    /** Veículos da conta (moto/carro). Remoção é lógica (campo `removidoEm`), então não usa lápide. */
+    VEICULO("veiculos"),
 }
 
 data class SyncDoc(
@@ -15,7 +17,11 @@ data class SyncDoc(
     val fields: Map<String, Any?>,
 )
 
-data class OdometerDoc(val offsetKm: Double, val tankLiters: Double, val updatedAtMs: Long)
+/**
+ * Hodômetro/tanque de UM veículo. [veiculoId] nulo = documento antigo (anterior aos vários veículos): quem baixa o
+ * atribui ao veículo migrado (ver [atribuirVeiculoLegado]).
+ */
+data class OdometerDoc(val offsetKm: Double, val tankLiters: Double, val updatedAtMs: Long, val veiculoId: String? = null)
 
 data class UserProfile(
     val displayName: String,
@@ -23,4 +29,6 @@ data class UserProfile(
     val model: String?,
     val year: Int?,
     val voice: Boolean = true,
+    /** Veículo ativo da conta (para o outro aparelho abrir no mesmo veículo); opcional. */
+    val veiculoAtivoId: String? = null,
 )

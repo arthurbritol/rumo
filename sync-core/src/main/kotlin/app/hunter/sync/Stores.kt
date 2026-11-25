@@ -18,10 +18,11 @@ interface LocalStore {
      * doc passado. Uma edição feita durante a sincronização (updatedAtMs diferente) continua suja.
      */
     suspend fun markClean(docs: List<SyncDoc>)
-    suspend fun odometer(): OdometerDoc?
+    /** Hodômetro/tanque de cada veículo (uma linha por veículo). */
+    suspend fun odometers(): List<OdometerDoc>
 
     /**
-     * Grava o hodômetro (se a linha local não for mais nova que [o]). [dirty] falso: marca como sincronizado;
+     * Grava o hodômetro do veículo [OdometerDoc.veiculoId] (se a linha local não for mais nova que [o]). [dirty] falso: marca como sincronizado;
      * verdadeiro: fica pendente de envio (usado quando o motor ajustou o hodômetro mas não conseguiu enviá-lo).
      */
     suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean = false)
@@ -58,4 +59,4 @@ interface RemoteStore {
     suspend fun deleteAllUserData()
 }
 
-data class RemoteSnapshot(val docs: List<SyncDoc>, val odometer: OdometerDoc?, val profile: UserProfile?)
+data class RemoteSnapshot(val docs: List<SyncDoc>, val odometers: List<OdometerDoc>, val profile: UserProfile?)

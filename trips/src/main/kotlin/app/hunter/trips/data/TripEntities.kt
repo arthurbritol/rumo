@@ -30,6 +30,8 @@ data class TripEntity(
     @ColumnInfo(defaultValue = "0") val updatedAtMs: Long = System.currentTimeMillis(),
     /** true = alteração ainda não enviada à nuvem. */
     @ColumnInfo(defaultValue = "1") val dirty: Boolean = true,
+    /** Veículo da viagem; nulo = gravada sem veículo cadastrado. */
+    val veiculoId: String? = null,
 ) {
     fun touch() = copy(updatedAtMs = System.currentTimeMillis(), dirty = true)
 

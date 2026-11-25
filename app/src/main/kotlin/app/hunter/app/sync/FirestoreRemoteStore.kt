@@ -6,6 +6,7 @@ import app.hunter.sync.RemoteSnapshot
 import app.hunter.sync.RemoteStore
 import app.hunter.sync.SyncDoc
 import app.hunter.sync.UserProfile
+import app.hunter.sync.atribuirVeiculoLegado
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
@@ -22,7 +23,7 @@ internal suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont
 
 /**
  * [RemoteStore] sobre o Firestore, nos caminhos permitidos por firebase/firestore.rules:
- * usuarios/{uid} (perfil), subcoleções por [Kind.path], config/hodometro e config/exclusao.
+ * usuarios/{uid} (perfil), subcoleções por [Kind.path], hodometros/{veiculoId}, config/hodometro (antigo) e config/exclusao.
  *
  * [deleteSocial] apaga os dados sociais da conta (convites, amizades, rolês etc.) e roda no início de
  * [deleteAllUserData]; o padrão não faz nada (testes e builds sem social).
@@ -35,6 +36,7 @@ class FirestoreRemoteStore(
 ) : RemoteStore {
     private val user: DocumentReference get() = db.collection("usuarios").document(uid)
     private val odometerRef: DocumentReference get() = user.collection("config").document("hodometro")
+    private val hodometros: CollectionReference get() = user.collection("hodometros")
     private val markerRef: DocumentReference get() = user.collection("config").document("exclusao")
     private fun col(kind: Kind): CollectionReference = user.collection(kind.path)
 
@@ -42,9 +44,12 @@ class FirestoreRemoteStore(
         val docs = Kind.entries.flatMap { kind ->
             col(kind).get(Source.SERVER).await().documents.map { mapToDoc(kind, it.id, it.data.orEmpty()) }
         }
-        val odo = odometerRef.get(Source.SERVER).await().data?.let(::mapToOdometer)
+        // Hodômetro por veículo (hodometros/{veiculoId}) mais o documento antigo, sem veículo.
+        val porVeiculo = hodometros.get(Source.SERVER).await().documents.mapNotNull { mapToOdometer(it.data.orEmpty(), it.id) }
+        val antigo = odometerRef.get(Source.SERVER).await().data?.let { mapToOdometer(it) }
         val profile = user.get(Source.SERVER).await().data?.let(::mapToProfile)
-        return RemoteSnapshot(docs, odo, profile)
+        // Documentos antigos (sem veiculoId) passam a pertencer ao veículo migrado, sem perder nada.
+        return atribuirVeiculoLegado(RemoteSnapshot(docs, porVeiculo + listOfNotNull(antigo), profile))
     }
 
     override suspend fun push(docs: List<SyncDoc>) {
@@ -59,7 +64,8 @@ class FirestoreRemoteStore(
     }
 
     override suspend fun pushOdometer(o: OdometerDoc) {
-        odometerRef.set(odometerToMap(o)).await()
+        val id = o.veiculoId
+        if (id == null) odometerRef.set(odometerToMap(o)).await() else hodometros.document(id).set(odometerToMap(o)).await()
     }
 
     override suspend fun pushProfile(p: UserProfile) {
@@ -84,6 +90,13 @@ class FirestoreRemoteStore(
                 page.forEach { batch.delete(it.reference) }
                 batch.commit().await()
             }
+        }
+        while (true) {
+            val page = hodometros.limit(DELETE_PAGE_SIZE.toLong()).get(Source.SERVER).await().documents
+            if (page.isEmpty()) break
+            val batch = db.batch()
+            page.forEach { batch.delete(it.reference) }
+            batch.commit().await()
         }
         odometerRef.delete().await()
         user.delete().await()

@@ -5,6 +5,8 @@ import app.hunter.app.data.TombstoneEntity
 import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceItemEntity
 import app.hunter.maintenance.data.OdometerEntity
+import app.hunter.maintenance.data.VeiculoEntity
+import app.hunter.sync.VEICULO_LEGADO_ID
 import app.hunter.sync.Kind
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.SyncDoc
@@ -58,7 +60,7 @@ fun profileApplyDecision(stored: UserProfile?, dirty: Boolean, incoming: UserPro
 
 fun FuelupEntity.toDoc() = SyncDoc(
     Kind.FUELUP, gid, updatedAtMs, false,
-    mapOf("dateMs" to dateMs, "odometerKm" to odometerKm, "liters" to liters, "totalCost" to totalCost, "fullTank" to fullTank),
+    mapOf("dateMs" to dateMs, "odometerKm" to odometerKm, "liters" to liters, "totalCost" to totalCost, "fullTank" to fullTank, "veiculoId" to veiculoId),
 )
 
 fun fuelupFromDoc(d: SyncDoc, existing: FuelupEntity?) = FuelupEntity(
@@ -69,6 +71,7 @@ fun fuelupFromDoc(d: SyncDoc, existing: FuelupEntity?) = FuelupEntity(
     totalCost = d.fields.dbl("totalCost"),
     fullTank = d.fields["fullTank"] as? Boolean ?: false,
     gid = d.gid, updatedAtMs = d.updatedAtMs, dirty = false,
+    veiculoId = d.veiculoIdOuLegado(),
 )
 
 // ---------- manutenção ----------
@@ -77,7 +80,7 @@ fun MaintenanceItemEntity.toDoc() = SyncDoc(
     Kind.MAINTENANCE, gid, updatedAtMs, false,
     mapOf(
         "name" to name, "intervalKm" to intervalKm, "intervalDays" to intervalDays,
-        "lastDoneKm" to lastDoneKm, "lastDoneAtMs" to lastDoneAtMs,
+        "lastDoneKm" to lastDoneKm, "lastDoneAtMs" to lastDoneAtMs, "veiculoId" to veiculoId,
     ),
 )
 
@@ -89,6 +92,7 @@ fun itemFromDoc(d: SyncDoc, existing: MaintenanceItemEntity?) = MaintenanceItemE
     lastDoneKm = d.fields.num("lastDoneKm")?.toDouble(),
     lastDoneAtMs = d.fields.num("lastDoneAtMs")?.toLong(),
     gid = d.gid, updatedAtMs = d.updatedAtMs, dirty = false,
+    veiculoId = d.veiculoIdOuLegado(),
 )
 
 // ---------- locais (só favoritos sincronizam; recentes ficam no aparelho) ----------
@@ -121,7 +125,7 @@ fun TripEntity.toDocOrNull(): SyncDoc? {
             "startedAtMs" to startedAtMs, "endedAtMs" to ended, "distanceM" to distanceM, "elapsedMs" to elapsedMs,
             "movingTimeMs" to movingTimeMs, "stoppedTimeMs" to stoppedTimeMs, "stopCount" to stopCount,
             "maxSpeedMps" to maxSpeedMps, "elevationGainM" to elevationGainM, "elevationLossM" to elevationLossM,
-            "title" to title,
+            "title" to title, "veiculoId" to veiculoId,
         ),
     )
 }
@@ -140,12 +144,49 @@ fun tripFromDoc(d: SyncDoc, existing: TripEntity?) = TripEntity(
     elevationLossM = d.fields.dbl("elevationLossM"),
     title = d.fields["title"] as? String,
     gid = d.gid, updatedAtMs = d.updatedAtMs, dirty = false,
+    veiculoId = (d.fields["veiculoId"] as? String)?.takeIf { it.isNotBlank() },
 )
 
 // ---------- lápides e hodômetro ----------
 
 fun TombstoneEntity.toDoc() = SyncDoc(Kind.valueOf(kind), gid, deletedAtMs, true, emptyMap())
 
-fun OdometerEntity.toDoc() = OdometerDoc(offsetKm, tankLiters, updatedAtMs)
+fun OdometerEntity.toDoc() = OdometerDoc(offsetKm, tankLiters, updatedAtMs, veiculoId)
 
-fun odometerFromDoc(o: OdometerDoc) = OdometerEntity(1, o.offsetKm, o.tankLiters, o.updatedAtMs, false)
+/** Documento sem veículo (não deveria chegar: o download atribui o legado) vai para o veículo migrado. */
+fun odometerFromDoc(o: OdometerDoc) = OdometerEntity(o.veiculoId ?: VEICULO_LEGADO_ID, o.offsetKm, o.tankLiters, o.updatedAtMs, false)
+
+// ---------- veículos ----------
+
+/**
+ * Valores sempre aceitos pelas regras do Firestore (um veículo recusado falharia a cada sincronização): textos
+ * aparados e limitados a 60, tipo MOTO/CARRO, tanque entre 0 e 200 L, ano de 1900 a 2100 e consumo de 0 (exclusivo) a 100.
+ */
+fun VeiculoEntity.toDoc() = SyncDoc(
+    Kind.VEICULO, id, updatedAtMs, false,
+    mapOf(
+        "tipo" to app.hunter.model.TipoVeiculo.deNome(tipo).name,
+        "apelido" to clampText(apelido), "marca" to clampText(marca), "modelo" to clampText(modelo),
+        "ano" to ano?.takeIf { it in 1900..2100 },
+        "tanqueLitros" to (tanqueLitros.takeIf { it.isFinite() } ?: 0.0).coerceIn(0.0, 200.0),
+        "consumoPadraoKmL" to consumoPadraoKmL?.takeIf { it > 0.0 && it <= 100.0 },
+        "criadoEm" to criadoEm, "removidoEm" to removidoEm,
+    ),
+)
+
+fun veiculoFromDoc(d: SyncDoc) = VeiculoEntity(
+    id = d.gid,
+    tipo = d.fields["tipo"] as? String ?: "MOTO",
+    apelido = d.fields["apelido"] as? String ?: "",
+    marca = d.fields["marca"] as? String ?: "",
+    modelo = d.fields["modelo"] as? String ?: "",
+    ano = d.fields.num("ano")?.toInt(),
+    tanqueLitros = d.fields.num("tanqueLitros")?.toDouble() ?: 13.0,
+    consumoPadraoKmL = d.fields.num("consumoPadraoKmL")?.toDouble(),
+    criadoEm = d.fields.lng("criadoEm"),
+    removidoEm = d.fields.num("removidoEm")?.toLong(),
+    updatedAtMs = d.updatedAtMs, dirty = false,
+)
+
+/** Veículo do documento; sem campo (cliente antigo, não resolvido) vale o veículo migrado. */
+private fun SyncDoc.veiculoIdOuLegado(): String = (fields["veiculoId"] as? String)?.takeIf { it.isNotBlank() } ?: VEICULO_LEGADO_ID

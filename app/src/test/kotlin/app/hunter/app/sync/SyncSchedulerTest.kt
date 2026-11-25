@@ -32,7 +32,7 @@ class SyncSchedulerTest {
         override suspend fun dirty() = dirtyDocs
         override suspend fun apply(docs: List<SyncDoc>) {}
         override suspend fun markClean(docs: List<SyncDoc>) { dirtyDocs = dirtyDocs - docs.toSet() }
-        override suspend fun odometer(): OdometerDoc? = null
+        override suspend fun odometers(): List<OdometerDoc> = emptyList()
         override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) {}
         override suspend fun profile(): UserProfile? = null
         override suspend fun applyProfile(p: UserProfile) {}
@@ -56,7 +56,7 @@ class SyncSchedulerTest {
                 active--
             }
             failWith?.let { throw it }
-            return RemoteSnapshot(emptyList(), null, null)
+            return RemoteSnapshot(emptyList(), emptyList(), null)
         }
         override suspend fun push(docs: List<SyncDoc>) {}
         override suspend fun pushOdometer(o: OdometerDoc) {}
@@ -216,7 +216,7 @@ class SyncSchedulerTest {
         val pushed = mutableListOf<String>()
         val errors = mutableListOf<Throwable>()
         class Rec(val id: String) : RemoteStore {
-            override suspend fun fetchAll(): RemoteSnapshot { delay(1_000); return RemoteSnapshot(emptyList(), null, null) }
+            override suspend fun fetchAll(): RemoteSnapshot { delay(1_000); return RemoteSnapshot(emptyList(), emptyList(), null) }
             override suspend fun push(docs: List<SyncDoc>) { pushed += id }
             override suspend fun pushOdometer(o: OdometerDoc) { pushed += id }
             override suspend fun pushProfile(p: UserProfile) { pushed += id }
@@ -244,7 +244,7 @@ class SyncSchedulerTest {
         val log = mutableListOf<String>()
         val gate = SyncGate()
         val remote = object : RemoteStore {
-            override suspend fun fetchAll(): RemoteSnapshot { log += "sync-inicio"; delay(5_000); log += "sync-fim"; return RemoteSnapshot(emptyList(), null, null) }
+            override suspend fun fetchAll(): RemoteSnapshot { log += "sync-inicio"; delay(5_000); log += "sync-fim"; return RemoteSnapshot(emptyList(), emptyList(), null) }
             override suspend fun push(docs: List<SyncDoc>) {}
             override suspend fun pushOdometer(o: OdometerDoc) {}
             override suspend fun pushProfile(p: UserProfile) {}

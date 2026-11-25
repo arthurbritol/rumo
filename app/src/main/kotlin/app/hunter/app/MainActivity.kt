@@ -178,7 +178,7 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
         }
     }
 
-    val bikeSaver = remember { AppBikeSaver(app.maintenanceDao, app.tripDao, prefs, account.scheduler::requestSync) }
+    val bikeSaver = remember { AppBikeSaver(app.maintenanceDao, app.tripDao, app.veiculos, prefs, account.scheduler::requestSync) }
     // Avaliado a cada transição, depois da primeira sincronização do login: o perfil vindo da conta já está gravado.
     val hasBikeInAccount: () -> Boolean = {
         ProfilePrefs.read(prefs)?.let { it.brand != null && it.model != null } == true

@@ -45,18 +45,27 @@ fun mapToDoc(kind: Kind, gid: String, data: Map<String, Any?>): SyncDoc = SyncDo
     fields = data - UPDATED_AT - DELETED,
 )
 
-fun odometerToMap(o: OdometerDoc): Map<String, Any?> =
-    mapOf("offsetKm" to o.offsetKm, "tankLiters" to o.tankLiters, UPDATED_AT to o.updatedAtMs)
+/** `veiculoId` só vai quando existe (o documento antigo `config/hodometro` não tem o campo). */
+fun odometerToMap(o: OdometerDoc): Map<String, Any?> = buildMap {
+    put("offsetKm", o.offsetKm)
+    put("tankLiters", o.tankLiters)
+    put(UPDATED_AT, o.updatedAtMs)
+    o.veiculoId?.let { put("veiculoId", it) }
+}
 
-fun mapToOdometer(data: Map<String, Any?>): OdometerDoc? {
+/** [idDoCaminho]: id do documento em `hodometros/{veiculoId}`, usado se o campo `veiculoId` faltar. */
+fun mapToOdometer(data: Map<String, Any?>, idDoCaminho: String? = null): OdometerDoc? {
     val offset = data["offsetKm"] as? Number ?: return null
     val tank = data["tankLiters"] as? Number ?: return null
     val at = data[UPDATED_AT] as? Number ?: return null
-    return OdometerDoc(offset.toDouble(), tank.toDouble(), at.toLong())
+    return OdometerDoc(offset.toDouble(), tank.toDouble(), at.toLong(), (data["veiculoId"] as? String) ?: idDoCaminho)
 }
 
 /** Limite de texto das regras (displayName, brand, model). */
 const val MAX_PROFILE_TEXT = 60
+
+/** Limite de tamanho do id de veículo no perfil (as regras aceitam até 64). */
+const val MAX_ID_TEXT = 64
 private const val DEFAULT_NAME = "Motociclista"
 
 /** Apara e limita a [max] unidades UTF-16 sem partir um par substituto (emoji) ao meio. */
@@ -96,6 +105,7 @@ fun profileToMap(p: UserProfile, nowMs: Long): Map<String, Any?> = buildMap {
     put("model", p.model?.let(::clampText)?.ifEmpty { null })
     if (p.year != null && p.year in 1950..2100) put("year", p.year)
     put("voice", p.voice)
+    p.veiculoAtivoId?.takeIf { it.length in 1..MAX_ID_TEXT }?.let { put("veiculoAtivoId", it) }
     put(UPDATED_AT, nowMs)
 }
 
@@ -112,5 +122,6 @@ fun mapToProfile(data: Map<String, Any?>): UserProfile? {
             is String -> v != "false"
             else -> true
         },
+        veiculoAtivoId = data["veiculoAtivoId"] as? String,
     )
 }

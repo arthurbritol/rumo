@@ -20,7 +20,7 @@ service cloud.firestore {
 
     function perfilValido(d) {
       return d.keys().hasOnly([
-          'displayName', 'displayNameLower', 'brand', 'model', 'year', 'voice', 'updatedAtMs'
+          'displayName', 'displayNameLower', 'brand', 'model', 'year', 'voice', 'veiculoAtivoId', 'updatedAtMs'
         ])
         && d.keys().hasAll(['displayName', 'updatedAtMs'])
         && d.displayName is string
@@ -29,6 +29,7 @@ service cloud.firestore {
             || (d.displayNameLower is string && d.displayNameLower == d.displayName.lower()))
         && textoOpcional(d, 'brand', 60)
         && textoOpcional(d, 'model', 60)
+        && textoOpcional(d, 'veiculoAtivoId', 64)
         && (!('voice' in d) || d.voice == null || d.voice is bool)
         && (!('year' in d) || d.year == null
             || (d.year is int && d.year >= 1950 && d.year <= 2100))
@@ -36,12 +37,37 @@ service cloud.firestore {
     }
 
     // Documento sincronizável: updatedAtMs e deleted obrigatórios; demais
-    // campos livres, porém limitados a 20 chaves no total.
+    // campos livres, porém limitados a 20 chaves no total. `veiculoId` (abastecimentos,
+    // manutenção e viagens) é um id de até 64 caracteres; documentos antigos não o têm.
+    // Maior documento hoje: viagem, com 12 campos de dados + updatedAtMs + deleted = 14 chaves.
     function docSyncValido(d) {
       return d.keys().hasAll(['updatedAtMs', 'deleted'])
         && d.updatedAtMs is number
         && d.deleted is bool
+        && textoOpcional(d, 'veiculoId', 64)
         && d.keys().size() <= 20;
+    }
+
+    // Veículo (moto/carro) da conta. Remoção é lógica (`removidoEm`). Campos tipados e limitados.
+    function veiculoValido(d) {
+      return d.keys().hasOnly([
+          'tipo', 'apelido', 'marca', 'modelo', 'ano', 'tanqueLitros', 'consumoPadraoKmL',
+          'criadoEm', 'removidoEm', 'updatedAtMs', 'deleted'
+        ])
+        && d.keys().hasAll(['tipo', 'apelido', 'tanqueLitros', 'criadoEm', 'updatedAtMs', 'deleted'])
+        && d.tipo is string && d.tipo in ['MOTO', 'CARRO']
+        && d.apelido is string && d.apelido.size() <= 60
+        && textoOpcional(d, 'marca', 60)
+        && textoOpcional(d, 'modelo', 60)
+        && (!('ano' in d) || d.ano == null
+            || (d.ano is int && d.ano >= 1900 && d.ano <= 2100))
+        && d.tanqueLitros is number && d.tanqueLitros >= 0 && d.tanqueLitros <= 200
+        && (!('consumoPadraoKmL' in d) || d.consumoPadraoKmL == null
+            || (d.consumoPadraoKmL is number && d.consumoPadraoKmL > 0 && d.consumoPadraoKmL <= 100))
+        && d.criadoEm is number
+        && (!('removidoEm' in d) || d.removidoEm == null || d.removidoEm is number)
+        && d.updatedAtMs is number
+        && d.deleted is bool;
     }
 
     match /usuarios/{uid} {
@@ -65,14 +91,33 @@ service cloud.firestore {
         allow create, update: if dono(uid) && docSyncValido(request.resource.data);
       }
 
+      match /veiculos/{id} {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid) && veiculoValido(request.resource.data);
+      }
+
+      // Hodômetro/tanque por veículo (documento antigo: config/hodometro, sem veículo).
+      match /hodometros/{veiculoId} {
+        allow read, delete: if dono(uid);
+        allow create, update: if dono(uid)
+          && request.resource.data.keys().hasOnly(['offsetKm', 'tankLiters', 'updatedAtMs', 'veiculoId'])
+          && request.resource.data.keys().hasAll(['offsetKm', 'tankLiters', 'updatedAtMs', 'veiculoId'])
+          && request.resource.data.offsetKm is number
+          && request.resource.data.tankLiters is number
+          && request.resource.data.updatedAtMs is number
+          && request.resource.data.veiculoId == veiculoId
+          && veiculoId.size() <= 64;
+      }
+
       match /config/hodometro {
         allow read, delete: if dono(uid);
         allow create, update: if dono(uid)
-          && request.resource.data.keys().hasOnly(['offsetKm', 'tankLiters', 'updatedAtMs'])
+          && request.resource.data.keys().hasOnly(['offsetKm', 'tankLiters', 'updatedAtMs', 'veiculoId'])
           && request.resource.data.keys().hasAll(['offsetKm', 'tankLiters', 'updatedAtMs'])
           && request.resource.data.offsetKm is number
           && request.resource.data.tankLiters is number
-          && request.resource.data.updatedAtMs is number;
+          && request.resource.data.updatedAtMs is number
+          && textoOpcional(request.resource.data, 'veiculoId', 64);
       }
 
       // Marcador de exclusão de conta pendente (fora do perfil, para que

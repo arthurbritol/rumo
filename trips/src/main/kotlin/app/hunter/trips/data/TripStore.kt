@@ -27,6 +27,9 @@ interface TripStore {
     /** Todos os trajetos, mais recentes primeiro (o ativo, se houver, vem junto com endedAtMs = null). */
     fun observeTrips(): Flow<List<TripSummary>>
     fun observePoints(tripId: Long): Flow<List<TrackPoint>>
+
+    /** Distância total (m) das viagens do veículo, inclusive a que está gravando (alimenta o hodômetro dele). */
+    fun observeDistanceM(veiculoId: String): Flow<Double>
 }
 
 /** Implementada pela [android.app.Application] do app para o serviço achar o [TripStore]. */

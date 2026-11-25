@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceItemEntity
+import app.hunter.maintenance.data.VeiculoEntity
 import app.hunter.trips.data.TripEntity
 
 /**
@@ -34,6 +35,13 @@ interface SyncDao {
     @Update suspend fun updateItem(e: MaintenanceItemEntity)
     @Query("DELETE FROM maintenance_items WHERE gid = :gid") suspend fun deleteItem(gid: String)
     @Query("UPDATE maintenance_items SET dirty = 0 WHERE gid = :gid AND updatedAtMs = :ver") suspend fun cleanItem(gid: String, ver: Long)
+
+    // --- veículos (remoção é lógica: a linha fica com removidoEm; não há lápide)
+    @Query("SELECT * FROM veiculos") suspend fun veiculos(): List<VeiculoEntity>
+    @Query("SELECT * FROM veiculos WHERE dirty = 1") suspend fun dirtyVeiculos(): List<VeiculoEntity>
+    @Query("SELECT * FROM veiculos WHERE id = :id") suspend fun veiculoById(id: String): VeiculoEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putVeiculo(e: VeiculoEntity)
+    @Query("UPDATE veiculos SET dirty = 0 WHERE id = :id AND updatedAtMs = :ver") suspend fun cleanVeiculo(id: String, ver: Long)
 
     // --- locais (só favoritos)
     @Query("SELECT * FROM places WHERE favorite = 1") suspend fun favoritePlaces(): List<PlaceEntity>
@@ -74,7 +82,7 @@ interface SyncDao {
 
     // --- sair da conta
     @Query(
-        "SELECT (SELECT COUNT(*) FROM fuelups WHERE dirty = 1) + (SELECT COUNT(*) FROM maintenance_items WHERE dirty = 1) + " +
+        "SELECT (SELECT COUNT(*) FROM fuelups WHERE dirty = 1) + (SELECT COUNT(*) FROM maintenance_items WHERE dirty = 1) + (SELECT COUNT(*) FROM veiculos WHERE dirty = 1) + " +
             "(SELECT COUNT(*) FROM places WHERE favorite = 1 AND dirty = 1) + " +
             "(SELECT COUNT(*) FROM trips WHERE endedAtMs IS NOT NULL AND dirty = 1) + " +
             "(SELECT COUNT(*) FROM tombstones WHERE dirty = 1)",
@@ -88,4 +96,5 @@ interface SyncDao {
     @Query("DELETE FROM trips WHERE endedAtMs IS NOT NULL") suspend fun wipeFinishedTrips()
     @Query("DELETE FROM tombstones") suspend fun wipeTombstones()
     @Query("DELETE FROM odometer") suspend fun wipeOdometer()
+    @Query("DELETE FROM veiculos") suspend fun wipeVeiculos()
 }

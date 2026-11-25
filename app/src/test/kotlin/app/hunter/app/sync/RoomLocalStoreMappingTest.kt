@@ -20,8 +20,8 @@ import kotlin.test.assertTrue
 
 class RoomLocalStoreMappingTest {
 
-    private val fuelup = FuelupEntity(id = 7, dateMs = 1_700_000_000_000, odometerKm = 12000.5, liters = 11.2, totalCost = 68.9, fullTank = true, gid = "g-f", updatedAtMs = 50, dirty = true)
-    private val item = MaintenanceItemEntity(id = 3, name = "Óleo", intervalKm = 5000, intervalDays = null, lastDoneKm = 100.0, lastDoneAtMs = 9, gid = "g-m", updatedAtMs = 60)
+    private val fuelup = FuelupEntity(id = 7, dateMs = 1_700_000_000_000, odometerKm = 12000.5, liters = 11.2, totalCost = 68.9, fullTank = true, gid = "g-f", updatedAtMs = 50, veiculoId = "v1", dirty = true)
+    private val item = MaintenanceItemEntity(id = 3, name = "Óleo", intervalKm = 5000, intervalDays = null, lastDoneKm = 100.0, lastDoneAtMs = 9, gid = "g-m", updatedAtMs = 60, veiculoId = "v1")
     private val place = PlaceEntity(id = 2, name = "Casa", subtitle = "Rua A", lat = -8.0476, lon = -34.877, favorite = true, lastUsedMs = 5, useCount = 2, gid = "g-p", updatedAtMs = 70)
     private val trip = TripEntity(id = 4, startedAtMs = 1_700_000_000_000, endedAtMs = 1_700_003_600_000, distanceM = 42000.4, elapsedMs = 3_600_000, movingTimeMs = 3_000_000, stoppedTimeMs = 600_000, stopCount = 3, maxSpeedMps = 30.5, elevationGainM = 120.0, elevationLossM = 118.0, title = "Praia", gid = "g-t", updatedAtMs = 80)
 
@@ -91,13 +91,13 @@ class RoomLocalStoreMappingTest {
     }
 
     @Test fun `nomes de Kind batem com os literais gravados nas lapides pelos DAOs`() {
-        assertEquals(setOf("FUELUP", "MAINTENANCE", "PLACE", "TRIP"), Kind.values().map { it.name }.toSet())
+        assertEquals(setOf("FUELUP", "MAINTENANCE", "PLACE", "TRIP", "VEICULO"), Kind.values().map { it.name }.toSet())
     }
 
     @Test fun `hodometro ida e volta`() {
-        val o = OdometerEntity(offsetKm = 350.25, tankLiters = 13.0, updatedAtMs = 5, dirty = true)
-        assertEquals(OdometerDoc(350.25, 13.0, 5), o.toDoc())
-        assertEquals(OdometerEntity(1, 350.25, 13.0, 5, false), odometerFromDoc(OdometerDoc(350.25, 13.0, 5)))
+        val o = OdometerEntity(veiculoId = "v1", offsetKm = 350.25, tankLiters = 13.0, updatedAtMs = 5, dirty = true)
+        assertEquals(OdometerDoc(350.25, 13.0, 5, "v1"), o.toDoc())
+        assertEquals(OdometerEntity("v1", 350.25, 13.0, 5, false), odometerFromDoc(OdometerDoc(350.25, 13.0, 5, "v1")))
     }
 
     @Test fun `regra de apply nao sobrescreve linha local mais nova`() {

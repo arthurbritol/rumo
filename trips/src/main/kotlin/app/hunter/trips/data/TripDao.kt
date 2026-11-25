@@ -28,6 +28,10 @@ interface TripDao {
     @Query("SELECT * FROM trips ORDER BY startedAtMs DESC")
     fun observeTrips(): Flow<List<TripEntity>>
 
+    /** Soma das distâncias (m) das viagens do veículo, inclusive a que está gravando. */
+    @Query("SELECT COALESCE(SUM(distanceM), 0.0) FROM trips WHERE veiculoId = :veiculoId")
+    fun observeDistanceM(veiculoId: String): Flow<Double>
+
     /** Só viagem concluída já pode ter ido para a nuvem; a gravando não deixa lápide. */
     @Query("INSERT OR REPLACE INTO tombstones (kind, gid, deletedAtMs, dirty) SELECT 'TRIP', gid, :now, 1 FROM trips WHERE id = :id AND endedAtMs IS NOT NULL")
     suspend fun tombstoneTrip(id: Long, now: Long)

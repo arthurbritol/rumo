@@ -47,7 +47,7 @@ private class FakeLocal : LocalStore {
     override suspend fun dirty() = dirtyDocs
     override suspend fun apply(docs: List<SyncDoc>) {}
     override suspend fun markClean(docs: List<SyncDoc>) {}
-    override suspend fun odometer(): OdometerDoc? = null
+    override suspend fun odometers(): List<OdometerDoc> = emptyList()
     override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) {}
     override suspend fun profile(): UserProfile? = null
     override suspend fun applyProfile(p: UserProfile) {}
@@ -68,7 +68,7 @@ private class FakeRemote(val ev: Events) : RemoteStore {
         fetches++
         if (hang) awaitCancellation()
         fetchError?.let { throw it }
-        return RemoteSnapshot(emptyList(), null, null)
+        return RemoteSnapshot(emptyList(), emptyList(), null)
     }
     override suspend fun push(docs: List<SyncDoc>) {}
     override suspend fun pushOdometer(o: OdometerDoc) {}
@@ -634,7 +634,7 @@ class AuthRepositoryTest {
             ev.list += "sync-inicio"
             try { kotlinx.coroutines.delay(ms) } finally { active-- }
             ev.list += "sync-fim"
-            return RemoteSnapshot(emptyList(), null, null)
+            return RemoteSnapshot(emptyList(), emptyList(), null)
         }
         override suspend fun push(docs: List<SyncDoc>) {}
         override suspend fun pushOdometer(o: OdometerDoc) {}

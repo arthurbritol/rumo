@@ -6,10 +6,16 @@ import app.hunter.model.TripSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-class RoomTripStore(private val dao: TripDao) : TripStore {
+/** [veiculoAtivoId]: veículo ativo no momento em que a viagem começa (nulo = sem veículo cadastrado). */
+class RoomTripStore(
+    private val dao: TripDao,
+    private val veiculoAtivoId: suspend () -> String? = { null },
+) : TripStore {
 
     override suspend fun createTrip(startedAtMs: Long, title: String?): Long =
-        dao.insertTrip(TripEntity(startedAtMs = startedAtMs, title = title))
+        dao.insertTrip(TripEntity(startedAtMs = startedAtMs, title = title, veiculoId = veiculoAtivoId()))
+
+    override fun observeDistanceM(veiculoId: String): Flow<Double> = dao.observeDistanceM(veiculoId)
 
     override suspend fun renameTrip(tripId: Long, title: String?) {
         val t = dao.getTrip(tripId) ?: return

@@ -12,6 +12,7 @@ import app.hunter.maintenance.data.FuelupEntity
 import app.hunter.maintenance.data.MaintenanceDao
 import app.hunter.maintenance.data.MaintenanceItemEntity
 import app.hunter.maintenance.data.OdometerEntity
+import app.hunter.maintenance.data.VeiculoEntity
 import app.hunter.trips.data.TrackPointEntity
 import app.hunter.trips.data.TripDao
 import app.hunter.trips.data.TripEntity
@@ -26,8 +27,9 @@ import app.hunter.trips.data.TripEntity
         FuelupEntity::class, MaintenanceItemEntity::class, OdometerEntity::class,
         PlaceEntity::class, TombstoneEntity::class,
         AnpStationEntity::class, AnpCityStatsEntity::class, AnpStateStatsEntity::class,
+        VeiculoEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -62,6 +64,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 Migration3To4.statements.forEach { db.execSQL(it) }
+            }
+        }
+
+        /** v4 → v5: vários veículos (tabela `veiculos`, `veiculoId` nos dados, hodômetro por veículo). */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Migration4To5.statements.forEach { db.execSQL(it) }
             }
         }
     }

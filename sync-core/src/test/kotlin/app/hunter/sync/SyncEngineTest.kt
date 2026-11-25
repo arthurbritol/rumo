@@ -30,7 +30,7 @@ class FakeLocalStore : LocalStore {
     override suspend fun markClean(docs: List<SyncDoc>) {
         docs.forEach { if (this.docs[it.kind to it.gid]?.updatedAtMs == it.updatedAtMs) dirtyKeys -= it.kind to it.gid }
     }
-    override suspend fun odometer() = odo
+    override suspend fun odometers() = listOfNotNull(odo)
     override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) { odo = o; odoDirty = dirty }
     override suspend fun profile() = prof
     override suspend fun applyProfile(p: UserProfile) { prof = p; profDirty = false }
@@ -57,7 +57,7 @@ class FakeRemoteStore : RemoteStore {
 
     override suspend fun fetchAll(): RemoteSnapshot {
         fetchError?.let { throw it }
-        return RemoteSnapshot(docs.values.toList(), odo, prof)
+        return RemoteSnapshot(docs.values.toList(), listOfNotNull(odo), prof)
     }
 
     var pushError: IOException? = null
@@ -123,7 +123,7 @@ class SyncEngineTest {
         engine.firstSync()
 
         assertEquals(listOf(fuel("r")), local.all())
-        assertEquals(remote.odo, local.odometer())
+        assertEquals(remote.odo, local.odo)
         assertEquals(perfil, local.profile())
         assertTrue(remote.pushed.isEmpty())
     }
@@ -369,7 +369,7 @@ class SyncEngineTest {
 
     /** O que a Garagem mostra: deslocamento + soma das viagens vivas do aparelho. */
     private suspend fun shownKm(): Double =
-        local.odometer()!!.offsetKm + local.all().filter { it.kind == Kind.TRIP && !it.deleted }
+        local.odo!!.offsetKm + local.all().filter { it.kind == Kind.TRIP && !it.deleted }
             .sumOf { (it.fields["distanceM"] as Number).toDouble() / 1000 }
 
     @Test
@@ -385,13 +385,13 @@ class SyncEngineTest {
         engine.firstSync()
 
         assertEquals(10_500.0, shownKm(), 1e-9)
-        assertEquals(local.odometer(), remote.odo)
+        assertEquals(local.odo, remote.odo)
         assertEquals(now, remote.odo!!.updatedAtMs)
         assertFalse(local.hasDirtyOdometerOrProfile())
         // idempotente: um segundo sync não muda nada
         engine.syncNow()
         assertEquals(10_500.0, shownKm(), 1e-9)
-        assertEquals(local.odometer(), remote.odo)
+        assertEquals(local.odo, remote.odo)
     }
 
     @Test
@@ -456,7 +456,7 @@ class SyncEngineTest {
         remote.pushOdoError = null
         engine.syncNow()
         assertEquals(500.0, shownKm(), 1e-9)
-        assertEquals(local.odometer(), remote.odo)
+        assertEquals(local.odo, remote.odo)
         assertFalse(local.odoDirty)
     }
 

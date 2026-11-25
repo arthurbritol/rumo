@@ -14,7 +14,7 @@ import kotlin.test.assertSame
 class PerUserRemoteStoreTest {
     private class Fake(val uid: String) : RemoteStore {
         var fetches = 0
-        override suspend fun fetchAll(): RemoteSnapshot { fetches++; return RemoteSnapshot(emptyList(), null, null) }
+        override suspend fun fetchAll(): RemoteSnapshot { fetches++; return RemoteSnapshot(emptyList(), emptyList(), null) }
         override suspend fun push(docs: List<SyncDoc>) {}
         override suspend fun pushOdometer(o: OdometerDoc) {}
         override suspend fun pushProfile(p: UserProfile) {}

@@ -25,6 +25,8 @@ fun dedupKey(d: SyncDoc): String? {
         Kind.FUELUP -> listOf("dateMs", "odometerKm", "liters", "totalCost").joinToString("|") { fmt(f[it]) }
         Kind.MAINTENANCE -> listOf("name", "intervalKm", "intervalDays").joinToString("|") { fmt(f[it]) }
         Kind.PLACE -> "${fixed(f["lat"], 4)}|${fixed(f["lon"], 4)}|${fmt(f["name"])}"
+        // Veículo: o id já é único (UUID); nunca é duplicata de outro por conteúdo.
+        Kind.VEICULO -> "veiculo|${d.gid}"
         Kind.TRIP -> {
             val m = (f["distanceM"] as? Number)?.toDouble()?.let { Math.round(it).toString() } ?: ""
             "${fmt(f["startedAtMs"])}|$m"

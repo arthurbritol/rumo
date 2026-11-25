@@ -92,14 +92,22 @@ class SyncEngine(
         val snap = remote.fetchAll()
         val dirtyBefore = local.dirty()
         val localDirtyMeta = local.hasDirtyOdometerOrProfile()
-        val localOdo = local.odometer()
+        val localOdos = local.odometers()
         val localProfile = local.profile()
 
         val localDocs = local.all()
         val plan = merge(localDocs, snap.docs, now)
-        // Último a escrever vence, corrigido pelas viagens que a mesclagem trouxe ao lado vencedor (ver KDoc).
-        val odo = mergeOdometerWithTrips(localOdo, snap.odometer, localDocs, snap.docs, plan.merged, now)
-        val odoAdjusted = odo != null && odo != mergeOdometer(localOdo, snap.odometer, now)
+        // Hodômetro de cada veículo: último a escrever vence, corrigido pelas viagens (do mesmo veículo) que a
+        // mesclagem trouxe ao lado vencedor (ver KDoc de mergeOdometerWithTrips).
+        val veiculoIds = (localOdos.map { it.veiculoId } + snap.odometers.map { it.veiculoId }).distinct()
+        val odoPlans = veiculoIds.map { id ->
+            val localOdo = localOdos.firstOrNull { it.veiculoId == id }
+            val remoteOdo = snap.odometers.firstOrNull { it.veiculoId == id }
+            val odo = mergeOdometerWithTrips(
+                localOdo, remoteOdo, docsDoVeiculo(localDocs, id), docsDoVeiculo(snap.docs, id), docsDoVeiculo(plan.merged, id), now,
+            )
+            OdoPlan(localOdo, remoteOdo, odo, odoAdjusted = odo != null && odo != mergeOdometer(localOdo, remoteOdo, now))
+        }
         val profile: UserProfile? = when {
             localProfile == null -> snap.profile
             snap.profile == null || localDirtyMeta -> localProfile
@@ -114,14 +122,15 @@ class SyncEngine(
         // 2) Hodômetro e perfil, cada um independente: a falha de um (rede, regra) não impede o outro nem
         // desfaz os registros já sincronizados; o primeiro erro é relançado no fim para o agendador reportar.
         var failure: Exception? = null
-        if (odo != null) {
-            val err = if (odo == snap.odometer) null else attempt { remote.pushOdometer(odo) }
+        for (p in odoPlans) {
+            val odo = p.odo ?: continue
+            val err = if (odo == p.remoteOdo) null else attempt { remote.pushOdometer(odo) }
             if (err != null) {
-                failure = err
+                failure = failure ?: err
                 // As viagens trazidas já foram aplicadas: o ajuste precisa ficar no aparelho (sujo) e subir depois,
                 // senão a diferença some e o hodômetro fica contado em dobro.
-                if (odoAdjusted) local.applyOdometer(odo, dirty = true)
-            } else if (odo != localOdo || localDirtyMeta) {
+                if (p.odoAdjusted) local.applyOdometer(odo, dirty = true)
+            } else if (odo != p.localOdo || localDirtyMeta) {
                 local.applyOdometer(odo)
             }
         }
@@ -135,6 +144,12 @@ class SyncEngine(
         }
         failure?.let { throw it }
     }
+
+    private class OdoPlan(val localOdo: OdometerDoc?, val remoteOdo: OdometerDoc?, val odo: OdometerDoc?, val odoAdjusted: Boolean)
+
+    /** Viagens contam para o hodômetro do veículo delas; [id] nulo (documento sem veículo) vê todas. */
+    private fun docsDoVeiculo(docs: List<SyncDoc>, id: String?): List<SyncDoc> =
+        if (id == null) docs else docs.filter { it.kind != Kind.TRIP || it.fields["veiculoId"] == id }
 
     /** Roda [block] e devolve a exceção (null se deu certo); cancelamento sempre propaga. */
     private suspend fun attempt(block: suspend () -> Unit): Exception? = try {

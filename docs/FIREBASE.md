@@ -136,3 +136,22 @@ firebase deploy --only firestore:rules
 ```
 
 Testes das regras: `firebase/test/presence.rules.test.js` (rodam com os demais pelo comando do item 4). Nenhum índice novo.
+
+## Vários veículos (carro e moto): `veiculos`, `hodometros` e `veiculoId` (REQUER publicar as regras ANTES do app)
+
+A conta passa a ter vários veículos. Novidades no Firestore (`firebase/firestore.rules`):
+
+- `usuarios/{uid}/veiculos/{id}`: um documento por veículo (`tipo` só `MOTO`/`CARRO`, `apelido`/`marca`/`modelo` até 60 caracteres, `ano` inteiro de 1900 a 2100, `tanqueLitros` de 0 a 200, `consumoPadraoKmL` de 0 (exclusivo) a 100, `criadoEm`, `removidoEm`, `updatedAtMs`, `deleted`). Só o dono lê e escreve. Remover um veículo é lógico (`removidoEm`); o documento não é apagado.
+- `usuarios/{uid}/hodometros/{veiculoId}`: hodômetro e tanque por veículo (`offsetKm`, `tankLiters`, `updatedAtMs`, `veiculoId` igual ao id do caminho). O documento antigo `config/hodometro` continua aceito (com `veiculoId` opcional) e é lido como o hodômetro do veículo migrado.
+- `veiculoAtivoId` (opcional, texto até 64) no perfil `usuarios/{uid}`, para o outro aparelho da mesma conta abrir no mesmo veículo.
+- `veiculoId` (opcional, texto até 64) nos documentos de abastecimentos, manutenção e viagens. O limite de 20 chaves por documento não mudou (o maior, a viagem, tem 14).
+- Documentos antigos (sem `veiculoId`) pertencem ao veículo migrado: o app os atribui ao baixar, sem perder nada. O veículo migrado ("Minha moto") tem id fixo `00000000-0000-4000-8000-000000000001`, igual em todos os aparelhos da conta, para dois aparelhos que migraram sozinhos não gerarem duas motos.
+
+**Passo manual, nesta ordem:**
+
+1. Publique as regras ANTES de distribuir o app: `cd firebase && firebase deploy --only firestore:rules`.
+2. Só então publique/instale o app com os vários veículos.
+
+**E se o app sair antes das regras?** O app continua funcionando: os dados locais ficam intactos, e a sincronização falha com erro tratado (o aviso de sincronização do app; `PERMISSION_DENIED` em `Rumo/sync` no `adb logcat`) até as regras serem publicadas. Nada se perde; os dados sobem na primeira sincronização depois do deploy. As regras novas são compatíveis para trás: apps antigos continuam sincronizando (ignoram os campos novos; os documentos que eles reescrevem voltam sem `veiculoId` e são reatribuídos ao veículo migrado).
+
+Testes das regras: `firebase/test/veiculos.rules.test.js` (rodam com os demais: `npx firebase-tools emulators:exec --only firestore --project demo-rumo "npm test"` dentro de `firebase/`). Nenhum índice novo.

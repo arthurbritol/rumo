@@ -5,6 +5,9 @@ import androidx.room.withTransaction
 import app.hunter.app.data.AppDatabase
 import app.hunter.app.data.SyncDao
 import app.hunter.app.data.TombstoneEntity
+import app.hunter.app.veiculo.completarVeiculoLegado
+import app.hunter.maintenance.data.VeiculoEntity
+import app.hunter.sync.VEICULO_LEGADO_ID
 import app.hunter.sync.Kind
 import app.hunter.sync.LocalStore
 import app.hunter.sync.OdometerDoc
@@ -24,7 +27,8 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
     private val maintenance get() = db.maintenanceDao()
 
     override suspend fun all(): List<SyncDoc> = db.withTransaction {
-        dao.fuelups().map { it.toDoc() } +
+        dao.veiculos().map { it.toDoc() } +
+            dao.fuelups().map { it.toDoc() } +
             dao.items().map { it.toDoc() } +
             dao.favoritePlaces().mapNotNull { it.toDocOrNull() } +
             dao.finishedTrips().mapNotNull { it.toDocOrNull() } +
@@ -32,7 +36,8 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
     }
 
     override suspend fun dirty(): List<SyncDoc> = db.withTransaction {
-        dao.dirtyFuelups().map { it.toDoc() } +
+        dao.dirtyVeiculos().map { it.toDoc() } +
+            dao.dirtyFuelups().map { it.toDoc() } +
             dao.dirtyItems().map { it.toDoc() } +
             dao.dirtyPlaces().mapNotNull { it.toDocOrNull() } +
             dao.dirtyTrips().mapNotNull { it.toDocOrNull() } +
@@ -43,6 +48,8 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
         val now = System.currentTimeMillis()
         for (d in docs) {
             when (d.kind) {
+                // Veículo: sem lápide (remoção lógica), então só a regra de versão e o upsert.
+                Kind.VEICULO -> if (shouldApply(dao.veiculoById(d.gid)?.updatedAtMs, d.updatedAtMs)) dao.putVeiculo(veiculoFromDoc(d))
                 Kind.FUELUP -> applyOne(d, dao.fuelupByGid(d.gid)?.updatedAtMs,
                     onDelete = { dao.deleteFuelup(d.gid) },
                     onUpsert = {
@@ -79,6 +86,21 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
                     })
             }
         }
+        garantirVeiculosDasLinhas()
+    }
+
+    /**
+     * Linhas de dados vindas da nuvem podem apontar para um veículo que não veio junto (conta antiga, onde o
+     * veículo migrado só existia no banco do outro aparelho): cria o veículo que falta, para nada ficar sem dono.
+     */
+    private suspend fun garantirVeiculosDasLinhas() {
+        val faltando = maintenance.veiculoIdsSemLinha()
+        if (faltando.isEmpty()) return
+        val perfil = ProfilePrefs.read(prefs)
+        for (id in faltando) {
+            val v = VeiculoEntity(id = id, tipo = "MOTO", apelido = "Minha moto", tanqueLitros = maintenance.getOdometer(id)?.tankLiters ?: 13.0)
+            dao.putVeiculo(completarVeiculoLegado(v, perfil) ?: v)
+        }
     }
 
     /**
@@ -109,14 +131,15 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
                 Kind.MAINTENANCE -> dao.cleanItem(d.gid, d.updatedAtMs)
                 Kind.PLACE -> dao.cleanPlace(d.gid, d.updatedAtMs)
                 Kind.TRIP -> dao.cleanTrip(d.gid, d.updatedAtMs)
+                Kind.VEICULO -> dao.cleanVeiculo(d.gid, d.updatedAtMs)
             }
         }
     }
 
-    override suspend fun odometer(): OdometerDoc? = maintenance.getOdometer()?.toDoc()
+    override suspend fun odometers(): List<OdometerDoc> = maintenance.getOdometers().map { it.toDoc() }
 
     override suspend fun applyOdometer(o: OdometerDoc, dirty: Boolean) = db.withTransaction {
-        val cur = maintenance.getOdometer()
+        val cur = maintenance.getOdometer(o.veiculoId ?: VEICULO_LEGADO_ID)
         if (cur == null || shouldApply(cur.updatedAtMs, o.updatedAtMs)) {
             maintenance.putOdometerRaw(odometerFromDoc(o).copy(dirty = dirty))
         }
@@ -126,14 +149,20 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
 
     override suspend fun applyProfile(p: UserProfile) {
         when (profileApplyDecision(ProfilePrefs.read(prefs), ProfilePrefs.isDirty(prefs), p)) {
-            ProfileApply.WRITE -> ProfilePrefs.write(prefs, p)
+            ProfileApply.WRITE -> {
+                ProfilePrefs.write(prefs, p)
+                // O perfil trouxe marca/modelo (outro aparelho): completa o veículo migrado, se estiver sem esses dados.
+                db.withTransaction {
+                    dao.veiculoById(VEICULO_LEGADO_ID)?.let { v -> completarVeiculoLegado(v, p)?.let { dao.putVeiculo(it) } }
+                }
+            }
             ProfileApply.CLEAN_ONLY -> ProfilePrefs.markClean(prefs)
             ProfileApply.SKIP -> Unit // editado durante a sincronização: continua sujo e sobe na próxima
         }
     }
 
     override suspend fun hasDirtyOdometerOrProfile(): Boolean =
-        maintenance.getOdometer()?.dirty == true || ProfilePrefs.isDirty(prefs)
+        maintenance.dirtyOdometerCount() > 0 || ProfilePrefs.isDirty(prefs)
 
     /**
      * Apaga os dados da conta deste aparelho. Também apaga os locais recentes (só locais), de propósito:
@@ -144,7 +173,7 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
         db.withTransaction {
             val blocker = clearAllBlocker(
                 dirtyRows = dao.dirtyCount(),
-                odometerDirty = maintenance.getOdometer()?.dirty == true,
+                odometerDirty = maintenance.dirtyOdometerCount() > 0,
                 profileDirty = ProfilePrefs.isDirty(prefs),
             )
             if (blocker != null) throw IllegalStateException(blocker)
@@ -154,6 +183,7 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
             dao.wipePlaces()
             dao.wipeTombstones()
             dao.wipeOdometer()
+            dao.wipeVeiculos()
         }
         ProfilePrefs.clear(prefs)
     }

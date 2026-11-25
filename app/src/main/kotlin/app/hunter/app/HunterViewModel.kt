@@ -61,6 +61,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -118,7 +120,7 @@ data class PreviewUi(
     val route: Route? get() = routes.getOrNull(selected)
 }
 
-@OptIn(FlowPreview::class)
+@OptIn(FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HunterViewModel(app: Application) : AndroidViewModel(app) {
     private val hunter = app as HunterApp
     private val store = hunter.tripStore
@@ -496,20 +498,30 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- combustível, manutenção, hodômetro ----------
 
-    val fuelups: StateFlow<List<Fuelup>> = dao.observeFuelups().map { l -> l.map { it.toModel() } }.hot(emptyList())
+    /** Veículo ativo: abastecimentos, manutenção, hodômetro e autonomia são sempre dele. */
+    private val veiculoAtivoId: StateFlow<String?> = hunter.veiculos.veiculoAtivo.map { it?.id }.distinctUntilChanged().hot(null)
+
+    val fuelups: StateFlow<List<Fuelup>> = veiculoAtivoId
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else dao.observeFuelups(id) }
+        .map { l -> l.map { it.toModel() } }.hot(emptyList())
     val fuelSummary: StateFlow<FuelSummary> = fuelups.map { FuelMath.summarize(it) }.hot(FuelMath.summarize(emptyList()))
 
-    private val odometerEntity: StateFlow<OdometerEntity?> = dao.observeOdometer().hot(null)
-    val tankLiters: StateFlow<Double> = odometerEntity.map { it?.tankLiters ?: DEFAULT_TANK_L }.hot(DEFAULT_TANK_L)
+    private val odometerEntity: StateFlow<OdometerEntity?> = veiculoAtivoId
+        .flatMapLatest { id -> if (id == null) flowOf(null) else dao.observeOdometer(id) }.hot(null)
+    val tankLiters: StateFlow<Double> = combine(odometerEntity, hunter.veiculos.veiculoAtivo) { o, v ->
+        o?.tankLiters ?: v?.tanqueLitros ?: DEFAULT_TANK_L
+    }.hot(DEFAULT_TANK_L)
 
-    private val tripsDistanceM: StateFlow<Double> = allTrips.map { l -> l.sumOf { it.stats.distanceM } }.hot(0.0)
+    /** Distância das viagens do veículo ativo (o hodômetro dele soma só as viagens dele). */
+    private val tripsDistanceM: StateFlow<Double> = veiculoAtivoId
+        .flatMapLatest { id -> if (id == null) flowOf(0.0) else store.observeDistanceM(id) }.hot(0.0)
 
     /** Hodômetro da moto (km): deslocamento informado + soma das viagens (inclui a que está gravando). */
     val odometerKm: StateFlow<Double> =
         combine(odometerEntity, tripsDistanceM) { o, m -> Odometer.currentKm(o?.offsetKm ?: 0.0, m) }.hot(0.0)
 
     val maintenance: StateFlow<List<MaintenanceRow>> =
-        combine(dao.observeItems(), odometerKm) { items, km ->
+        combine(veiculoAtivoId.flatMapLatest { id -> if (id == null) flowOf(emptyList()) else dao.observeItems(id) }, odometerKm) { items, km ->
             val now = System.currentTimeMillis()
             items.map { MaintenanceRow(it.toModel(), MaintenanceMath.status(it.toModel(), km, now)) }
                 .sortedBy { order(it.status.state) }
@@ -617,11 +629,12 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         val route = p.route ?: return
         adviceJob?.cancel()
         adviceJob = viewModelScope.launch {
-            val fuelups = dao.observeFuelups().first().map { it.toModel() }
-            val od = dao.getOdometer()
-            val tripsM = store.observeTrips().first().sumOf { it.stats.distanceM }
+            val veiculo = hunter.veiculos.ativoAgora()
+            val fuelups = veiculo?.let { dao.observeFuelups(it.id).first() }.orEmpty().map { it.toModel() }
+            val od = veiculo?.let { dao.getOdometer(it.id) }
+            val tripsM = veiculo?.let { store.observeDistanceM(it.id).first() } ?: 0.0
             val odo = Odometer.currentKm(od?.offsetKm ?: 0.0, tripsM)
-            val state = FuelPlanner.state(od?.tankLiters ?: DEFAULT_TANK_L, FuelMath.summarize(fuelups).avgKmPerL, odo, fuelups)
+            val state = FuelPlanner.state(od?.tankLiters ?: veiculo?.tanqueLitros ?: DEFAULT_TANK_L, FuelMath.summarize(fuelups).avgKmPerL, odo, fuelups)
             if (state == null) {
                 _preview.update { cur -> if (cur != null && cur.route === route) cur.copy(fuel = null, noFuelData = route.distanceM > 60_000) else cur }
                 return@launch
@@ -748,16 +761,18 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         // sincronização da conta: os itens dela (com histórico) chegam antes e a semente não vira duplicata.
         if (!prefs.getBoolean("seeded", false)) {
             viewModelScope.launch {
-                combine(account.gateway.state, account.syncedUid) { s, synced ->
+                combine(account.gateway.state, account.syncedUid, veiculoAtivoId) { s, synced, veiculoId ->
                     val uid = (s as? AuthState.SignedIn)?.uid
-                    (uid != null) to (uid != null && synced == uid)
-                }.first { (signedIn, synced) ->
-                    when (maintenanceSeedDecision(dao.itemCount(), signedIn, synced)) {
+                    Triple(uid != null, uid != null && synced == uid, veiculoId)
+                }.first { (signedIn, synced, veiculoId) ->
+                    // Sem veículo ativo ainda (instalação nova antes do cadastro): espera; a semente é do veículo.
+                    if (veiculoId == null) return@first false
+                    when (maintenanceSeedDecision(dao.itemCount(veiculoId), signedIn, synced)) {
                         SeedDecision.WAIT -> false
                         SeedDecision.MARK_ONLY -> true
                         SeedDecision.SEED -> {
                             MaintenanceMath.defaultItems.forEach { (n, km, days) ->
-                                dao.insertItem(MaintenanceItemEntity(name = n, intervalKm = km, intervalDays = days))
+                                dao.insertItem(MaintenanceItemEntity(name = n, intervalKm = km, intervalDays = days, veiculoId = veiculoId))
                             }
                             true
                         }
@@ -771,7 +786,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- ações de garagem ----------
 
     fun addFuelup(odometerKm: Double, liters: Double, totalCost: Double, full: Boolean) = viewModelScope.launch {
-        dao.insertFuelup(FuelupEntity(dateMs = System.currentTimeMillis(), odometerKm = odometerKm, liters = liters, totalCost = totalCost, fullTank = full))
+        val veiculo = hunter.veiculos.ativoAgora() ?: return@launch
+        dao.insertFuelup(FuelupEntity(dateMs = System.currentTimeMillis(), odometerKm = odometerKm, liters = liters, totalCost = totalCost, fullTank = full, veiculoId = veiculo.id))
         // Abastecer em hodômetro maior que o calculado é um bom sinal de que o painel mudou: ajusta o deslocamento.
         if (odometerKm > this@HunterViewModel.odometerKm.value) setOdometer(odometerKm)
         syncSoon()
@@ -780,19 +796,23 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteFuelup(id: Long) = viewModelScope.launch { dao.deleteFuelup(id); syncSoon() }
 
     fun setOdometer(panelKm: Double) = viewModelScope.launch {
-        val cur = dao.getOdometer() ?: OdometerEntity()
+        val veiculo = hunter.veiculos.ativoAgora() ?: return@launch
+        val cur = dao.getOdometer(veiculo.id) ?: OdometerEntity(veiculoId = veiculo.id, tankLiters = veiculo.tanqueLitros)
         dao.putOdometer(cur.copy(offsetKm = Odometer.offsetFor(panelKm, tripsDistanceM.value)))
         syncSoon()
     }
 
     fun setTank(liters: Double) = viewModelScope.launch {
-        val cur = dao.getOdometer() ?: OdometerEntity()
+        val veiculo = hunter.veiculos.ativoAgora() ?: return@launch
+        val cur = dao.getOdometer(veiculo.id) ?: OdometerEntity(veiculoId = veiculo.id, tankLiters = veiculo.tanqueLitros)
         dao.putOdometer(cur.copy(tankLiters = liters))
+        if (veiculo.tanqueLitros != liters) hunter.veiculos.editar(veiculo.copy(tanqueLitros = liters))
         syncSoon()
     }
 
     fun addMaintenanceItem(name: String, km: Int?, days: Int?) = viewModelScope.launch {
-        dao.insertItem(MaintenanceItemEntity(name = name, intervalKm = km, intervalDays = days))
+        val veiculo = hunter.veiculos.ativoAgora() ?: return@launch
+        dao.insertItem(MaintenanceItemEntity(name = name, intervalKm = km, intervalDays = days, veiculoId = veiculo.id))
         syncSoon()
     }
 
