@@ -151,7 +151,10 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
         storeProvider = { FirestoreSocialStore(firestore) },
         readProfile = { ProfilePrefs.read(prefs) },
         readTrips = { finishedSlices(database.syncDao().finishedTrips()) },
-        readCostPerKm = { FuelMath.summarize(database.syncDao().fuelups().map { it.toModel() }).avgCostPerKm },
+        readCostPerKm = {
+            val ativo = app.veiculos.ativoAgora()?.id
+            FuelMath.summarize(database.syncDao().fuelups().filter { ativo == null || it.veiculoId == ativo }.map { it.toModel() }).avgCostPerKm
+        },
         searchPrefs = SearchPref(prefs, ::signedUid),
         scope = scope,
         // Rede só para o primeiro fix (e dentro de um ambiente fechado); pontos velhos são descartados pelo publicador.

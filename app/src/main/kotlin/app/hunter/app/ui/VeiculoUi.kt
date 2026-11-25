@@ -53,6 +53,7 @@ import app.hunter.model.TipoVeiculo
 import app.hunter.model.Veiculo
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+
 private const val OUTRA_MARCA = "Outra"
 private const val OUTRO_MODELO = "Outro modelo…"
 

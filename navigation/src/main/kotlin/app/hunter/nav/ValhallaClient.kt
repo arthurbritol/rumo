@@ -11,7 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Rotas com o Valhalla (OpenStreetMap), custo `motorcycle`. O servidor público
+ * Rotas com o Valhalla (OpenStreetMap), custo `motorcycle` (moto) ou `auto` (carro). O servidor público
  * (valhalla1.openstreetmap.de) é de uso justo: bom para uso pessoal; para uso intenso, hospedar o próprio.
  */
 class ValhallaClient(
@@ -22,8 +22,8 @@ class ValhallaClient(
      * Rota principal primeiro; até [alternates] alternativas depois. Com [via] (paradas intermediárias, ex.: um
      * posto) a rota passa por elas na ordem e não há alternativas.
      */
-    suspend fun route(from: LatLon, to: LatLon, profile: RouteProfile, alternates: Int = 0, via: List<LatLon> = emptyList()): List<Route> {
-        val body = buildRequest(from, to, profile, if (via.isEmpty()) alternates else 0, via)
+    suspend fun route(from: LatLon, to: LatLon, profile: RouteProfile, alternates: Int = 0, via: List<LatLon> = emptyList(), tipo: TipoDeRota = TipoDeRota.MOTO): List<Route> {
+        val body = buildRequest(from, to, profile, if (via.isEmpty()) alternates else 0, via, tipo)
         val text = http.postJson("$baseUrl/route", body)
         return parse(text, profile)
     }
@@ -31,17 +31,25 @@ class ValhallaClient(
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
-        fun buildRequest(from: LatLon, to: LatLon, profile: RouteProfile, alternates: Int = 0, via: List<LatLon> = emptyList()): String {
+        fun buildRequest(from: LatLon, to: LatLon, profile: RouteProfile, alternates: Int = 0, via: List<LatLon> = emptyList(), tipo: TipoDeRota = TipoDeRota.MOTO): String {
             val stops = listOf(from) + via + to
             val locations = stops.joinToString(",") { """{"lat":${it.lat},"lon":${it.lon},"type":"break"}""" }
-            val opts = when (profile) {
-                RouteProfile.FASTEST -> """"use_highways":1.0,"use_tolls":0.5"""
-                RouteProfile.CURVES -> """"use_highways":0.0,"use_tolls":0.0,"use_trails":0.0"""
-                RouteProfile.NO_TOLLS -> """"use_highways":1.0,"use_tolls":0.0"""
-                RouteProfile.NO_DIRT -> """"use_highways":1.0,"use_tolls":0.5,"use_trails":0.0,"exclude_unpaved":true"""
+            val (costing, opts) = when (tipo) {
+                TipoDeRota.MOTO -> "motorcycle" to when (RouteProfile.valido(profile, tipo)) {
+                    RouteProfile.CURVES -> """"use_highways":0.0,"use_tolls":0.0,"use_trails":0.0"""
+                    RouteProfile.NO_TOLLS -> """"use_highways":1.0,"use_tolls":0.0"""
+                    RouteProfile.NO_DIRT -> """"use_highways":1.0,"use_tolls":0.5,"use_trails":0.0,"exclude_unpaved":true"""
+                    else -> """"use_highways":1.0,"use_tolls":0.5"""
+                }
+                // `auto` aceita use_highways, use_tolls e use_ferry; sem use_trails (só moto/bicicleta).
+                TipoDeRota.CARRO -> "auto" to when (RouteProfile.valido(profile, tipo)) {
+                    RouteProfile.NO_TOLLS -> """"use_highways":1.0,"use_tolls":0.0,"use_ferry":0.5"""
+                    RouteProfile.NO_FERRY -> """"use_highways":1.0,"use_tolls":0.5,"use_ferry":0.0"""
+                    else -> """"use_highways":1.0,"use_tolls":0.5,"use_ferry":0.5"""
+                }
             }
             return """{"locations":[$locations],""" +
-                """"costing":"motorcycle","costing_options":{"motorcycle":{$opts}},""" +
+                """"costing":"$costing","costing_options":{"$costing":{$opts}},""" +
                 """"directions_options":{"language":"pt-BR","units":"kilometers"},"alternates":$alternates}"""
         }
 

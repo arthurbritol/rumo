@@ -27,6 +27,7 @@ import app.hunter.model.Fuelup
 import app.hunter.model.GeoBox
 import app.hunter.model.MaintenanceItem
 import app.hunter.model.MaintenanceMath
+import app.hunter.model.TipoVeiculo
 import app.hunter.model.TrackPoint
 import app.hunter.model.TripSummary
 import app.hunter.nav.LatLon
@@ -35,6 +36,10 @@ import app.hunter.nav.NavStatus
 import app.hunter.nav.Place
 import app.hunter.nav.Route
 import app.hunter.nav.RouteProfile
+import app.hunter.nav.TipoDeRota
+import app.hunter.app.veiculo.itensDeManutencaoPadrao
+import app.hunter.app.veiculo.paraRota
+import app.hunter.app.veiculo.perfilAoTrocarDeTipo
 import app.hunter.podble.PodStatus
 import app.hunter.trips.recording.AndroidLocationSource
 import app.hunter.trips.recording.TrackingStatus
@@ -60,6 +65,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -107,6 +113,8 @@ data class SearchUi(
 data class PreviewUi(
     val place: Place,
     val profile: RouteProfile = RouteProfile.FASTEST,
+    /** Tipo do veículo ativo: define o custo da rota e os perfis oferecidos. */
+    val tipo: TipoDeRota = TipoDeRota.MOTO,
     val routes: List<Route> = emptyList(),
     val selected: Int = 0,
     val loading: Boolean = true,
@@ -510,10 +518,15 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
     /** Cadastra o veículo do formulário (já validado) e o torna o ativo. */
     fun adicionarVeiculo(f: app.hunter.app.veiculo.VeiculoForm) = viewModelScope.launch {
         val v = f.paraVeiculo(id = "", criadoEm = 0L)
-        hunter.veiculos.adicionar(
+        val novo = hunter.veiculos.adicionar(
             tipo = v.tipo, apelido = v.apelido, marca = v.marca, modelo = v.modelo, ano = v.ano,
             tanqueLitros = v.tanqueLitros, tornarAtivo = true,
         )
+        // Veículo novo sem itens ganha a manutenção padrão do tipo (o primeiro veículo é semeado pelo fluxo da abertura).
+        if (prefs.getBoolean("seeded", false) && dao.itemCount(novo.id) == 0) {
+            itensDeManutencaoPadrao(novo.id, novo.tipo).forEach { dao.insertItem(it) }
+            syncSoon()
+        }
     }
 
     fun editarVeiculo(base: app.hunter.model.Veiculo, f: app.hunter.app.veiculo.VeiculoForm) = viewModelScope.launch {
@@ -608,12 +621,12 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
 
     fun previewTo(place: Place) {
         clearSearch()
-        _preview.value = PreviewUi(place)
+        _preview.value = PreviewUi(place, tipo = veiculoAtivo.value?.tipo.paraRota())
         loadRoutes()
     }
 
     fun setProfile(profile: RouteProfile) {
-        _preview.update { it?.copy(profile = profile, routes = emptyList(), selected = 0, loading = true, error = null) }
+        _preview.update { it?.copy(profile = perfilAoTrocarDeTipo(profile, it.tipo), routes = emptyList(), selected = 0, loading = true, error = null) }
         loadRoutes()
     }
 
@@ -656,7 +669,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
             val od = veiculo?.let { dao.getOdometer(it.id) }
             val tripsM = veiculo?.let { store.observeDistanceM(it.id).first() } ?: 0.0
             val odo = Odometer.currentKm(od?.offsetKm ?: 0.0, tripsM)
-            val state = FuelPlanner.state(od?.tankLiters ?: veiculo?.tanqueLitros ?: DEFAULT_TANK_L, FuelMath.summarize(fuelups).avgKmPerL, odo, fuelups)
+            val state = FuelPlanner.state(od?.tankLiters ?: veiculo?.tanqueLitros ?: DEFAULT_TANK_L, FuelMath.summarize(fuelups).avgKmPerL, odo, fuelups,
+                FuelPlanner.consumoPadrao(veiculo?.tipo, veiculo?.consumoPadraoKmL))
             if (state == null) {
                 _preview.update { cur -> if (cur != null && cur.route === route) cur.copy(fuel = null, noFuelData = route.distanceM > 60_000) else cur }
                 return@launch
@@ -697,7 +711,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val routes = NavServices.router.route(
                     LatLon(from.latitude, from.longitude), p.place.latLon, p.profile, alternates = 2,
-                    via = listOfNotNull(p.via?.latLon),
+                    via = listOfNotNull(p.via?.latLon), tipo = p.tipo,
                 )
                 _preview.update { cur ->
                     if (cur == null || cur.place != p.place || cur.profile != p.profile || cur.via != p.via) cur
@@ -760,6 +774,18 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         watchConnection()
         checkUpdate()
 
+        // Trocar de veículo com a prévia aberta: ajusta o perfil ao tipo novo (se não existe, "Mais rápida") e recalcula.
+        viewModelScope.launch {
+            veiculoAtivoId.drop(1).collect {
+                if (_preview.value == null) return@collect
+                val tipo = veiculoAtivo.value?.tipo.paraRota()
+                _preview.update { cur ->
+                    cur?.copy(tipo = tipo, profile = perfilAoTrocarDeTipo(cur.profile, tipo), routes = emptyList(), selected = 0, loading = true, error = null, fuel = null)
+                }
+                loadRoutes()
+            }
+        }
+
         // Busca com debounce; cancela a anterior quando o texto muda.
         viewModelScope.launch {
             queryFlow.debounce(180).distinctUntilChanged().collectLatest { q ->
@@ -793,9 +819,8 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
                         SeedDecision.WAIT -> false
                         SeedDecision.MARK_ONLY -> true
                         SeedDecision.SEED -> {
-                            MaintenanceMath.defaultItems.forEach { (n, km, days) ->
-                                dao.insertItem(MaintenanceItemEntity(name = n, intervalKm = km, intervalDays = days, veiculoId = veiculoId))
-                            }
+                            val tipo = hunter.veiculos.ativoAgora()?.tipo ?: TipoVeiculo.MOTO
+                            itensDeManutencaoPadrao(veiculoId, tipo).forEach { dao.insertItem(it) }
                             true
                         }
                     }

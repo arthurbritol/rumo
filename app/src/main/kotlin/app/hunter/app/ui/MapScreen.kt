@@ -1125,7 +1125,7 @@ private fun PreviewCard(vm: HunterViewModel, pv: PreviewUi, onStart: () -> Unit,
         }
 
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(RouteProfile.entries) { prof -> SelectChip(prof.label, prof == pv.profile, { vm.setProfile(prof) }) }
+            items(RouteProfile.paraTipo(pv.tipo)) { prof -> SelectChip(prof.label, prof == pv.profile, { vm.setProfile(prof) }) }
         }
         Text(pv.profile.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 

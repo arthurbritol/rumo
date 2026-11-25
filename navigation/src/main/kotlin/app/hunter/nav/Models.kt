@@ -18,12 +18,32 @@ data class Place(
     val latLon get() = LatLon(lat, lon)
 }
 
-/** Perfis de rota para moto (Valhalla `motorcycle`). */
+/** Tipo de rota (custo do Valhalla): o app converte o tipo do veículo ativo nisto; o módulo não conhece o app. */
+enum class TipoDeRota { MOTO, CARRO }
+
+/** Perfis de rota. Moto: Valhalla `motorcycle`; carro: `auto` (só os perfis de [paraTipo] valem em cada um). */
 enum class RouteProfile(val label: String, val hint: String) {
     FASTEST("Mais rápida", "Usa rodovias"),
     CURVES("Estradas e curvas", "Evita rodovias"),
     NO_TOLLS("Sem pedágio", "Evita praças de pedágio"),
     NO_DIRT("Sem terra", "Evita trechos não pavimentados"),
+    NO_FERRY("Evitar balsa", "Evita travessias de balsa"),
+    ;
+
+    companion object {
+        /** Perfis oferecidos para o tipo, na ordem de exibição; o primeiro é o padrão. */
+        fun paraTipo(tipo: TipoDeRota): List<RouteProfile> = when (tipo) {
+            TipoDeRota.MOTO -> listOf(FASTEST, CURVES, NO_TOLLS, NO_DIRT)
+            TipoDeRota.CARRO -> listOf(FASTEST, NO_TOLLS, NO_FERRY)
+        }
+
+        /** Lê o nome gravado; desconhecido (ou ausente) vira [FASTEST]. */
+        fun deNome(nome: String?): RouteProfile = entries.firstOrNull { it.name == nome } ?: FASTEST
+
+        /** [perfil] se existe no [tipo]; senão [FASTEST]. */
+        fun valido(perfil: RouteProfile, tipo: TipoDeRota): RouteProfile =
+            if (perfil in paraTipo(tipo)) perfil else FASTEST
+    }
 }
 
 /**

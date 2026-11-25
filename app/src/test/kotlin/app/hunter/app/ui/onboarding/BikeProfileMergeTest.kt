@@ -35,4 +35,28 @@ class BikeProfileMergeTest {
         val existing = UserProfile("  ", null, null, null)
         assertEquals("Ana", BikeProfileMerge.merge(existing, form(), "Ana", voice = true).displayName)
     }
+
+    private fun formCarro() = BikeForm(short = false).apply {
+        escolherTipo(app.hunter.model.TipoVeiculo.CARRO)
+        brand = "Fiat"
+        model = "Argo"
+        year = "2021"
+        odometerKm = "10"
+    }
+
+    @Test fun `cadastro de carro nao grava marca modelo e ano no perfil`() {
+        val p = BikeProfileMerge.merge(null, formCarro(), "Ana", voice = true)
+        assertEquals("Ana", p.displayName)
+        assertEquals(null, p.brand)
+        assertEquals(null, p.model)
+        assertEquals(null, p.year)
+    }
+
+    @Test fun `cadastro de carro preserva a moto que ja estava no perfil`() {
+        val existing = UserProfile("Ana", "Honda", "CG 160", 2022)
+        val p = BikeProfileMerge.merge(existing, formCarro(), "Ana", voice = true)
+        assertEquals("Honda", p.brand)
+        assertEquals("CG 160", p.model)
+        assertEquals(2022, p.year)
+    }
 }

@@ -36,11 +36,15 @@ object BikeProfileMerge {
     /**
      * Um perfil local com nome (já sincronizado ou editado) mantém o nome; só moto muda. Sem isso o nome da
      * conta, aparado e limitado a 1..[MAX_NAME] (limite das regras do Firestore), com "Motociclista" se vazio.
+     * Cadastro de CARRO não grava marca, modelo nem ano no perfil (esses campos só valem para a moto/veículo
+     * migrado): mantém os que já existiam.
      */
     fun merge(existing: UserProfile?, form: BikeForm, accountName: String, voice: Boolean): UserProfile {
         val name = existing?.displayName?.trim()?.takeIf { it.isNotEmpty() }
             ?: accountName.trim().take(MAX_NAME).trim().ifEmpty { "Motociclista" }
-        return form.toProfile(name).copy(voice = voice)
+        val base = form.toProfile(name)
+        val perfil = if (form.tipo == TipoVeiculo.CARRO) base.copy(brand = existing?.brand, model = existing?.model, year = existing?.year) else base
+        return perfil.copy(voice = voice)
     }
 }
 
