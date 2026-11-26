@@ -377,6 +377,7 @@ private fun HunterRoot(
                 lon = loc.longitude,
                 bearing = loc.bearing,
                 timeAgoText = timeAgo,
+                carro = loc.carro,
             )
         }
     }

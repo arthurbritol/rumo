@@ -99,6 +99,7 @@ data class FriendMarker(
     val lon: Double,
     val bearing: Float? = null,
     val timeAgoText: String = "",
+    val carro: Boolean = false,
 )
 
 /**
@@ -713,6 +714,7 @@ private fun friendsFeatures(friends: List<FriendMarker>): FeatureCollection {
         feat.addStringProperty("timeAgo", f.timeAgoText)
         feat.addStringProperty("label", label)
         feat.addNumberProperty("b", (f.bearing ?: 0f).toDouble())
+        feat.addStringProperty("icon", if (f.carro) "friend-car" else "friend-bike")
         feat
     }
     return FeatureCollection.fromFeatures(features)
@@ -736,6 +738,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     }
     st.addImage("me", meBitmap(density))
     st.addImage("friend-bike", friendBikeBitmap(density))
+    st.addImage("friend-car", carBitmap(density, destaque = false, proprio = false))
     st.addImage("fuel-station", fuelStationBitmap(density))
     app.hunter.nav.perigos.Perigo.values().forEach { st.addImage(perigoIconId(it), perigoBitmap(it, (30 * density).toInt())) }
     // Uma imagem por variante (não por pessoa). A moto laranja do próprio usuário é o marcador "me".
@@ -823,7 +826,7 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     )
     st.addLayer(
         SymbolLayer("friends-symbol", SRC_FRIENDS).withProperties(
-            iconImage("friend-bike"),
+            iconImage(Expression.get("icon")),
             iconRotate(Expression.get("b")),
             iconRotationAlignment("map"),
             iconAllowOverlap(true),

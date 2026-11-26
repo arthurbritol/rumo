@@ -147,4 +147,14 @@ class FirestoreSocialStoreMappingTest {
     fun `locationPermission docId combina de e para`() {
         assertEquals("user_a_user_b", LocationPermission.docId("user_a", "user_b"))
     }
+
+    @Test
+    fun `veiculo so vai a nuvem para carro e volta no mapeamento inverso`() {
+        val moto = LiveLocation(latitude = -23.0, longitude = -46.0, updatedAtMs = 1_700_000_000_000L)
+        assertEquals(false, liveLocationToMap(moto).containsKey("veiculo"))
+        assertEquals(false, mapToLiveLocation(liveLocationToMap(moto))!!.carro)
+        val carro = moto.copy(carro = true)
+        assertEquals("c", liveLocationToMap(carro)["veiculo"])
+        assertEquals(true, mapToLiveLocation(liveLocationToMap(carro))!!.carro)
+    }
 }

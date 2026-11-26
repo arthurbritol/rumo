@@ -243,7 +243,7 @@ fun mapToRole(id: String, data: Map<String, Any?>): Role? {
 }
 
 /** Mapa de `localizacoes/{uid}`: coordenadas, rumo, velocidade e instante da atualização. */
-fun liveLocationToMap(loc: LiveLocation): Map<String, Any?> = mapOf(
+fun liveLocationToMap(loc: LiveLocation): Map<String, Any?> = (if (loc.carro) mapOf<String, Any?>("veiculo" to "c") else emptyMap<String, Any?>()) + mapOf(
     "latitude" to if (loc.latitude.isNaN()) 0.0 else loc.latitude.coerceIn(-90.0, 90.0),
     "longitude" to if (loc.longitude.isNaN()) 0.0 else loc.longitude.coerceIn(-180.0, 180.0),
     "bearing" to loc.bearing?.let { if (it.isNaN()) null else it.coerceIn(0f, 360f) },
@@ -271,6 +271,7 @@ fun mapToLiveLocation(data: Map<String, Any?>): LiveLocation? {
         bearing = bearing,
         speedKmh = speed,
         updatedAtMs = updated,
+        carro = data["veiculo"] == "c",
     )
 }
 

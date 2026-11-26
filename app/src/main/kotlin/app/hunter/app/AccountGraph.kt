@@ -1,5 +1,6 @@
 package app.hunter.app
 
+import app.hunter.model.TipoVeiculo
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.room.InvalidationTracker
@@ -157,6 +158,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
         },
         searchPrefs = SearchPref(prefs, ::signedUid),
         scope = scope,
+        carro = { app.veiculos.veiculoAtivo.value?.tipo == TipoVeiculo.CARRO },
         // Rede só para o primeiro fix (e dentro de um ambiente fechado); pontos velhos são descartados pelo publicador.
         locationSourceFactory = { AndroidLocationSource(app, intervalMs = 3_000L, includeNetwork = true) },
     )

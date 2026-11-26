@@ -75,6 +75,8 @@ class SocialGraph(
     /** Lido a cada cálculo: trocar o fuso com o app aberto muda a semana. */
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     private val clock: () -> Long = System::currentTimeMillis,
+    /** O veículo ativo é carro; o amigo aparece com ícone de carro. */
+    private val carro: () -> Boolean = { false },
     private val log: (String, Throwable) -> Unit = { m, e -> Log.w("Rumo/social", m, e) },
     /** "Visto por último" é renovado a cada tanto enquanto o app está na frente. */
     private val presenceRenewMs: Long = 60_000L,
@@ -134,6 +136,7 @@ class SocialGraph(
                 grantedPermissions = combine(store.observeGrantedPermissions(uid), store.observeFriendUids(uid)) { g, f -> g intersect f },
                 appInForeground = foreground,
                 clock = clock,
+                carro = carro,
             )
         }
         return SocialSession(uid, store, SocialEngine(store, uid, clock), publisher, livePub).also { cached = it }

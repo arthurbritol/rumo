@@ -55,6 +55,8 @@ class LiveLocationPublisher(
     private val grantedPermissions: Flow<Set<String>>,
     private val appInForeground: Flow<Boolean> = flowOf(false),
     private val clock: () -> Long = System::currentTimeMillis,
+    /** O veículo ativo é carro (lido a cada publicação). */
+    private val carro: () -> Boolean = { false },
     private val minFloorMs: Long = DEFAULT_MIN_FLOOR_MS,
     private val minIntervalMs: Long = DEFAULT_MIN_INTERVAL_MS,
     private val minDistanceMeters: Double = DEFAULT_MIN_DISTANCE_METERS,
@@ -194,6 +196,7 @@ class LiveLocationPublisher(
                 bearing = point.bearingDeg,
                 speedKmh = point.speedMps?.let { (it * 3.6f).coerceAtLeast(0f) },
                 updatedAtMs = now,
+                carro = carro(),
             )
             try {
                 store.publishLocation(liveLoc)

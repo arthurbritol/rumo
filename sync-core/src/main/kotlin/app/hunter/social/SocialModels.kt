@@ -46,6 +46,8 @@ data class LiveLocation(
     val bearing: Float? = null,
     val speedKmh: Float? = null,
     val updatedAtMs: Long = System.currentTimeMillis(),
+    /** A pessoa está num carro (o amigo aparece com ícone de carro). Só vai à nuvem quando verdadeiro: moto = campo ausente. */
+    val carro: Boolean = false,
 ) {
     fun isExpired(nowMs: Long = System.currentTimeMillis(), maxAgeMs: Long = 5 * 60 * 1000L): Boolean =
         nowMs - updatedAtMs > maxAgeMs

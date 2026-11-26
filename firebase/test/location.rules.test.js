@@ -256,3 +256,10 @@ test('permissoesLocalizacao: consultas por de e por para funcionam apenas para o
     db(CAIO).collection('permissoesLocalizacao').where('para', '==', BETO).get()
   );
 });
+
+test('localizacaoValida: veiculo so aceita "c" (carro); ausente = moto', async () => {
+  await assertSucceeds(db(ANA).doc(`localizacoes/${ANA}`).set(localizacaoValidaDoc({ veiculo: 'c' })));
+  await assertFails(db(ANA).doc(`localizacoes/${ANA}`).set(localizacaoValidaDoc({ veiculo: 'm' })));
+  await assertFails(db(ANA).doc(`localizacoes/${ANA}`).set(localizacaoValidaDoc({ veiculo: 7 })));
+  await assertSucceeds(db(ANA).doc(`localizacoes/${ANA}`).set(localizacaoValidaDoc()));
+});

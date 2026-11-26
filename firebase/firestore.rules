@@ -225,12 +225,13 @@ service cloud.firestore {
     }
 
     function localizacaoValida(d) {
-      return d.keys().hasOnly(['latitude', 'longitude', 'bearing', 'speedKmh', 'updatedAtMs'])
+      return d.keys().hasOnly(['latitude', 'longitude', 'bearing', 'speedKmh', 'updatedAtMs', 'veiculo'])
         && d.keys().hasAll(['latitude', 'longitude', 'updatedAtMs'])
         && d.latitude is number && d.latitude >= -90 && d.latitude <= 90
         && d.longitude is number && d.longitude >= -180 && d.longitude <= 180
         && (!('bearing' in d) || d.bearing == null || (d.bearing is number && d.bearing >= 0 && d.bearing <= 360))
         && numeroOuNulo(d, 'speedKmh')
+        && (!('veiculo' in d) || d.veiculo == 'c')
         && epochMsOk(d.updatedAtMs);
     }
 
