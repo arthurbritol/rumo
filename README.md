@@ -60,16 +60,16 @@ conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem
 - Roteiro de teste no aparelho: [docs/TESTES-MANUAIS-CONTA.md](docs/TESTES-MANUAIS-CONTA.md).
 
 **Amigos e rolê (precisa de conta)**
-- Aba Amigos: busque pelo nome, convide, aceite e veja o veículo e os km da semana de cada amigo. Dá para desfazer a
+- Aba Amigos: busque pelo nome, convide, aceite e veja o veículo e os km da semana de cada amigo; quem está de carro aparece no mapa com ícone de carro. Dá para desfazer a
   amizade ou bloquear, e escolher se você aparece na busca (Perfil).
 - Rolê em grupo: até 10 pessoas, cada uma informa quanto quer gastar; o app mostra a média e até onde o grupo
   vai com o custo por km de cada um. O rolê some sozinho em 7 dias.
 - Exige publicar as regras e o TTL no Firebase: [docs/FIREBASE.md](docs/FIREBASE.md). Roteiro de teste com duas
   contas: [docs/TESTES-MANUAIS-AMIGOS.md](docs/TESTES-MANUAIS-AMIGOS.md).
 
-**Rolê por perto (nesta versão, só para moto; precisa de conta e do servidor `workers/nearby`)**
-- "Procurando rolê": escolha ritmo, distância e parada; outros motociclistas por perto aparecem no mapa como motos
-  anônimas (posição aproximada, sem nome nem modelo), com destaque para quem combina com você. Raio de 5 a 20 km.
+**Rolê por perto (moto com moto, carro com carro; precisa de conta e do servidor `workers/nearby`)**
+- "Procurando rolê": escolha ritmo, distância e parada; quem está por perto no mesmo tipo de veículo (moto ou carro, conforme o veículo ativo) aparece no mapa como moto ou carro
+  anônimo (posição aproximada, sem nome nem modelo), com destaque para quem combina com você. Raio de 5 a 20 km.
 - Proponha um ponto de encontro (2 a 8 vagas), entre numa proposta, veja a distância e o tempo de cada um; a posição
   real só aparece a menos de 1 km do ponto. Ao fim, "Quero ser amigo" (só vira convite se os dois marcarem).
 - Bloquear e denunciar sem saber quem é; 3 denúncias de pessoas que estiveram no mesmo encontro suspendem a busca

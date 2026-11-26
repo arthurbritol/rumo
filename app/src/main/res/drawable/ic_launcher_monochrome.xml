@@ -2,5 +2,13 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M54,25 L77,82 L54,69 L31,82 Z" android:fillColor="#FFFFFFFF" />
+    <group android:translateX="-4" android:translateY="-1">
+        <path
+            android:pathData="M37,80 L37,28 L56,28 C75,28 75,55 56,55 L40,55 M52,56 C60,64 60,79 78,79"
+            android:strokeColor="#FFFFFFFF" android:strokeWidth="10.5"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path
+            android:pathData="M78,72.8 A6.2,6.2 0 1 1 78,85.2 A6.2,6.2 0 1 1 78,72.8 Z"
+            android:fillColor="#FFFFFFFF" />
+    </group>
 </vector>
