@@ -30,7 +30,7 @@ fun temVeiculo(ativo: Veiculo?, perfil: UserProfile?): Boolean =
 /** Nome curto do veículo para listas: apelido, senão "marca modelo", senão o tipo. */
 fun Veiculo.nomeExibicao(): String =
     apelido.trim().ifEmpty { listOf(marca, modelo).filter { it.isNotBlank() }.joinToString(" ").trim() }
-        .ifEmpty { if (tipo == TipoVeiculo.CARRO) "Carro" else "Moto" }
+        .ifEmpty { TextosDoVeiculo.de(tipo).rotuloDoTipo }
 
 /** Segunda linha da lista: "marca modelo · ano", sem repetir o nome quando ele já é "marca modelo". */
 fun Veiculo.detalhe(): String {

@@ -29,8 +29,10 @@ class AccountDefaultsTest {
     @Test
     fun `nome do perfil padrao - nome da conta, senao parte local do e-mail, senao Motociclista, limitado a 60`() {
         assertEquals("joao.silva", defaultProfileFor(null, " ", "joao.silva@gmail.com", true)!!.displayName)
-        assertEquals("Motociclista", defaultProfileFor(null, "", null, true)!!.displayName)
-        assertEquals("Motociclista", defaultProfileFor(null, null, "@x.com", true)!!.displayName)
+        assertEquals("Você", defaultProfileFor(null, "", null, true)!!.displayName)
+        assertEquals("Motorista", defaultProfileFor(null, "", null, true, app.hunter.model.TipoVeiculo.CARRO)!!.displayName)
+        assertEquals("Motociclista", defaultProfileFor(null, "", null, true, app.hunter.model.TipoVeiculo.MOTO)!!.displayName)
+        assertEquals("Você", defaultProfileFor(null, null, "@x.com", true)!!.displayName)
         assertEquals("n".repeat(60), defaultProfileFor(null, "n".repeat(90), null, true)!!.displayName)
     }
 }

@@ -1,5 +1,6 @@
 package app.hunter.app.ui
 
+import app.hunter.app.veiculo.LocalTextosDoVeiculo
 import app.hunter.nav.perigos.CategoriaPerigo
 import android.app.Activity
 import androidx.compose.foundation.BorderStroke
@@ -175,11 +176,11 @@ internal fun updateStatusText(s: UpdateCheck): String? = when (s) {
     UpdateCheck.FOUND -> "Há uma versão nova: veja o aviso no topo do mapa."
 }
 
-/** "Ana · Honda CG 160 (2020)" ou "Ana · moto não informada". */
+/** "Ana · Honda CG 160 (2020)" ou "Ana · veículo não informado". */
 private fun profileSummary(p: UserProfile): String {
     val bike = listOfNotNull(p.brand, p.model).joinToString(" ").ifBlank { null }
         ?.let { b -> p.year?.let { "$b ($it)" } ?: b }
-    return "${p.displayName} · ${bike ?: "moto não informada"}"
+    return "${p.displayName} · ${bike ?: "veículo não informado"}"
 }
 
 /** Linha chave-valor limpa para exibição de dados tabulares do perfil. */
@@ -447,27 +448,27 @@ fun ProfileScreen(
 
         VeiculoAtivoLinha(veiculos = veiculos, ativo = veiculoAtivo, onEscolher = onEscolherVeiculo)
 
-        // 3. Seção: Dados da Moto
+        // 3. Seção: Dados do veículo
         HCard {
             val currentBrand = profile?.brand?.ifBlank { null } ?: editProfile?.invoke()?.brand?.ifBlank { null }
             val currentModel = profile?.model?.ifBlank { null } ?: editProfile?.invoke()?.model?.ifBlank { null }
             val currentYear = profile?.year?.toString() ?: editProfile?.invoke()?.year?.ifBlank { null }
-            val bikeSummary = listOfNotNull(currentBrand, currentModel).joinToString(" ").ifEmpty { "Moto não cadastrada" }
+            val bikeSummary = listOfNotNull(currentBrand, currentModel).joinToString(" ").ifEmpty { "Veículo não cadastrado" }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SquircleIcon(
-                    iconRes = R.drawable.fa_motorcycle,
+                    iconRes = iconeDoVeiculo(veiculoAtivo?.tipo),
                     backgroundColor = NovareSuccess.copy(alpha = 0.15f),
                     tintColor = NovareSuccess,
-                    contentDescription = "Moto",
+                    contentDescription = "Veículo",
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = "Dados da Moto",
+                        text = "Dados do veículo",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -486,7 +487,7 @@ fun ProfileScreen(
                 ProfileDataRow(label = "Ano", value = currentYear ?: "Não informado")
 
                 Text(
-                    text = "O hodômetro e revisões da moto são ajustados na Garagem.",
+                    text = LocalTextosDoVeiculo.current.hodometroNaGaragem,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
@@ -495,7 +496,7 @@ fun ProfileScreen(
                 if (editProfile != null) {
                     Spacer(Modifier.height(4.dp))
                     RumoSecondaryButton(
-                        text = "Editar dados da moto",
+                        text = "Editar dados do veículo",
                         onClick = {
                             val f = editProfile()
                             editName = f.name
@@ -553,7 +554,7 @@ fun ProfileScreen(
                 )
 
                 Text(
-                    text = "O km da moto se ajusta na Garagem.",
+                    text = LocalTextosDoVeiculo.current.kmNaGaragem,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -616,7 +617,7 @@ fun ProfileScreen(
                     Switch(checked = searchable, onCheckedChange = onSearchableChange)
                 }
                 Text(
-                    text = "Permite que outros motociclistas encontrem você pelo nome de exibição para mandar convites de amizade e rolês em grupo.",
+                    text = "Permite que outras pessoas encontrem você pelo nome de exibição para mandar convites de amizade e rolês em grupo.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -836,7 +837,7 @@ fun ProfileScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Isto apaga seus dados da nuvem (moto, abastecimentos, manutenção, locais e resumo das viagens) " +
+                        "Isto apaga seus dados da nuvem (veículos, abastecimentos, manutenção, locais e resumo das viagens) " +
                             "e a sua conta. Não dá para desfazer. Os dados deste celular ficam, como no uso sem conta.",
                     )
                     Text("Digite $DELETE_WORD para confirmar.", style = MaterialTheme.typography.labelLarge)

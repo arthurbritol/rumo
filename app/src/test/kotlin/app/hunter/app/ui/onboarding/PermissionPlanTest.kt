@@ -24,6 +24,14 @@ class PermissionPlanTest {
         assertFalse("android.permission.BLUETOOTH_SCAN" in all(30))
     }
 
+    @Test fun `sem Pod nunca pede Bluetooth`() {
+        for (sdk in 26..36) {
+            assertFalse("bluetooth" in PermissionPlan.steps(sdk, comPod = false).map { it.id }, "sdk $sdk")
+            assertFalse("android.permission.BLUETOOTH_CONNECT" in PermissionPlan.steps(sdk, comPod = false).flatMap { it.permissions })
+        }
+        assertEquals(listOf("location", "notifications"), PermissionPlan.steps(33, comPod = false).map { it.id })
+    }
+
     @Test fun `Android 13 inclui notificações`() {
         assertEquals(listOf("location", "bluetooth", "notifications"), ids(33))
         assertTrue("android.permission.POST_NOTIFICATIONS" in all(33))

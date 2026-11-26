@@ -1,5 +1,6 @@
 package app.hunter.app
 
+import app.hunter.app.veiculo.TextosDoVeiculo
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -58,7 +59,7 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
         val n = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_manage)
-            .setContentTitle(if (due.size == 1) "Manutenção da moto" else "Manutenção da moto (${due.size} itens)")
+            .setContentTitle(TextosDoVeiculo.de(app.veiculos.ativoAgora()?.tipo).tituloDoLembrete(due.size))
             .setContentText(lines.first())
             .setStyle(NotificationCompat.InboxStyle().also { s -> lines.forEach(s::addLine) })
             .setContentIntent(open)

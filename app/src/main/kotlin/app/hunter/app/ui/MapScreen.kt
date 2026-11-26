@@ -1,5 +1,8 @@
 package app.hunter.app.ui
 
+import app.hunter.app.veiculo.LocalTextosDoVeiculo
+import app.hunter.app.veiculo.TextosDoVeiculo
+import app.hunter.app.veiculo.rolePermitido
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -154,7 +157,9 @@ fun MapScreen(
     // Rolê por perto: o botão só existe com o servidor configurado e com conta logada (como o de trânsito).
     val authState by (context.applicationContext as HunterApp).account.gateway.state.collectAsStateWithLifecycle()
     val signedIn = authState is AuthState.SignedIn
-    val nearbyAvailable = BuildConfig.NEARBY_URL.isNotBlank() && signedIn
+    // Rolê por perto só para moto nesta versão (ROLE_PARA_CARRO): com carro ativo some o botão, a faixa, os cartões e o ponto de proposta.
+    val roleOk = rolePermitido(vm.veiculoAtivo.collectAsStateWithLifecycle().value?.tipo)
+    val nearbyAvailable = BuildConfig.NEARBY_URL.isNotBlank() && signedIn && roleOk
     val nearbyState by nearbyVm.estado.collectAsStateWithLifecycle()
     val nearbyRiders = (nearbyState as? NearbyUiState.Procurando)?.vizinhos.orEmpty()
     val nearbyPref by nearbyVm.preferencia.collectAsStateWithLifecycle()
@@ -202,6 +207,8 @@ fun MapScreen(
 
     // Saiu da conta com a procura ligada: para tudo.
     LaunchedEffect(signedIn) { if (!signedIn) nearbyVm.desligar() }
+    // Trocou para carro com o rolê ligado: desliga pelo mesmo caminho do "Desligar".
+    LaunchedEffect(roleOk) { if (!roleOk) nearbyVm.desligar() }
     LaunchedEffect(nearbyState) {
         if (nearbyState is NearbyUiState.Desligado) {
             selectedRider = null
@@ -633,7 +640,7 @@ fun MapScreen(
             onLongPress = {
                 if (!navigating) {
                     // Procurando rolê e fora de um encontro, segurar no mapa marca o ponto de uma proposta.
-                    if (nearbyState is NearbyUiState.Procurando && (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado)) {
+                    if (roleOk && nearbyState is NearbyUiState.Procurando && (encontro is EncontroUiState.Nenhum || encontro is EncontroUiState.Encerrado)) {
                         proposalPoint = it
                         selectedRider = null
                         selectedProposal = null
@@ -856,7 +863,7 @@ fun MapScreen(
 
 // ---------------------------------------------------------------- busca
 
-private val QUICK_SEARCHES = listOf("Posto de gasolina", "Restaurante", "Mecânica de moto", "Padaria", "Hotel", "Mirante")
+private fun buscasRapidas(t: TextosDoVeiculo) = listOf("Posto de gasolina", "Restaurante", t.atalhoMecanica, "Padaria", "Hotel", "Mirante")
 
 /** Distância em linha reta até o lugar, para escolher o resultado certo de relance. */
 @Composable
@@ -932,11 +939,12 @@ private fun SearchOverlay(vm: HunterViewModel, onClose: () -> Unit, onPick: (Pla
                     }
                 } else {
                     item {
+                        val buscas = buscasRapidas(LocalTextosDoVeiculo.current)
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            items(QUICK_SEARCHES) { q -> SelectChip(q, false, { vm.onQuery(q) }) }
+                            items(buscas) { q -> SelectChip(q, false, { vm.onQuery(q) }) }
                         }
                     }
                     if (favs.isNotEmpty()) {
@@ -1132,7 +1140,7 @@ private fun PreviewCard(vm: HunterViewModel, pv: PreviewUi, onStart: () -> Unit,
         when {
             pv.loading -> Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
-                Text("Calculando rota para moto…")
+                Text(LocalTextosDoVeiculo.current.calculandoRota)
             }
             pv.error != null -> {
                 Text(pv.error, color = Bad)

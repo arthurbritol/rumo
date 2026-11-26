@@ -40,6 +40,9 @@ import app.hunter.nav.TipoDeRota
 import app.hunter.app.veiculo.itensDeManutencaoPadrao
 import app.hunter.app.veiculo.paraRota
 import app.hunter.app.veiculo.perfilAoTrocarDeTipo
+import app.hunter.app.veiculo.podPermitido
+import app.hunter.podble.PodPhase
+import app.hunter.podble.PodService
 import app.hunter.podble.PodStatus
 import app.hunter.trips.recording.AndroidLocationSource
 import app.hunter.trips.recording.TrackingStatus
@@ -773,6 +776,13 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         PodStatus.restore(app)
         watchConnection()
         checkUpdate()
+
+        // O Pod só vale para moto: ao trocar para carro com o Pod ativo, desconecta de modo limpo (igual ao botão "Desconectar").
+        viewModelScope.launch {
+            veiculoAtivo.map { it?.tipo }.distinctUntilChanged().collect { tipo ->
+                if (!podPermitido(tipo) && PodStatus.state.value.phase != PodPhase.IDLE) PodService.disconnect(app)
+            }
+        }
 
         // Trocar de veículo com a prévia aberta: ajusta o perfil ao tipo novo (se não existe, "Mais rápida") e recalcula.
         viewModelScope.launch {

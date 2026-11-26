@@ -61,9 +61,9 @@ class FirestoreMappingTest {
         assertEquals(60, (m["brand"] as String).length)
         assertEquals("m".repeat(60), m["model"])
         assertFalse(m.containsKey("year")) // fora de 1950..2100: omitido em vez de recusado
-        // nome vazio vira "Motociclista"; marca/modelo em branco viram nulos
+        // nome vazio vira "Você"; marca/modelo em branco viram nulos
         val vazio = profileToMap(UserProfile("   ", " ", "", 2020), 1L)
-        assertEquals("Motociclista", vazio["displayName"])
+        assertEquals("Você", vazio["displayName"])
         assertNull(vazio["brand"])
         assertNull(vazio["model"])
         assertEquals(2020, vazio["year"])

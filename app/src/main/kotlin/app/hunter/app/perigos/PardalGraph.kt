@@ -58,7 +58,7 @@ object PardalGraph {
             armazenamento = armazenamento,
             rede = rede,
             // ASCII: o OkHttp rejeita acentos em cabeçalho.
-            userAgent = "Rumo/$versaoApp (app de navegacao para motos; https://github.com/arthurbritol/rumo)",
+            userAgent = "Rumo/$versaoApp (app de navegacao para motos e carros; https://github.com/arthurbritol/rumo)",
             aoAtualizar = { uf ->
                 fonte.invalidar(uf)
                 estado.atualizar()

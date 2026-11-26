@@ -102,13 +102,20 @@ import app.hunter.app.ui.TripsScreen
 import app.hunter.app.ui.UpdateBanner
 import app.hunter.app.ui.formatFriendElapsed
 import app.hunter.app.ui.onboarding.AppBikeSaver
+import app.hunter.app.veiculo.LocalTextosDoVeiculo
+import app.hunter.model.TipoVeiculo
+import app.hunter.app.veiculo.TextosDoVeiculo
 import app.hunter.app.veiculo.temVeiculo
+import app.hunter.app.veiculo.podPermitido
+import app.hunter.app.ui.abasVisiveis
+import app.hunter.app.ui.iconeParaVeiculo
 import app.hunter.app.ui.onboarding.BikeSetupScreen
 import app.hunter.app.ui.onboarding.EXISTING_USER_NOTICE_KEY
 import app.hunter.app.ui.onboarding.EntryRoute
 import app.hunter.app.ui.onboarding.ONBOARDING_IN_PROGRESS_KEY
 import app.hunter.app.ui.onboarding.LoginRoute
 import app.hunter.app.ui.onboarding.OnboardingScreen
+import app.hunter.app.ui.onboarding.PermissionPlan
 import app.hunter.app.ui.onboarding.PermissionsScreen
 import app.hunter.app.ui.onboarding.SharedPrefsOnboardingPrefs
 import app.hunter.app.ui.onboarding.resolveEntry
@@ -133,8 +140,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             HunterTheme {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    AppEntry(application as HunterApp, { vm }, accountVm)
+                // Textos do veículo ativo (moto, carro; sem veículo vale moto) para todas as telas, sem passar parâmetro.
+                val tipoAtivo by (application as HunterApp).veiculos.veiculoAtivo.collectAsStateWithLifecycle()
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalTextosDoVeiculo provides TextosDoVeiculo.de(tipoAtivo?.tipo),
+                ) {
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        AppEntry(application as HunterApp, { vm }, accountVm)
+                    }
                 }
             }
         }
@@ -201,7 +214,13 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                     onDone = onDone, onSkip = onSkip,
                 )
             },
-            permissions = { onNext -> PermissionsScreen(onFinished = onNext) },
+            // Bluetooth (Pod) só para quem tem moto: na apresentação o veículo ainda não existe, e a tela do Pod pede quando preciso.
+            permissions = { onNext ->
+                PermissionsScreen(
+                    onFinished = onNext,
+                    steps = PermissionPlan.steps(android.os.Build.VERSION.SDK_INT, comPod = app.veiculos.veiculoAtivo.value?.tipo == TipoVeiculo.MOTO),
+                )
+            },
             bike = { short, onNext ->
                 BikeSetupScreen(
                     short = short,
@@ -305,6 +324,10 @@ private fun HunterRoot(
 ) {
     var tabIndex by rememberSaveable { mutableStateOf(0) }
     val tab = Tab.entries[tabIndex]
+    // O Pod só existe para moto: com carro ativo a aba some e, se estava aberta, volta para o mapa.
+    val tipoAtivo = vm.veiculoAtivo.collectAsStateWithLifecycle().value?.tipo
+    val abas = abasVisiveis(tipoAtivo)
+    LaunchedEffect(tipoAtivo) { if (!podPermitido(tipoAtivo) && Tab.entries[tabIndex] == Tab.Pod) tabIndex = Tab.Map.ordinal }
     val nav by vm.nav.collectAsStateWithLifecycle()
 
     // Toda vez que o app volta para a frente (o processo pode ficar vivo por dias): procura versão nova.
@@ -356,7 +379,7 @@ private fun HunterRoot(
     val config = androidx.compose.ui.platform.LocalConfiguration.current
     val classe = classeDeTela(config.screenWidthDp, config.screenHeightDp)
     val abasNoMapa = navegacaoEnxuta(EstadoDaTela(navegando = nav.active), classe.orientacao()).abas
-    // Durante a navegação as abas somem do mapa: mais mapa e nenhum toque acidental com a moto andando.
+    // Durante a navegação as abas somem do mapa: mais mapa e nenhum toque acidental com o veículo andando.
     val formaAbas = formaDasAbas(classe, abasNoMapa, tab == Tab.Map)
     val seguros = insetsSeguros()
     // Altura dos cartões de baixo do mapa (retrato), para o aviso de conta ficar acima deles.
@@ -371,7 +394,8 @@ private fun HunterRoot(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
                 ) {
                     NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp) {
-                        Tab.entries.forEachIndexed { i, t ->
+                        abas.forEach { t ->
+                            val i = t.ordinal
                             val selected = i == tabIndex
                             NavigationBarItem(
                                 selected = selected,
@@ -403,7 +427,7 @@ private fun HunterRoot(
         val baixo = padding.calculateBottomPadding()
         Row(Modifier.fillMaxSize().padding(bottom = baixo).consumeWindowInsets(PaddingValues(bottom = baixo))) {
             if (formaAbas == FormaDasAbas.Trilho) {
-                TrilhoDeAbas(tabIndex = tabIndex, badge = badge, seguros = seguros, onSelect = { tabIndex = it })
+                TrilhoDeAbas(abas = abas, tabIndex = tabIndex, badge = badge, seguros = seguros, onSelect = { tabIndex = it })
             }
             Box(
                 Modifier
@@ -516,7 +540,7 @@ private fun IconeDaAba(t: Tab, selected: Boolean, badge: String?) {
     ) {
         val iconContent: @Composable () -> Unit = {
             Icon(
-                painter = painterResource(t.iconResId),
+                painter = painterResource(t.iconeParaVeiculo(LocalTextosDoVeiculo.current.tipo)),
                 contentDescription = t.label,
                 modifier = Modifier.size(20.dp),
             )
@@ -558,7 +582,7 @@ private fun IconeDaAba(t: Tab, selected: Boolean, badge: String?) {
  * e a largura toda do trilho (acima do mínimo de 48 dp).
  */
 @Composable
-private fun TrilhoDeAbas(tabIndex: Int, badge: String?, seguros: WindowInsets, onSelect: (Int) -> Unit) {
+private fun TrilhoDeAbas(abas: List<Tab>, tabIndex: Int, badge: String?, seguros: WindowInsets, onSelect: (Int) -> Unit) {
     Row(Modifier.fillMaxHeight()) {
         Surface(color = MaterialTheme.colorScheme.surface) {
             Column(
@@ -570,7 +594,8 @@ private fun TrilhoDeAbas(tabIndex: Int, badge: String?, seguros: WindowInsets, o
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Tab.entries.forEachIndexed { i, t ->
+                abas.forEach { t ->
+                    val i = t.ordinal
                     val selected = i == tabIndex
                     val cor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     Column(

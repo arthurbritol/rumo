@@ -98,7 +98,7 @@ class AccountGraph(private val database: AppDatabase, private val app: HunterApp
     private fun afterSync() {
         val s = gateway.state.value as? AuthState.SignedIn ?: return
         _syncedUid.value = s.uid
-        val created = defaultProfileFor(ProfilePrefs.read(prefs), s.name, s.email, prefs.getBoolean(ProfilePrefs.VOICE, true))
+        val created = defaultProfileFor(ProfilePrefs.read(prefs), s.name, s.email, prefs.getBoolean(ProfilePrefs.VOICE, true), app.veiculos.veiculoAtivo.value?.tipo)
         if (created != null) {
             ProfilePrefs.writeDirty(prefs, created)
             scheduler.requestSync()

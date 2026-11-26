@@ -53,8 +53,8 @@ class SocialUiMapperTest {
     @Test
     fun `rótulo da moto`() {
         assertEquals("Honda CG 160", bikeLabel("Honda", "CG 160"))
-        assertEquals("Moto não informada", bikeLabel(null, null))
-        assertEquals("Moto não informada", bikeLabel("  ", ""))
+        assertEquals("Veículo não informado", bikeLabel(null, null))
+        assertEquals("Veículo não informado", bikeLabel("  ", ""))
         assertEquals("CG 160", bikeLabel(null, "CG 160"))
         assertEquals("Honda", bikeLabel("Honda", null))
     }
@@ -71,7 +71,7 @@ class SocialUiMapperTest {
             now, zone,
         )
         assertEquals(listOf("Maria", "Ana", "Zeca", "Amigo"), rows.map { it.name })
-        assertEquals("Moto não informada", rows.last().bikeLabel)
+        assertEquals("Veículo não informado", rows.last().bikeLabel)
     }
 
     @Test

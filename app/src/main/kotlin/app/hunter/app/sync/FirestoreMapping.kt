@@ -1,5 +1,6 @@
 package app.hunter.app.sync
 
+import app.hunter.app.veiculo.TextosDoVeiculo
 import app.hunter.sync.Kind
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.SyncDoc
@@ -66,7 +67,6 @@ const val MAX_PROFILE_TEXT = 60
 
 /** Limite de tamanho do id de veículo no perfil (as regras aceitam até 64). */
 const val MAX_ID_TEXT = 64
-private const val DEFAULT_NAME = "Motociclista"
 
 /** Apara e limita a [max] unidades UTF-16 sem partir um par substituto (emoji) ao meio. */
 fun clampText(s: String, max: Int = MAX_PROFILE_TEXT): String {
@@ -86,12 +86,12 @@ fun rulesLowerOrNull(name: String): String? {
     return if (lower == asciiLower) lower else null
 }
 
-/** Nome exibido válido para as regras (1..60 após aparar; "Motociclista" se vazio). */
-fun safeDisplayName(raw: String): String = clampText(raw).ifEmpty { DEFAULT_NAME }
+/** Nome exibido válido para as regras (1..60 após aparar; nome padrão se vazio). */
+fun safeDisplayName(raw: String): String = clampText(raw).ifEmpty { TextosDoVeiculo.nomePadrao(null) }
 
 /**
  * Mapa do perfil que NUNCA viola as regras (um perfil recusado falharia a cada sincronização): nome aparado e
- * limitado a 1..60 ("Motociclista" se vazio), marca/modelo limitados a 60 (em branco viram nulos), ano omitido
+ * limitado a 1..60 (nome padrão se vazio), marca/modelo limitados a 60 (em branco viram nulos), ano omitido
  * se nulo ou fora de 1950..2100. `displayNameLower` é `lowercase(Locale.ROOT)` e só vai quando a minúscula muda
  * apenas letras ASCII: o `lower()` das regras (conferido no emulador) não converte maiúsculas acentuadas ("Á"),
  * então para "Ágata" ou "İzmir" o campo (opcional nas regras) é omitido em vez de o perfil ser recusado.

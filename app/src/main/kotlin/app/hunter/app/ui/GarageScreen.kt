@@ -65,6 +65,7 @@ import app.hunter.model.FuelSegment
 import app.hunter.model.Fuelup
 import app.hunter.model.GeoBox
 import app.hunter.podble.PodPhase
+import app.hunter.app.veiculo.podPermitido
 import java.util.Locale
 import kotlin.math.max
 
@@ -86,7 +87,7 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // 1. Topo: Cabeçalho com Nome da Moto, badge Pod com fa_bluetooth e Avatar do Perfil
+        // 1. Topo: Cabeçalho com nome do veículo, badge Pod com fa_bluetooth e Avatar do Perfil
         Row(
             Modifier
                 .fillMaxWidth()
@@ -108,40 +109,42 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
                 )
             }
 
-            // Badge de status do Pod com fa_bluetooth
-            val podConnected = pod.phase == PodPhase.CONNECTED
-            val podColor = if (podConnected) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant
-            val podBg = if (podConnected) NovareSuccess.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
-            val podText = when (pod.phase) {
-                PodPhase.CONNECTED -> "Pod ativo"
-                PodPhase.CONNECTING -> "Conectando"
-                PodPhase.SCANNING -> "Buscando"
-                PodPhase.AWAITING_PIN -> "Pareando"
-                PodPhase.IDLE -> if (pod.pairedName != null) "Pod pareado" else "Pod offline"
-            }
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = podBg,
-                border = BorderStroke(0.5.dp, podColor.copy(alpha = 0.35f)),
-                modifier = Modifier.padding(end = 4.dp),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // Badge (só moto) de status do Pod com fa_bluetooth
+            if (podPermitido(vm.veiculoAtivo.collectAsStateWithLifecycle().value?.tipo)) {
+                val podConnected = pod.phase == PodPhase.CONNECTED
+                val podColor = if (podConnected) NovareSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+                val podBg = if (podConnected) NovareSuccess.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+                val podText = when (pod.phase) {
+                    PodPhase.CONNECTED -> "Pod ativo"
+                    PodPhase.CONNECTING -> "Conectando"
+                    PodPhase.SCANNING -> "Buscando"
+                    PodPhase.AWAITING_PIN -> "Pareando"
+                    PodPhase.IDLE -> if (pod.pairedName != null) "Pod pareado" else "Pod offline"
+                }
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = podBg,
+                    border = BorderStroke(0.5.dp, podColor.copy(alpha = 0.35f)),
+                    modifier = Modifier.padding(end = 4.dp),
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.fa_bluetooth),
-                        contentDescription = null,
-                        tint = podColor,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Text(
-                        text = podText,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = podColor,
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.fa_bluetooth),
+                            contentDescription = null,
+                            tint = podColor,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text(
+                            text = podText,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = podColor,
+                        )
+                    }
                 }
             }
 

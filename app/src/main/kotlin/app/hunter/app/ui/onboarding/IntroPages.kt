@@ -41,21 +41,21 @@ private data class IntroPage(
 
 private val pages = listOf(
     IntroPage(
-        "🧭", "Navegue de moto",
-        "Mapa em tela cheia, rotas para moto (rápida, curvas, sem pedágio) e curva a curva com voz.",
+        "🧭", "Navegue com segurança",
+        "Mapa em tela cheia, rotas pensadas para o seu veículo (rápida, sem pedágio e mais) e curva a curva com voz.",
     ),
     IntroPage(
         "📈", "Viagens e garagem",
-        "Grava cada viagem, mostra km, velocidade e altimetria. Controla abastecimento e manutenção da moto.",
+        "Grava cada viagem, mostra km, velocidade e altimetria. Controla abastecimento e manutenção do seu veículo.",
     ),
     IntroPage(
         "👥", "Rolê com os amigos",
         "Veja quanto cada um rodou na semana e até onde o grupo vai com o que cada um quer gastar.",
-        listOf("🏍 Ana · R$ 80 → 210 km", "🏍 Bruno · R$ 60 → 160 km"),
+        listOf("📍 Ana · R$ 80 → 210 km", "📍 Bruno · R$ 60 → 160 km"),
     ),
     IntroPage(
-        "📟", "Conecte ao painel",
-        "Royal Enfield (Tripper Pod e Dash), Yamaha Y-Connect e outras. Mostra a manobra no painel da moto.",
+        "⚠️", "Avisos e postos no caminho",
+        "Radares e lombadas no trajeto, postos com preço de combustível e lembretes de manutenção.",
     ),
 )
 

@@ -1,5 +1,7 @@
 package app.hunter.app.ui
 
+import app.hunter.app.veiculo.LocalTextosDoVeiculo
+import app.hunter.app.veiculo.podPermitido
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -432,7 +434,7 @@ fun FriendsScreen(
         SectionTitle("Amigos (${ui.friends.size})")
         if (ui.friends.isNotEmpty()) {
             Text(
-                "Sua localização é publicada enquanto o Rumo estiver aberto ou o Pod conectado, só para os amigos com o interruptor ligado. Para ver um amigo no mapa, ele também precisa compartilhar com você.",
+                "Sua localização é publicada enquanto o Rumo estiver aberto${if (podPermitido(LocalTextosDoVeiculo.current.tipo)) " ou o Pod conectado" else ""}, só para os amigos com o interruptor ligado. Para ver um amigo no mapa, ele também precisa compartilhar com você.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -658,7 +660,7 @@ private fun FriendCard(
         ) {
             if (row.isLiveOnRoad) {
                 SquircleIcon(
-                    iconRes = R.drawable.fa_motorcycle,
+                    iconRes = R.drawable.fa_route,
                     backgroundColor = NovareSuccess.copy(alpha = 0.15f),
                     tintColor = NovareSuccess,
                 )

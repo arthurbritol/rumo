@@ -1,5 +1,6 @@
 package app.hunter.app.ui
 
+import app.hunter.app.veiculo.TextosDoVeiculo
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,12 +58,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 private const val OUTRA_MARCA = "Outra"
 private const val OUTRO_MODELO = "Outro modelo…"
 
+/** Recurso do ícone do tipo (moto ou carro; sem veículo, moto). */
+@androidx.annotation.DrawableRes
+fun iconeDoVeiculo(tipo: TipoVeiculo?): Int = if (tipo == TipoVeiculo.CARRO) R.drawable.fa_car else R.drawable.fa_motorcycle
+
 /** Ícone simples do tipo (moto ou carro); a cor vem do [tint]. */
 @Composable
 fun VeiculoIcone(tipo: TipoVeiculo, modifier: Modifier = Modifier, tint: Color = MaterialTheme.colorScheme.onSurface) {
     Icon(
-        painter = painterResource(if (tipo == TipoVeiculo.CARRO) R.drawable.fa_car else R.drawable.fa_motorcycle),
-        contentDescription = if (tipo == TipoVeiculo.CARRO) "Carro" else "Moto",
+        painter = painterResource(iconeDoVeiculo(tipo)),
+        contentDescription = TextosDoVeiculo.de(tipo).rotuloDoTipo,
         tint = tint,
         modifier = modifier,
     )
@@ -88,7 +93,7 @@ fun TipoVeiculoSelector(selecionado: TipoVeiculo, onSelecionar: (TipoVeiculo) ->
                 ) {
                     VeiculoIcone(t, Modifier.size(22.dp), if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        if (t == TipoVeiculo.CARRO) "Carro" else "Moto",
+                        TextosDoVeiculo.de(t).rotuloDoTipo,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
                     )
@@ -202,7 +207,7 @@ fun VeiculoFormDialog(
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         VeiculoIcone(form.tipo, Modifier.size(20.dp))
-                        Text(if (form.tipo == TipoVeiculo.CARRO) "Carro" else "Moto", style = MaterialTheme.typography.titleSmall)
+                        Text(TextosDoVeiculo.de(form.tipo).rotuloDoTipo, style = MaterialTheme.typography.titleSmall)
                     }
                 }
                 OutlinedTextField(

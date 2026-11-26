@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="Rumo — navegação, viagens, garagem e amigos para a sua moto" width="100%">
+  <img src="docs/assets/banner.png" alt="Rumo — navegação, viagens, garagem e amigos para a sua moto ou carro" width="100%">
 </p>
 
 <p align="center">
@@ -12,10 +12,11 @@
 
 # Rumo
 
-App Android para motociclistas: mapa com busca de destino, rotas pensadas para moto, navegação curva a curva com
-voz, gravação de viagens, controle de abastecimento e manutenção, mapas offline, **amigos e rolê em grupo** e
-conexão com o painel da moto por Bluetooth. Funciona com qualquer moto; hoje o painel suportado é o **Tripper Pod**
-da Royal Enfield, e outras marcas (como a conexão da Yamaha) entram no catálogo de conexões aos poucos. Funciona sem
+App Android para quem anda de moto ou de carro: mapa com busca de destino, rotas pensadas para o seu veículo,
+navegação curva a curva com voz, gravação de viagens, controle de abastecimento e manutenção, mapas offline,
+**amigos e rolê em grupo** e, para quem tem moto, conexão com o painel por Bluetooth. Você cadastra vários veículos
+(moto e/ou carro) na Garagem e troca o veículo ativo na hora; o painel suportado hoje é o **Tripper Pod** da Royal
+Enfield (só aparece com moto ativa), e outras marcas entram no catálogo de conexões aos poucos. Funciona sem
 conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem. Não modifica o Waze.
 
 <p align="center">
@@ -30,7 +31,7 @@ conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem
 - Mapa em tela cheia (MapLibre + OpenFreeMap, sem chave de API), claro ou escuro conforme o sistema.
 - Busca de destino (Photon/OpenStreetMap) com favoritos e recentes instantâneos, distância até cada resultado e
   atalhos (posto, restaurante, mecânica…). Toque longo no mapa escolhe um ponto.
-- Rotas para moto (Valhalla): *mais rápida*, *estradas e curvas*, *sem pedágio* e *sem terra*, com alternativas.
+- Rotas (Valhalla) para o veículo ativo. Moto: *mais rápida*, *estradas e curvas*, *sem pedágio* e *sem terra*; carro: *mais rápida*, *sem pedágio* e *evitar balsa*; com alternativas.
 - Navegação curva a curva com voz em pt-BR, recálculo ao sair da rota e gravação automática da viagem.
 - Funciona com GPS, Wi-Fi ou antenas; avisa quando está sem internet e refaz a rota sozinho quando ela volta.
 
@@ -50,7 +51,7 @@ conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem
 
 **Conta e sincronização (opcional)**
 - Entrar com Google ou e-mail e senha. Sem conta o app funciona igual, mas desinstalar apaga tudo.
-- Com conta, ficam salvos na nuvem: perfil, moto, hodômetro, abastecimentos, manutenção, locais favoritos, resumo
+- Com conta, ficam salvos na nuvem: perfil, veículos, hodômetro, abastecimentos, manutenção, locais favoritos, resumo
   das viagens e a preferência de voz. Edite offline: sincroniza quando a internet volta. Reinstalar e entrar
   recupera tudo, menos o trajeto completo (mapa) das viagens, que fica só no aparelho.
 - Sair e apagar a conta (dados da nuvem inclusos) ficam no perfil, pelo ícone no topo da Garagem.
@@ -59,14 +60,14 @@ conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem
 - Roteiro de teste no aparelho: [docs/TESTES-MANUAIS-CONTA.md](docs/TESTES-MANUAIS-CONTA.md).
 
 **Amigos e rolê (precisa de conta)**
-- Aba Amigos: busque pelo nome, convide, aceite e veja a moto e os km da semana de cada amigo. Dá para desfazer a
+- Aba Amigos: busque pelo nome, convide, aceite e veja o veículo e os km da semana de cada amigo. Dá para desfazer a
   amizade ou bloquear, e escolher se você aparece na busca (Perfil).
 - Rolê em grupo: até 10 pessoas, cada uma informa quanto quer gastar; o app mostra a média e até onde o grupo
   vai com o custo por km de cada um. O rolê some sozinho em 7 dias.
 - Exige publicar as regras e o TTL no Firebase: [docs/FIREBASE.md](docs/FIREBASE.md). Roteiro de teste com duas
   contas: [docs/TESTES-MANUAIS-AMIGOS.md](docs/TESTES-MANUAIS-AMIGOS.md).
 
-**Rolê por perto (precisa de conta e do servidor `workers/nearby`)**
+**Rolê por perto (nesta versão, só para moto; precisa de conta e do servidor `workers/nearby`)**
 - "Procurando rolê": escolha ritmo, distância e parada; outros motociclistas por perto aparecem no mapa como motos
   anônimas (posição aproximada, sem nome nem modelo), com destaque para quem combina com você. Raio de 5 a 20 km.
 - Proponha um ponto de encontro (2 a 8 vagas), entre numa proposta, veja a distância e o tempo de cada um; a posição
@@ -75,12 +76,12 @@ conta (tudo no celular); com conta opcional, seus dados ficam guardados na nuvem
   até o dono decidir. Documentação e custo medido: [docs/ROLE-POR-PERTO.md](docs/ROLE-POR-PERTO.md);
   roteiro com dois aparelhos: [docs/TESTES-MANUAIS-ROLE-POR-PERTO.md](docs/TESTES-MANUAIS-ROLE-POR-PERTO.md).
 
-**Tripper Pod**
+**Tripper Pod (só para moto)**
 - Conexão Bluetooth, PIN no primeiro uso, reconexão automática e bússola.
 - Na navegação, o Pod mostra a manobra, a distância e a chegada, o tempo ou a distância restantes.
 - O protocolo foi validado apenas no Pod da Meteor 350. Em outras Royal Enfield (como a Hunter 350) a
   compatibilidade é esperada, mas não verificada: teste com a moto parada antes de depender dele.
-- Outras marcas: o catálogo de conexões por marca está planejado; até lá, você informa os dados da moto à mão.
+- Outras marcas: o catálogo de conexões por marca está planejado; até lá, você informa os dados do veículo à mão.
 
 ## Instalação
 

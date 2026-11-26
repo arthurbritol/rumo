@@ -66,11 +66,11 @@ const val MOVING_KMH = 5f
 
 private val PT_BR: Locale = Locale.forLanguageTag("pt-BR")
 
-const val NO_BIKE_LABEL = "Moto não informada"
+const val NO_BIKE_LABEL = "Veículo não informado"
 const val UNKNOWN_FRIEND_NAME = "Amigo"
 const val UNKNOWN_PERSON_NAME = "Alguém"
 
-/** "Honda CG 160"; só uma das partes quando falta a outra; "Moto não informada" sem nenhuma. */
+/** "Honda CG 160"; só uma das partes quando falta a outra; "Veículo não informado" sem nenhuma. */
 fun bikeLabel(brand: String?, model: String?): String =
     listOfNotNull(brand?.trim()?.ifEmpty { null }, model?.trim()?.ifEmpty { null })
         .joinToString(" ").ifEmpty { NO_BIKE_LABEL }

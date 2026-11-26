@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import app.hunter.app.R
+import app.hunter.app.veiculo.podPermitido
+import app.hunter.model.TipoVeiculo
 
 enum class Tab(
     val label: String,
@@ -22,3 +24,11 @@ enum class Tab(
     Pod("Pod", Icons.Default.Settings, R.drawable.fa_bluetooth),
 }
 
+
+/** As abas do veículo ativo: o Pod (Bluetooth) só aparece para moto (ou sem veículo). Mapa, Viagens, Garagem e Amigos sempre. */
+fun abasVisiveis(tipo: TipoVeiculo?): List<Tab> = Tab.entries.filter { it != Tab.Pod || podPermitido(tipo) }
+
+/** Ícone da aba: a Garagem mostra o carro quando o veículo ativo é carro; as demais não mudam. */
+@DrawableRes
+fun Tab.iconeParaVeiculo(tipo: TipoVeiculo?): Int =
+    if (this == Tab.Garage && tipo == TipoVeiculo.CARRO) R.drawable.fa_car else iconResId

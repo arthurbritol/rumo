@@ -1,5 +1,7 @@
 package app.hunter.app.account
 
+import app.hunter.model.TipoVeiculo
+import app.hunter.app.veiculo.TextosDoVeiculo
 import app.hunter.app.sync.clampText
 import app.hunter.sync.UserProfile
 
@@ -17,17 +19,17 @@ fun maintenanceSeedDecision(itemCount: Int, signedIn: Boolean, syncedThisAccount
     else -> SeedDecision.SEED
 }
 
-private const val DEFAULT_NAME = "Motociclista"
-
 /**
  * Perfil a criar depois de uma sincronização bem-sucedida de quem não tem perfil (nem local, nem vindo da
  * nuvem): usuário 0.3 que criou a conta, visitante que entrou depois, quem tocou "Preencher depois". Nome: o da
- * conta, senão a parte local do e-mail, senão "Motociclista" (aparado, 1..60); moto vazia. Null se já há perfil.
+ * conta, senão a parte local do e-mail, senão o nome padrão do veículo ativo [tipo] ("Motorista", "Motociclista" ou "Você" sem veículo) (aparado, 1..60); marca e modelo vazios. Null se já há perfil.
  */
-fun defaultProfileFor(existing: UserProfile?, accountName: String?, email: String?, voice: Boolean): UserProfile? {
+fun defaultProfileFor(
+    existing: UserProfile?, accountName: String?, email: String?, voice: Boolean, tipo: TipoVeiculo? = null,
+): UserProfile? {
     if (existing != null) return null
     val name = accountName?.let(::clampText)?.takeIf { it.isNotEmpty() }
         ?: email?.substringBefore('@')?.let(::clampText)?.takeIf { it.isNotEmpty() }
-        ?: DEFAULT_NAME
+        ?: TextosDoVeiculo.nomePadrao(tipo)
     return UserProfile(displayName = name, brand = null, model = null, year = null, voice = voice)
 }

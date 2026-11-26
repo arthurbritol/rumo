@@ -1,5 +1,6 @@
 package app.hunter.app.ui.onboarding
 
+import app.hunter.app.veiculo.TextosDoVeiculo
 import android.content.SharedPreferences
 import app.hunter.app.sync.ProfilePrefs
 import app.hunter.maintenance.data.MaintenanceDao
@@ -20,7 +21,7 @@ interface BikeSaver {
 object BikeFormMapping {
     /** Apelido digitado; no cadastro curto (sem marca nem modelo) um nome padrão do tipo, para a lista não ficar sem nome. */
     fun apelido(form: BikeForm): String =
-        form.apelido.trim().ifEmpty { if (form.short) (if (form.tipo == TipoVeiculo.CARRO) "Meu carro" else "Minha moto") else "" }
+        form.apelido.trim().ifEmpty { if (form.short) TextosDoVeiculo.de(form.tipo).minha else "" }
 
     /** Aplica tipo, marca, modelo e ano do formulário completo a um veículo existente; o apelido só muda se foi digitado. */
     fun aplicar(v: app.hunter.model.Veiculo, form: BikeForm): app.hunter.model.Veiculo = v.copy(
@@ -35,13 +36,13 @@ object BikeProfileMerge {
 
     /**
      * Um perfil local com nome (já sincronizado ou editado) mantém o nome; só moto muda. Sem isso o nome da
-     * conta, aparado e limitado a 1..[MAX_NAME] (limite das regras do Firestore), com "Motociclista" se vazio.
+     * conta, aparado e limitado a 1..[MAX_NAME] (limite das regras do Firestore), com o nome padrão do tipo se vazio.
      * Cadastro de CARRO não grava marca, modelo nem ano no perfil (esses campos só valem para a moto/veículo
      * migrado): mantém os que já existiam.
      */
     fun merge(existing: UserProfile?, form: BikeForm, accountName: String, voice: Boolean): UserProfile {
         val name = existing?.displayName?.trim()?.takeIf { it.isNotEmpty() }
-            ?: accountName.trim().take(MAX_NAME).trim().ifEmpty { "Motociclista" }
+            ?: accountName.trim().take(MAX_NAME).trim().ifEmpty { TextosDoVeiculo.nomePadrao(form.tipo) }
         val base = form.toProfile(name)
         val perfil = if (form.tipo == TipoVeiculo.CARRO) base.copy(brand = existing?.brand, model = existing?.model, year = existing?.year) else base
         return perfil.copy(voice = voice)
