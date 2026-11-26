@@ -87,7 +87,7 @@ fun NearbySheet(
         ) {
             Text("Procurando rolê", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
-                "Quem procura rolê por perto aparece como ${if (LocalTextosDoVeiculo.current.tipo == TipoVeiculo.CARRO) \"um carro\" else \"uma moto\"} no mapa, sem nome nem modelo, com a posição aproximada.",
+                "Quem procura rolê por perto aparece como ${umaMotoOuUmCarro(LocalTextosDoVeiculo.current.tipo)} no mapa, sem nome nem modelo, com a posição aproximada.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -465,3 +465,5 @@ fun NearbyEndCard(
         PrimaryButton("Ok", onClose, Modifier.fillMaxWidth())
     }
 }
+
+private fun umaMotoOuUmCarro(tipo: TipoVeiculo): String = if (tipo == TipoVeiculo.CARRO) "um carro" else "uma moto"
