@@ -1,7 +1,7 @@
 // Ponto de entrada do Worker `nearby`: roteador HTTP/WebSocket.
 //
 //   GET /health                       -> 200 "ok"
-//   GET /ws?cell=<lat>:<lon>&t=<token> (Upgrade: websocket) -> repassa à Celula do quadrado
+//   GET /ws?cell=<lat>:<lon>[&v=m|c]&t=<token> (Upgrade: websocket) -> repassa à Celula do quadrado
 //   GET /admin/denuncias[?uid=<uid>]  (Authorization: Bearer <ADMIN_TOKEN>) -> denúncias do uid, ou as 500 mais
 //     recentes de todos (índice na Conta reservada INDICE_UID); POST /admin/suspensao?uid=&acao=tirar|por
 //     -> {uid, suspenso}. Rotas do dono: nunca passam pelo /ws nem levam x-rumo-*, nada disso vai ao app.
@@ -108,6 +108,11 @@ export async function handle(request, env, deps = {}) {
   const cell = url.searchParams.get("cell") ?? "";
   if (!cellNoBrasil(cell)) return texto("quadrado inválido", 404);
 
+  // Tipo de veículo do rolê: ausente ou "m" = moto (cliente antigo; mesma Celula de sempre), "c" = carro.
+  // Cada tipo tem a sua própria Celula, então moto e carro nunca se veem.
+  const v = url.searchParams.get("v") ?? "m";
+  if (v !== "m" && v !== "c") return texto("veículo inválido", 400);
+
   if (request.headers.get("Upgrade") !== "websocket") return texto("esperava WebSocket", 426);
 
   // Conexão do encontro (opcional): só o formato dos ids gerados pelo servidor.
@@ -133,6 +138,7 @@ export async function handle(request, env, deps = {}) {
   // Repasse sem o token na URL e sem nenhum cabeçalho interno vindo do cliente.
   url.searchParams.delete("t");
   url.searchParams.delete("enc");
+  url.searchParams.delete("v");
   const headers = new Headers(request.headers);
   for (const nome of [...headers.keys()]) {
     if (nome.toLowerCase().startsWith("x-rumo-")) headers.delete(nome);
@@ -143,7 +149,8 @@ export async function handle(request, env, deps = {}) {
   if (enc !== null) headers.set("x-rumo-enc", enc);
 
   const repasse = new Request(url.toString(), { method: "GET", headers });
-  const celula = env.CELULA.get(env.CELULA.idFromName(cell));
+  // Moto mantém o nome antigo (quadrado puro); carro usa "c|quadrado".
+  const celula = env.CELULA.get(env.CELULA.idFromName(v === "c" ? `c|${cell}` : cell));
   return celula.fetch(repasse);
 }
 

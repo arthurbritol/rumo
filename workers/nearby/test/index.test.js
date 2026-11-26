@@ -210,3 +210,22 @@ test("SEGURANÇA: x-rumo-enc, x-rumo-cell e outros x-rumo-* do cliente são apag
   assert.equal(h.get("x-rumo-cell"), "-21:-41");
   assert.equal(h.get("x-rumo-qualquer"), null);
 });
+
+test("veículo: sem v ou v=m vai para a Celula de moto (nome antigo); v=c para a de carro", async () => {
+  const { env, reg } = novoAmbiente();
+  const t = await token();
+  assert.equal((await chamar(pedido(`/ws?cell=-21:-41&t=${t}`), env)).status, 200);
+  assert.equal((await chamar(pedido(`/ws?cell=-21:-41&v=m&t=${t}`), env)).status, 200);
+  assert.equal((await chamar(pedido(`/ws?cell=-21:-41&v=c&t=${t}`), env)).status, 200);
+  assert.deepEqual(reg.nomes, ["-21:-41", "-21:-41", "c|-21:-41"]);
+});
+
+test("veículo inválido: 400 e v não é repassado à Celula", async () => {
+  const { env, reg } = novoAmbiente();
+  const t = await token();
+  assert.equal((await chamar(pedido(`/ws?cell=-21:-41&v=x&t=${t}`), env)).status, 400);
+  assert.equal((await chamar(pedido(`/ws?cell=-21:-41&v=c%7Cm&t=${t}`), env)).status, 400);
+  await chamar(pedido(`/ws?cell=-21:-41&v=c&t=${t}`), env);
+  assert.equal(new URL(reg.pedidos[0].url).searchParams.has("v"), false);
+  assert.equal(reg.pedidos[0].headers.get("x-rumo-cell"), "-21:-41");
+});

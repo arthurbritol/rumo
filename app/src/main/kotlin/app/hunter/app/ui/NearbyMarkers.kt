@@ -85,6 +85,40 @@ fun riderBitmap(density: Float, destaque: Boolean, proprio: Boolean): Bitmap {
     return bmp
 }
 
+/** Carro visto de cima, apontando para o norte: carroceria arredondada, para-brisa e quatro rodas. Mesmas cores da moto. */
+fun carBitmap(density: Float, destaque: Boolean, proprio: Boolean): Bitmap {
+    val size = (56 * density).toInt().coerceAtLeast(2)
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val s = size.toFloat()
+    val cx = s / 2f
+    val pal = if (proprio) ORANGE else GRAY
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    if (destaque) {
+        paint.style = Paint.Style.FILL
+        paint.color = RING_FILL
+        c.drawCircle(cx, cx, s * 0.47f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.5f * density
+        paint.color = RING_STROKE
+        c.drawCircle(cx, cx, s * 0.45f, paint)
+    }
+    paint.style = Paint.Style.FILL
+    paint.color = WHEEL
+    for (y in listOf(0.2f, 0.62f)) {
+        c.drawRoundRect(RectF(cx - s * 0.20f, s * y, cx - s * 0.14f, s * (y + 0.18f)), s * 0.03f, s * 0.03f, paint)
+        c.drawRoundRect(RectF(cx + s * 0.14f, s * y, cx + s * 0.20f, s * (y + 0.18f)), s * 0.03f, s * 0.03f, paint)
+    }
+    val body = RectF(cx - s * 0.16f, s * 0.12f, cx + s * 0.16f, s * 0.88f)
+    paint.shader = LinearGradient(body.left, 0f, body.right, 0f, pal.bodyFrom, pal.bodyTo, Shader.TileMode.CLAMP)
+    c.drawRoundRect(body, s * 0.12f, s * 0.12f, paint)
+    paint.shader = null
+    paint.color = pal.shoulders
+    c.drawRoundRect(RectF(cx - s * 0.12f, s * 0.30f, cx + s * 0.12f, s * 0.42f), s * 0.04f, s * 0.04f, paint)
+    c.drawRoundRect(RectF(cx - s * 0.12f, s * 0.64f, cx + s * 0.12f, s * 0.72f), s * 0.04f, s * 0.04f, paint)
+    return bmp
+}
+
 /**
  * Pino redondo dos pontos de encontro: laranja claro para a proposta que combina, cinza-azulado para a que não
  * combina, laranja forte para o encontro em que o usuário está. Sem texto: o "2 de 4" é um rótulo da camada.

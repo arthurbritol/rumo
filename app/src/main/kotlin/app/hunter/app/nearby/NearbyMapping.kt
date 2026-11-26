@@ -40,7 +40,20 @@ fun Vizinho.toRiderFeature(): RiderFeature = RiderFeature(
 const val OWN_ICON_SEARCHING = "rider-self"
 const val OWN_ICON_DEFAULT = "me"
 
-fun ownMarkerIcon(procurando: Boolean): String = if (procurando) OWN_ICON_SEARCHING else OWN_ICON_DEFAULT
+fun ownMarkerIcon(procurando: Boolean, carro: Boolean = false): String =
+    if (!procurando) OWN_ICON_DEFAULT else if (carro) OWN_ICON_SEARCHING_CARRO else OWN_ICON_SEARCHING
+
+/** Carros do rolê de carro: mesma lógica das motos, imagem própria. */
+const val CAR_ICON = "car"
+const val CAR_ICON_COMBINA = "car-combina"
+const val OWN_ICON_SEARCHING_CARRO = "car-self"
+
+/** Troca a imagem de moto pela de carro quando o rolê é de carro (todos no rolê são do mesmo tipo). */
+fun iconeDoVeiculo(icon: String, carro: Boolean): String = if (!carro) icon else when (icon) {
+    RIDER_ICON -> CAR_ICON
+    RIDER_ICON_COMBINA -> CAR_ICON_COMBINA
+    else -> icon
+}
 
 private val PT_BR = Locale.forLanguageTag("pt-BR")
 

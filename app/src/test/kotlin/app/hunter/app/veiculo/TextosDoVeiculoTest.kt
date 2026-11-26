@@ -62,6 +62,6 @@ class TextosDoVeiculoTest {
         assertTrue(rolePermitido(null))
         assertTrue(rolePermitido(TipoVeiculo.MOTO))
         assertEquals(ROLE_PARA_CARRO, rolePermitido(TipoVeiculo.CARRO))
-        assertFalse(ROLE_PARA_CARRO)
+        assertTrue(ROLE_PARA_CARRO)
     }
 }

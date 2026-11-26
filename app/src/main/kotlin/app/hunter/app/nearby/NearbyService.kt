@@ -62,7 +62,7 @@ class NearbyService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("Procurando rolê")
-            .setContentText("Outros motociclistas por perto veem uma moto no mapa, sem seu nome.")
+            .setContentText("Outras pessoas por perto veem você no mapa, sem seu nome.")
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

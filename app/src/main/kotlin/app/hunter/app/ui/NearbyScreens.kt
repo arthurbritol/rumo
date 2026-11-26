@@ -26,6 +26,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import app.hunter.app.veiculo.LocalTextosDoVeiculo
+import app.hunter.model.TipoVeiculo
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -85,7 +87,7 @@ fun NearbySheet(
         ) {
             Text("Procurando rolê", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
-                "Quem procura rolê por perto aparece como uma moto no mapa, sem nome nem modelo, com a posição aproximada.",
+                "Quem procura rolê por perto aparece como ${if (LocalTextosDoVeiculo.current.tipo == TipoVeiculo.CARRO) \"um carro\" else \"uma moto\"} no mapa, sem nome nem modelo, com a posição aproximada.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -191,7 +193,7 @@ fun NearbyRiderCard(
     FloatingCard(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Motociclista por perto", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("${LocalTextosDoVeiculo.current.nomePadrao} por perto", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 if (distancia != null) {
                     Text(distancia, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -363,7 +365,7 @@ fun NearbyEncounterCard(
         )
         var outro = 0
         enc.participantes.forEach { p ->
-            val nome = if (p.sessao == enc.eu) "Você" else "Motociclista ${++outro}"
+            val nome = if (p.sessao == enc.eu) "Você" else "${LocalTextosDoVeiculo.current.nomePadrao} ${++outro}"
             // key: o estado dos diálogos fica preso à pessoa, não à posição na lista (que muda quando alguém sai).
             key(p.sessao) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -443,13 +445,13 @@ fun NearbyEndCard(
             key(sessao) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Motociclista ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                        Text("${LocalTextosDoVeiculo.current.nomePadrao} ${i + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                         val marcada = sessao in marcadas
                         TextButton(onClick = { onQueroAmigo(sessao) }, enabled = !marcada && !enviando) {
                             Text(if (marcada) "Marcado" else "Quero ser amigo")
                         }
                     }
-                    ModeracaoBotoes(enviando, { onBloquear(sessao) }, { m -> onDenunciar(sessao, m) }, nome = "Motociclista ${i + 1}")
+                    ModeracaoBotoes(enviando, { onBloquear(sessao) }, { m -> onDenunciar(sessao, m) }, nome = "${LocalTextosDoVeiculo.current.nomePadrao} ${i + 1}")
                 }
             }
         }

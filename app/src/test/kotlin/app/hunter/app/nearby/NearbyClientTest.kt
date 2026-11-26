@@ -384,4 +384,10 @@ class NearbyClientTest {
         c.disconnect()
         until { received.any { it.contains("parar") } }
     }
+
+    @Test
+    fun `wsUrl so manda v para carro`() {
+        assertTrue(!NearbyClient.wsUrl("https://x.dev", "1:2", null, "k").contains("v="))
+        assertTrue(NearbyClient.wsUrl("https://x.dev", "1:2", "e", "k", VEICULO_CARRO).contains("&v=c&"))
+    }
 }

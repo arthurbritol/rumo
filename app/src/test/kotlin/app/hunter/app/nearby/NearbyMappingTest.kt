@@ -130,4 +130,13 @@ class AvisoPontoLongeTest {
     fun raioMaiorQueADistanciaNaoAvisa() {
         assertEquals(null, avisoPontoLonge(-20.0, -40.0, -19.9, -40.0, 12))
     }
+
+    @Test
+    fun `icones de carro so trocam no role de carro`() {
+        assertEquals("rider", iconeDoVeiculo(RIDER_ICON, false))
+        assertEquals("car", iconeDoVeiculo(RIDER_ICON, true))
+        assertEquals("car-combina", iconeDoVeiculo(RIDER_ICON_COMBINA, true))
+        assertEquals("car-self", ownMarkerIcon(true, true))
+        assertEquals("me", ownMarkerIcon(false, true))
+    }
 }

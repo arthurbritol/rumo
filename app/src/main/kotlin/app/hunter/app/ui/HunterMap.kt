@@ -362,16 +362,17 @@ fun HunterMap(
         val src = style?.getSourceAs<GeoJsonSource>(SRC_FRIENDS) ?: return@LaunchedEffect
         src.setGeoJson(friendsFeatures(friends))
     }
-    LaunchedEffect(style, nearby, encounterRiders) {
+    val rolePorCarro = app.hunter.app.veiculo.LocalTextosDoVeiculo.current.tipo == app.hunter.model.TipoVeiculo.CARRO
+    LaunchedEffect(style, nearby, encounterRiders, rolePorCarro) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_NEARBY) ?: return@LaunchedEffect
-        src.setGeoJson(nearbyFeatures(nearby, encounterRiders))
+        src.setGeoJson(nearbyFeatures(nearby, encounterRiders, rolePorCarro))
     }
     LaunchedEffect(style, proposals, encounterPoint, encounterPointLabel) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_PROPOSALS) ?: return@LaunchedEffect
         src.setGeoJson(proposalFeatures(proposals, encounterPoint, encounterPointLabel))
     }
-    LaunchedEffect(style, nearbySearching) {
-        style?.getLayer("me-symbol")?.setProperties(iconImage(ownMarkerIcon(nearbySearching)))
+    LaunchedEffect(style, nearbySearching, rolePorCarro) {
+        style?.getLayer("me-symbol")?.setProperties(iconImage(ownMarkerIcon(nearbySearching, rolePorCarro)))
     }
     LaunchedEffect(style, perigos) {
         val src = style?.getSourceAs<GeoJsonSource>(SRC_PERIGOS) ?: return@LaunchedEffect
@@ -670,14 +671,14 @@ private fun perigosFeatures(perigos: List<app.hunter.nav.perigos.PerigoPonto>): 
     })
 
 /** Motos anônimas: só `id` (sessão aleatória), `rumo`, `destaque` e a imagem; nada que identifique a pessoa. */
-private fun nearbyFeatures(riders: List<Vizinho>, encounter: List<Participante>): FeatureCollection =
+private fun nearbyFeatures(riders: List<Vizinho>, encounter: List<Participante>, carro: Boolean): FeatureCollection =
     FeatureCollection.fromFeatures(
         (riders.map { it.toRiderFeature() } + encounter.mapNotNull { it.toRiderFeatureOrNull() }).map { r ->
             Feature.fromGeometry(Point.fromLngLat(r.lon, r.lat)).also { f ->
                 f.addStringProperty("id", r.id)
                 f.addNumberProperty("rumo", r.rumo)
                 f.addBooleanProperty("destaque", r.destaque)
-                f.addStringProperty("icon", r.icon)
+                f.addStringProperty("icon", app.hunter.app.nearby.iconeDoVeiculo(r.icon, carro))
             }
         },
     )
@@ -741,6 +742,9 @@ private fun setupStyle(st: Style, density: Float, dark: Boolean, trafficTileUrl:
     st.addImage(RIDER_ICON, riderBitmap(density, destaque = false, proprio = false))
     st.addImage(OWN_ICON_SEARCHING, riderBitmap(density, destaque = false, proprio = true))
     st.addImage(RIDER_ICON_COMBINA, riderBitmap(density, destaque = true, proprio = false))
+    st.addImage(app.hunter.app.nearby.CAR_ICON, carBitmap(density, destaque = false, proprio = false))
+    st.addImage(app.hunter.app.nearby.CAR_ICON_COMBINA, carBitmap(density, destaque = true, proprio = false))
+    st.addImage(app.hunter.app.nearby.OWN_ICON_SEARCHING_CARRO, carBitmap(density, destaque = false, proprio = true))
     st.addImage(PROPOSAL_ICON, encounterPinBitmap(density, PIN_NORMAL))
     st.addImage(PROPOSAL_ICON_COMBINA, encounterPinBitmap(density, PIN_COMBINA))
     st.addImage(ENCOUNTER_ICON, encounterPinBitmap(density, PIN_ENCONTRO))

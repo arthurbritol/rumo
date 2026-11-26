@@ -12,7 +12,10 @@ import app.hunter.trips.recording.AndroidLocationSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import app.hunter.app.veiculo.rolePermitido
+import app.hunter.model.TipoVeiculo
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.map
 
@@ -21,7 +24,12 @@ fun nearbyViewModelFactory(app: HunterApp): ViewModelProvider.Factory = viewMode
     initializer {
         val clientScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val gateway = app.account.gateway
-        val client = NearbyClient(BuildConfig.NEARBY_URL, { forceRefresh -> gateway.idToken(forceRefresh) }, clientScope)
+        val client = NearbyClient(
+            BuildConfig.NEARBY_URL,
+            { forceRefresh -> gateway.idToken(forceRefresh) },
+            clientScope,
+            veiculo = { if (app.veiculos.veiculoAtivo.value?.tipo == TipoVeiculo.CARRO) VEICULO_CARRO else VEICULO_MOTO },
+        )
         NearbyViewModel(
             link = client,
             signedIn = { gateway.state.value is AuthState.SignedIn },
@@ -30,7 +38,8 @@ fun nearbyViewModelFactory(app: HunterApp): ViewModelProvider.Factory = viewMode
             stopRequests = NearbyService.stopRequests,
             startFailures = NearbyService.startFailures,
             onDispose = { clientScope.cancel() },
-            rolePermitido = app.veiculos.veiculoAtivo.map { rolePermitido(it?.tipo) },
+            // Trocar de moto para carro (ou o contrário) muda de Celula: o rolê desliga e a pessoa liga de novo no outro tipo.
+            rolePermitido = app.veiculos.veiculoAtivo.map { it?.tipo }.filterNotNull().distinctUntilChanged().withIndex().map { it.index == 0 },
             etaCalculator = EtaCalculator { from, to -> NavServices.router.route(from, to, RouteProfile.FASTEST).firstOrNull() },
         )
     }

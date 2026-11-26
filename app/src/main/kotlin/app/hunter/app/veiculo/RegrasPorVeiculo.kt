@@ -2,12 +2,8 @@ package app.hunter.app.veiculo
 
 import app.hunter.model.TipoVeiculo
 
-/**
- * Rolê por perto só existe para moto na versão A. T8: ligar para carro quando o rolê separado por tipo existir
- * (basta virar esta constante; nenhuma outra condição deve citar o tipo).
- */
-// T8: ligar para carro quando o rolê separado por tipo existir
-const val ROLE_PARA_CARRO = false
+/** Rolê por perto vale para moto e carro, cada um na sua Celula do servidor (versão B). */
+const val ROLE_PARA_CARRO = true
 
 /** O Pod (Bluetooth) só vale para moto; sem veículo ativo vale como hoje (permitido). */
 fun podPermitido(tipo: TipoVeiculo?): Boolean = tipo != TipoVeiculo.CARRO

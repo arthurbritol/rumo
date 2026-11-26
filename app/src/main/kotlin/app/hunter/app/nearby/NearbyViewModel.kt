@@ -89,7 +89,7 @@ class NearbyViewModel(
     private val respostaMs: Long = 15_000,
     /** Convida o uid pelo Social quando as duas pessoas marcaram; a tela liga isto ao `SocialViewModel` (sem ele, falha e o servidor reenvia depois). */
     var convidarAmigo: suspend (String) -> ConviteDeEncontro = { ConviteDeEncontro.FALHOU },
-    /** O rolê vale para o veículo ativo (só moto na versão A); ao virar falso (troca de veículo, até vinda da sincronização) desliga. */
+    /** Emite falso quando o tipo do veículo ativo muda (troca de veículo, até vinda da sincronização): o rolê desliga, porque cada tipo tem a sua Celula. */
     rolePermitido: Flow<Boolean> = emptyFlow(),
 ) : ViewModel() {
 

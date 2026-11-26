@@ -43,6 +43,9 @@ data class NearbyEvent(val celula: String, val msg: ServerMessage, val extra: Bo
  * Reconecta com [backoff]; em 401 pede token novo; renova a conexão com token novo antes de [renewAfterMs]
  * (o ID token do Firebase vale 1 h). O token nunca é registrado em log.
  */
+const val VEICULO_MOTO = "m"
+const val VEICULO_CARRO = "c"
+
 class NearbyClient(
     url: String,
     private val tokenProvider: suspend (forceRefresh: Boolean) -> String?,
@@ -52,6 +55,8 @@ class NearbyClient(
     private val http: OkHttpClient = defaultHttp,
     /** De quanto em quanto tempo reavaliar a renovação adiada por [setEncounterActive]. */
     private val holdPollMs: Long = 5_000L,
+    /** Tipo de veículo do rolê, lido a cada conexão: "m" (moto) ou "c" (carro). Cada tipo tem a sua Celula no servidor. */
+    private val veiculo: () -> String = { VEICULO_MOTO },
 ) : NearbyLink {
     @Volatile private var encounterActive = false
 
@@ -247,7 +252,7 @@ class NearbyClient(
                     }
                 }
                 val socket = try {
-                    http.newWebSocket(Request.Builder().url(wsUrl(baseUrl, cell, encId, token)).build(), listener)
+                    http.newWebSocket(Request.Builder().url(wsUrl(baseUrl, cell, encId, token, veiculo())).build(), listener)
                 } catch (e: IllegalArgumentException) {
                     mudar(NearbyStatus.INDISPONIVEL)
                     delay(backoff.nextDelayMs(attempt++))
@@ -302,7 +307,7 @@ class NearbyClient(
             .build()
 
         /** Endereço do WebSocket: `https` vira `wss`, `http` vira `ws`; `ws`/`wss` ficam como estão. */
-        fun wsUrl(base: String, cell: String, encId: String?, token: String): String {
+        fun wsUrl(base: String, cell: String, encId: String?, token: String, veiculo: String = VEICULO_MOTO): String {
             val trimmed = base.trim().trimEnd('/')
             val (scheme, rest) = when {
                 trimmed.startsWith("https://") -> "wss" to trimmed.removePrefix("https://")
@@ -314,6 +319,8 @@ class NearbyClient(
             val http: HttpUrl = ("${if (scheme == "wss") "https" else "http"}://$rest").toHttpUrl()
             val b = http.newBuilder().addPathSegment("ws").addQueryParameter("cell", cell)
             if (encId != null) b.addQueryParameter("enc", encId)
+            // Moto não manda `v` (igual ao app antigo; o servidor assume moto); só o carro pede a Celula própria.
+            if (veiculo == VEICULO_CARRO) b.addQueryParameter("v", VEICULO_CARRO)
             b.addQueryParameter("t", token)
             return scheme + "://" + b.build().toString().substringAfter("://")
         }
