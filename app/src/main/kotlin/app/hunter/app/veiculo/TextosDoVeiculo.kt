@@ -58,8 +58,8 @@ class TextosDoVeiculo(val tipo: TipoVeiculo) {
         /** Sem veículo (nulo) vale a moto. */
         fun de(tipo: TipoVeiculo?): TextosDoVeiculo = if (tipo == TipoVeiculo.CARRO) CARRO else MOTO
 
-        /** Nome de exibição padrão: "Motorista" (carro), "Motociclista" (moto) e "Você" quando ainda não há veículo. */
-        fun nomePadrao(tipo: TipoVeiculo?): String = if (tipo == null) "Você" else de(tipo).nomePadrao
+        /** Nome de exibição padrão: "Motorista" (carro), "Motociclista" (moto) e "Motociclista" (como antes dos carros) quando ainda não há veículo. */
+        fun nomePadrao(tipo: TipoVeiculo?): String = if (tipo == null) "Motociclista" else de(tipo).nomePadrao
     }
 }
 

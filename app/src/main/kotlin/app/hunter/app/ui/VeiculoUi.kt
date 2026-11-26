@@ -44,7 +44,9 @@ import app.hunter.app.HunterViewModel
 import app.hunter.app.R
 import app.hunter.app.ui.onboarding.FormError
 import app.hunter.app.ui.onboarding.FormField
+import app.hunter.app.veiculo.MSG_MANTENHA_UM_VEICULO
 import app.hunter.app.veiculo.RegrasVeiculo
+import app.hunter.app.veiculo.podeRemoverVeiculo
 import app.hunter.app.veiculo.VeiculoForm
 import app.hunter.app.veiculo.catalogoDoTipo
 import app.hunter.app.veiculo.detalhe
@@ -258,6 +260,7 @@ fun VeiculosListaDialog(
     onEditar: ((Veiculo) -> Unit)? = null,
     onRemover: ((Veiculo) -> Unit)? = null,
 ) {
+    val podeRemover = podeRemoverVeiculo(veiculos.size)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Seus veículos") },
@@ -291,7 +294,10 @@ fun VeiculosListaDialog(
                             if (onEditar != null || onRemover != null) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     onEditar?.let { TextButton(onClick = { it(v) }) { Text("Editar") } }
-                                    onRemover?.let { TextButton(onClick = { it(v) }) { Text("Remover", color = MaterialTheme.colorScheme.error) } }
+                                    onRemover?.let { TextButton(onClick = { it(v) }, enabled = podeRemover) { Text("Remover", color = if (podeRemover) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) } }
+                                }
+                                if (onRemover != null && !podeRemover) {
+                                    Text(MSG_MANTENHA_UM_VEICULO, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -368,6 +374,27 @@ fun SeletorDeVeiculoDaGaragem(vm: HunterViewModel, modifier: Modifier = Modifier
             text = { Text("O veículo some da lista, mas os registros dele (abastecimentos, manutenção e hodômetro) ficam guardados, só escondidos.") },
             confirmButton = { TextButton(onClick = { vm.removerVeiculo(v.id); removendo = null }) { Text("Remover", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { removendo = null }) { Text("Cancelar") } },
+        )
+    }
+}
+
+/** Estado vazio da Garagem (sem nenhum veículo): só o botão para adicionar; nada de dado até existir um veículo. */
+@Composable
+fun SemVeiculoNaGaragem(vm: HunterViewModel, modifier: Modifier = Modifier) {
+    var adicionando by remember { mutableStateOf<VeiculoForm?>(null) }
+    HCard(modifier = modifier) {
+        Text("Nenhum veículo cadastrado", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Text(
+            "Adicione um veículo para registrar hodômetro, abastecimentos e manutenção.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        RumoPrimaryButton(text = "Adicionar veículo", onClick = { adicionando = VeiculoForm() }, modifier = Modifier.fillMaxWidth())
+    }
+    adicionando?.let { f ->
+        VeiculoFormDialog(
+            titulo = "Novo veículo", form = f, permitirTrocarTipo = true,
+            onDismiss = { adicionando = null },
+            onSalvar = { vm.adicionarVeiculo(it); adicionando = null },
         )
     }
 }

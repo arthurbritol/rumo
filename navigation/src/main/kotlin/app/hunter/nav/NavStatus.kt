@@ -17,6 +17,8 @@ data class NavUiState(
     val arrived: Boolean = false,
     /** Mudou a cada novo traçado (rota inicial ou recalculada): a UI redesenha a linha. */
     val routeVersion: Int = 0,
+    /** Tipo de rota (moto/carro) com que a navegação começou: o recálculo usa o mesmo, mesmo que o veículo ativo mude. */
+    val tipo: TipoDeRota = TipoDeRota.MOTO,
 )
 
 object NavStatus {
@@ -28,8 +30,8 @@ object NavStatus {
     val voice: StateFlow<Boolean> = _voice.asStateFlow()
     fun setVoice(on: Boolean) { _voice.value = on }
 
-    fun start(route: Route, destination: Place, via: List<LatLon> = emptyList()) = _state.update {
-        NavUiState(active = true, destination = destination, via = via, route = route, routeVersion = it.routeVersion + 1)
+    fun start(route: Route, destination: Place, via: List<LatLon> = emptyList(), tipo: TipoDeRota = TipoDeRota.MOTO) = _state.update {
+        NavUiState(active = true, destination = destination, via = via, route = route, routeVersion = it.routeVersion + 1, tipo = tipo)
     }
 
     fun setRoute(route: Route) = _state.update {

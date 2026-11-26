@@ -93,7 +93,7 @@ class SyncEngineTest {
     private fun fuel(gid: String, at: Long = 100, liters: Double = 10.0, date: Long = 5_000L) =
         SyncDoc(
             Kind.FUELUP, gid, at, false,
-            mapOf("dateMs" to date, "odometerKm" to 1000.0, "liters" to liters, "totalCost" to 60.0),
+            mapOf("dateMs" to date, "odometerKm" to 1000.0, "liters" to liters, "totalCost" to 60.0, "veiculoId" to "v"),
         )
 
     private val perfil = UserProfile("Ana", "Honda", "Hunter 350", 2024)
@@ -117,7 +117,7 @@ class SyncEngineTest {
     @Test
     fun `primeiro login em aparelho vazio traz tudo da conta`() = runTest {
         remote.docs[Kind.FUELUP to "r"] = fuel("r")
-        remote.odo = OdometerDoc(10.0, 5.0, 100)
+        remote.odo = OdometerDoc(10.0, 5.0, 100, "v")
         remote.prof = perfil
 
         engine.firstSync()
@@ -169,10 +169,10 @@ class SyncEngineTest {
 
     @Test
     fun `syncNow sobe hodômetro e perfil sujos`() = runTest {
-        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        local.odo = OdometerDoc(1.0, 2.0, 100, "v"); local.odoDirty = true
         local.prof = perfil; local.profDirty = true
         engine.syncNow()
-        assertEquals(OdometerDoc(1.0, 2.0, 100), remote.odo)
+        assertEquals(OdometerDoc(1.0, 2.0, 100, "v"), remote.odo)
         assertEquals(perfil, remote.prof)
         assertFalse(local.hasDirtyOdometerOrProfile())
     }
@@ -226,7 +226,7 @@ class SyncEngineTest {
         engine.deleteAccountData()
         // aparelho B, ainda logado com a mesma conta, com tudo sujo
         local.put(fuel("b"), dirty = true)
-        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        local.odo = OdometerDoc(1.0, 2.0, 100, "v"); local.odoDirty = true
         local.prof = perfil; local.profDirty = true
         repeat(3) {
             assertFailsWith<DeletionPendingException> { engine.syncNow() }
@@ -320,14 +320,14 @@ class SyncEngineTest {
 
     @Test
     fun `falha no pushOdometer deixa o local intacto e a nova tentativa converge`() = runTest {
-        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        local.odo = OdometerDoc(1.0, 2.0, 100, "v"); local.odoDirty = true
         remote.pushOdoError = IOException("sem rede")
         assertFailsWith<IOException> { engine.syncNow() }
         assertTrue(local.hasDirtyOdometerOrProfile())
         remote.pushOdoError = null
         engine.syncNow()
         assertFalse(local.hasDirtyOdometerOrProfile())
-        assertEquals(OdometerDoc(1.0, 2.0, 100), remote.odo)
+        assertEquals(OdometerDoc(1.0, 2.0, 100, "v"), remote.odo)
     }
 
     @Test
@@ -350,7 +350,7 @@ class SyncEngineTest {
     @Test
     fun `hodômetro recusado pelo remoto não impede o perfil nem os registros`() = runTest {
         local.put(fuel("a"), dirty = true)
-        local.odo = OdometerDoc(1.0, 2.0, 100); local.odoDirty = true
+        local.odo = OdometerDoc(1.0, 2.0, 100, "v"); local.odoDirty = true
         local.prof = perfil; local.profDirty = true
         remote.pushOdoError = IOException("sem rede")
         assertFailsWith<IOException> { engine.syncNow() }
@@ -364,7 +364,7 @@ class SyncEngineTest {
 
     private fun trip(gid: String, ended: Long, km: Double, at: Long = 10) = SyncDoc(
         Kind.TRIP, gid, at, false,
-        mapOf("startedAtMs" to ended - 1_000, "endedAtMs" to ended, "distanceM" to km * 1000),
+        mapOf("startedAtMs" to ended - 1_000, "endedAtMs" to ended, "distanceM" to km * 1000, "veiculoId" to "v"),
     )
 
     /** O que a Garagem mostra: deslocamento + soma das viagens vivas do aparelho. */
@@ -378,9 +378,9 @@ class SyncEngineTest {
         remote.docs[Kind.TRIP to "t1"] = trip("t1", 1_000, 100.0)
         remote.docs[Kind.TRIP to "t2"] = trip("t2", 2_000, 200.0)
         remote.docs[Kind.TRIP to "t3"] = trip("t3", 3_000, 300.0)
-        remote.odo = OdometerDoc(9_400.0, 13.0, 5_000) // 9400 + 600 = 10000 no painel
+        remote.odo = OdometerDoc(9_400.0, 13.0, 5_000, "v") // 9400 + 600 = 10000 no painel
         // aparelho reinstalado: cadastro curto com o painel 10500, sem viagens, mais novo
-        local.odo = OdometerDoc(10_500.0, 13.0, 900_000); local.odoDirty = true
+        local.odo = OdometerDoc(10_500.0, 13.0, 900_000, "v"); local.odoDirty = true
 
         engine.firstSync()
 
@@ -399,8 +399,8 @@ class SyncEngineTest {
         local.put(trip("l", 1_000, 10.0), dirty = true)
         remote.docs[Kind.TRIP to "r"] = trip("r", 1_100, 20.0)
         // local vence: o painel (510) foi lido com a viagem l -> deslocamento 500
-        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
-        remote.odo = OdometerDoc(100.0, 13.0, 1_500)
+        local.odo = OdometerDoc(500.0, 13.0, 2_000, "v"); local.odoDirty = true
+        remote.odo = OdometerDoc(100.0, 13.0, 1_500, "v")
         engine.syncNow()
         assertEquals(510.0, shownKm(), 1e-9)
 
@@ -408,8 +408,8 @@ class SyncEngineTest {
         local.docs.clear(); local.dirtyKeys.clear(); remote.docs.clear()
         local.put(trip("l2", 1_000, 10.0), dirty = true)
         remote.docs[Kind.TRIP to "r2"] = trip("r2", 1_100, 20.0)
-        local.odo = OdometerDoc(1.0, 13.0, 1_000); local.odoDirty = false
-        remote.odo = OdometerDoc(880.0, 13.0, 3_000)
+        local.odo = OdometerDoc(1.0, 13.0, 1_000, "v"); local.odoDirty = false
+        remote.odo = OdometerDoc(880.0, 13.0, 3_000, "v")
         engine.syncNow()
         assertEquals(900.0, shownKm(), 1e-9)
     }
@@ -417,19 +417,19 @@ class SyncEngineTest {
     @Test
     fun `viagem do outro lado terminada depois da leitura do painel soma normalmente`() = runTest {
         remote.docs[Kind.TRIP to "r"] = trip("r", 5_000, 20.0) // rodou depois da leitura local
-        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        local.odo = OdometerDoc(500.0, 13.0, 2_000, "v"); local.odoDirty = true
         engine.syncNow()
         assertEquals(520.0, shownKm(), 1e-9)
-        assertEquals(OdometerDoc(500.0, 13.0, 2_000), remote.odo) // sem ajuste
+        assertEquals(OdometerDoc(500.0, 13.0, 2_000, "v"), remote.odo) // sem ajuste
     }
 
     @Test
     fun `sem viagens de um lado o hodometro nao muda`() = runTest {
         local.put(trip("l", 1_000, 10.0), dirty = true)
-        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
-        remote.odo = OdometerDoc(100.0, 13.0, 1_500)
+        local.odo = OdometerDoc(500.0, 13.0, 2_000, "v"); local.odoDirty = true
+        remote.odo = OdometerDoc(100.0, 13.0, 1_500, "v")
         engine.syncNow()
-        assertEquals(OdometerDoc(500.0, 13.0, 2_000), remote.odo)
+        assertEquals(OdometerDoc(500.0, 13.0, 2_000, "v"), remote.odo)
         assertEquals(510.0, shownKm(), 1e-9)
     }
 
@@ -438,7 +438,7 @@ class SyncEngineTest {
         local.put(trip("dup-b", 1_000, 10.0), dirty = true)
         remote.docs[Kind.TRIP to "dup-a"] = trip("dup-a", 1_000, 10.0)
         remote.docs[Kind.TRIP to "r"] = trip("r", 1_100, 20.0)
-        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        local.odo = OdometerDoc(500.0, 13.0, 2_000, "v"); local.odoDirty = true
         engine.syncNow()
         assertEquals(510.0, shownKm(), 1e-9)
         engine.syncNow()
@@ -448,7 +448,7 @@ class SyncEngineTest {
     @Test
     fun `ajuste que nao sobe fica sujo no aparelho e sobe depois`() = runTest {
         remote.docs[Kind.TRIP to "r"] = trip("r", 1_100, 20.0)
-        local.odo = OdometerDoc(500.0, 13.0, 2_000); local.odoDirty = true
+        local.odo = OdometerDoc(500.0, 13.0, 2_000, "v"); local.odoDirty = true
         remote.pushOdoError = IOException("sem rede")
         assertFailsWith<IOException> { engine.syncNow() }
         assertEquals(500.0, shownKm(), 1e-9) // a viagem trazida já entrou e o ajuste também

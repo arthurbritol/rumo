@@ -52,7 +52,7 @@ class TextosDoVeiculoTest {
     @Test fun `nome padrao por tipo e sem veiculo`() {
         assertEquals("Motociclista", TextosDoVeiculo.nomePadrao(TipoVeiculo.MOTO))
         assertEquals("Motorista", TextosDoVeiculo.nomePadrao(TipoVeiculo.CARRO))
-        assertEquals("Você", TextosDoVeiculo.nomePadrao(null))
+        assertEquals("Motociclista", TextosDoVeiculo.nomePadrao(null))
     }
 
     @Test fun `Pod e role so para moto ou sem veiculo`() {

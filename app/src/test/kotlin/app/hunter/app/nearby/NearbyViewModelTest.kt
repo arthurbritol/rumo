@@ -287,6 +287,21 @@ class NearbyViewModelTest {
     }
 
     @Test
+    fun `rolê ligado desliga quando o veiculo ativo deixa de permitir o role`() = runTest {
+        val permitido = MutableStateFlow(true)
+        val link = FakeLink()
+        val vm = NearbyViewModel(
+            link = link, signedIn = { true }, positions = { MutableSharedFlow<TrackPoint>() },
+            rolePermitido = permitido, dispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+        vm.ligar(pref)
+        assertEquals(pref, vm.preferencia.value)
+        permitido.value = false
+        assertEquals(null, vm.preferencia.value)
+        assertEquals(1, link.disconnects)
+    }
+
+    @Test
     fun `falha do servico emitida de dentro do ligar nao deixa nada rodando`() = runTest {
         val falhas = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
         val link = FakeLink()

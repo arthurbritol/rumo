@@ -82,14 +82,14 @@ class NavSessionTest {
 
     @Test
     fun `sem navegacao ativa nao faz nada`() = runTest {
-        val s = NavSession(backgroundScope, { _, _, _, _ -> null })
+        val s = NavSession(backgroundScope, { _, _, _, _, _ -> null })
         assertNull(s.onPoint(pt(0.0, 0.0)))
     }
 
     @Test
     fun `ao iniciar fala a primeira instrucao e publica o progresso`() = runTest {
         NavStatus.start(route(), dest)
-        val s = NavSession(backgroundScope, { _, _, _, _ -> null })
+        val s = NavSession(backgroundScope, { _, _, _, _, _ -> null })
         val speech = s.onPoint(pt(10.0, 0.0))!!
         assertEquals(listOf("Siga para leste por 1 quilômetro."), speech)
         val p = NavStatus.state.value.progress!!
@@ -102,7 +102,7 @@ class NavSessionTest {
         NavStatus.start(route(), dest)
         var asked: Triple<LatLon, Place, RouteProfile>? = null
         val newRoute = route()
-        val s = NavSession(backgroundScope, { f, t, p, _ -> asked = Triple(f, t, p); newRoute }, now = { 100_000L })
+        val s = NavSession(backgroundScope, { f, t, p, _, _ -> asked = Triple(f, t, p); newRoute }, now = { 100_000L })
         s.onPoint(pt(100.0, 0.0))
         s.onPoint(pt(200.0, 300.0))
         s.onPoint(pt(210.0, 310.0))
@@ -121,13 +121,40 @@ class NavSessionTest {
     }
 
     @Test
+    fun `recalculo usa o tipo da navegacao e cai em Mais rapida se o perfil nao existe nele`() = runTest {
+        // Rota de carro com um perfil que so a moto tem (Estradas e curvas): o recalculo pede carro, Mais rapida.
+        val r = route()
+        val rota = Route(r.shape, r.maneuvers, r.distanceM, r.durationS, r.hasToll, r.hasHighway, RouteProfile.CURVES)
+        NavStatus.start(rota, dest, tipo = TipoDeRota.CARRO)
+        var pedido: Pair<RouteProfile, TipoDeRota>? = null
+        val s = NavSession(backgroundScope, { _, _, p, _, t -> pedido = p to t; null }, now = { 100_000L })
+        s.onPoint(pt(100.0, 0.0))
+        repeat(3) { s.onPoint(pt(200.0 + it, 300.0 + it)) }
+        runCurrent()
+        assertEquals(RouteProfile.FASTEST to TipoDeRota.CARRO, pedido)
+    }
+
+    @Test
+    fun `recalculo de moto mantem o perfil da rota`() = runTest {
+        val r = route()
+        val rota = Route(r.shape, r.maneuvers, r.distanceM, r.durationS, r.hasToll, r.hasHighway, RouteProfile.CURVES)
+        NavStatus.start(rota, dest)
+        var pedido: Pair<RouteProfile, TipoDeRota>? = null
+        val s = NavSession(backgroundScope, { _, _, p, _, t -> pedido = p to t; null }, now = { 100_000L })
+        s.onPoint(pt(100.0, 0.0))
+        repeat(3) { s.onPoint(pt(200.0 + it, 300.0 + it)) }
+        runCurrent()
+        assertEquals(RouteProfile.CURVES to TipoDeRota.MOTO, pedido)
+    }
+
+    @Test
     fun `recalculo mantem so as paradas que ainda estao a frente`() = runTest {
         val d = 1000.0 / 111_194.9
         val passed = LatLon(0.0, 0.2 * d)        // a 200 m do início: já ficou para trás
         val ahead = LatLon(0.5 * d, d)           // na 2ª perna, ainda não alcançada
         NavStatus.start(route(), dest, via = listOf(passed, ahead))
         var vias: List<LatLon>? = null
-        val s = NavSession(backgroundScope, { _, _, _, v -> vias = v; null }, now = { 100_000L })
+        val s = NavSession(backgroundScope, { _, _, _, v, _ -> vias = v; null }, now = { 100_000L })
         s.onPoint(pt(400.0, 0.0))
         repeat(3) { s.onPoint(pt(500.0 + it, 400.0)) } // sai da rota (mais perto da 1ª perna que da 2ª)
         runCurrent()
@@ -139,7 +166,7 @@ class NavSessionTest {
         NavStatus.start(route(), dest)
         var t = 100_000L
         var calls = 0
-        val s = NavSession(backgroundScope, { _, _, _, _ -> calls++; null }, now = { t })
+        val s = NavSession(backgroundScope, { _, _, _, _, _ -> calls++; null }, now = { t })
         s.onPoint(pt(100.0, 0.0))
         repeat(3) { s.onPoint(pt(200.0 + it, 300.0)) }
         runCurrent()

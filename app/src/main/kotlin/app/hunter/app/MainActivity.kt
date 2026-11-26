@@ -102,6 +102,7 @@ import app.hunter.app.ui.TripsScreen
 import app.hunter.app.ui.UpdateBanner
 import app.hunter.app.ui.formatFriendElapsed
 import app.hunter.app.ui.onboarding.AppBikeSaver
+import app.hunter.app.veiculo.PerfilVeiculo
 import app.hunter.app.veiculo.LocalTextosDoVeiculo
 import app.hunter.model.TipoVeiculo
 import app.hunter.app.veiculo.TextosDoVeiculo
@@ -268,7 +269,12 @@ private fun AppEntry(app: HunterApp, vmProvider: () -> HunterViewModel, accountV
                             setActivity = { account.gateway.activity = it },
                             readProfile = { ProfilePrefs.read(prefs) },
                             onSaveProfile = { form ->
-                                account.saveProfile(form.toProfile(voice = prefs.getBoolean(ProfilePrefs.VOICE, true)))
+                                // Marca, modelo e ano editam o veículo ativo; só moto também grava no perfil.
+                                val r = PerfilVeiculo.aplicar(
+                                    form, vmProvider().veiculoAtivo.value, ProfilePrefs.read(prefs), prefs.getBoolean(ProfilePrefs.VOICE, true),
+                                )
+                                r.veiculo?.let { vmProvider().salvarVeiculoAtivo(it) }
+                                account.saveProfile(r.perfil)
                             },
                             onSignIn = { overlay = Overlay.LOGIN_FROM_PROFILE.name },
                             onReopenIntro = { overlay = Overlay.INTRO.name },

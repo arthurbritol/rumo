@@ -32,6 +32,10 @@ interface TripDao {
     @Query("SELECT COALESCE(SUM(distanceM), 0.0) FROM trips WHERE veiculoId = :veiculoId")
     fun observeDistanceM(veiculoId: String): Flow<Double>
 
+    /** Viagens gravadas sem veículo (veiculoId nulo) passam a ser do veículo [veiculoId]; suja para subir à nuvem. */
+    @Query("UPDATE trips SET veiculoId = :veiculoId, updatedAtMs = :now, dirty = 1 WHERE veiculoId IS NULL")
+    suspend fun atribuirViagensSemVeiculo(veiculoId: String, now: Long)
+
     /** Só viagem concluída já pode ter ido para a nuvem; a gravando não deixa lápide. */
     @Query("INSERT OR REPLACE INTO tombstones (kind, gid, deletedAtMs, dirty) SELECT 'TRIP', gid, :now, 1 FROM trips WHERE id = :id AND endedAtMs IS NOT NULL")
     suspend fun tombstoneTrip(id: Long, now: Long)

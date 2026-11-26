@@ -6,7 +6,6 @@ import app.hunter.sync.RemoteSnapshot
 import app.hunter.sync.RemoteStore
 import app.hunter.sync.SyncDoc
 import app.hunter.sync.UserProfile
-import app.hunter.sync.atribuirVeiculoLegado
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
@@ -48,8 +47,8 @@ class FirestoreRemoteStore(
         val porVeiculo = hodometros.get(Source.SERVER).await().documents.mapNotNull { mapToOdometer(it.data.orEmpty(), it.id) }
         val antigo = odometerRef.get(Source.SERVER).await().data?.let { mapToOdometer(it) }
         val profile = user.get(Source.SERVER).await().data?.let(::mapToProfile)
-        // Documentos antigos (sem veiculoId) passam a pertencer ao veículo migrado, sem perder nada.
-        return atribuirVeiculoLegado(RemoteSnapshot(docs, porVeiculo + listOfNotNull(antigo), profile))
+        // Documentos antigos (sem veiculoId) chegam como estão: o motor os atribui ao veículo certo (atribuirVeiculoLegado).
+        return RemoteSnapshot(docs, porVeiculo + listOfNotNull(antigo), profile)
     }
 
     override suspend fun push(docs: List<SyncDoc>) {

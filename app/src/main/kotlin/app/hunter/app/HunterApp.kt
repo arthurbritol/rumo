@@ -59,7 +59,7 @@ class HunterApp : Application(), TripsGraph {
     /** Veículos da conta e o veículo ativo (uma instância por processo). */
     val veiculos: VeiculoRepository by lazy {
         VeiculoRepository(
-            store = RoomVeiculoStore(maintenanceDao),
+            store = RoomVeiculoStore(maintenanceDao, tripDao),
             ativoStore = SharedPrefsVeiculoAtivo(getSharedPreferences("app", MODE_PRIVATE)),
             scope = appScope,
             requestSync = { account.scheduler.requestSync() },

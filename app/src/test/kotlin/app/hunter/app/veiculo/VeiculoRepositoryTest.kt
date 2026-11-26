@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -27,6 +28,10 @@ private class FakeVeiculoStore : VeiculoStore {
     override suspend fun getVeiculos() = todos.value.filter { it.removidoEm == null }.sortedWith(compareBy({ it.criadoEm }, { it.id }))
     override suspend fun getVeiculo(id: String) = todos.value.firstOrNull { it.id == id }
     override suspend fun salvar(v: VeiculoEntity) { todos.value = todos.value.filter { it.id != v.id } + v }
+    val tanquesDoHodometro = mutableMapOf<String, Double>()
+    override suspend fun atualizarTanqueDoHodometro(id: String, litros: Double) { tanquesDoHodometro[id] = litros }
+    val viagensAtribuidas = mutableListOf<String>()
+    override suspend fun atribuirViagensSemVeiculo(id: String) { viagensAtribuidas += id }
 }
 
 private class FakeAtivoStore : VeiculoAtivoStore {
@@ -63,7 +68,7 @@ class VeiculoRepositoryTest {
     @Test
     fun `o segundo so vira ativo quando pedido`() = runTest {
         val r = repo()
-        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
         r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
         advanceUntilIdle()
         assertEquals("v1", r.veiculoAtivo.value?.id)
@@ -75,7 +80,7 @@ class VeiculoRepositoryTest {
     @Test
     fun `definir ativo troca na hora e ignora id inexistente ou removido`() = runTest {
         val r = repo()
-        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
         r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
         r.definirAtivo("v2")
         advanceUntilIdle()
@@ -92,7 +97,7 @@ class VeiculoRepositoryTest {
     @Test
     fun `remover o ativo cai no primeiro nao removido`() = runTest {
         val r = repo()
-        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
         r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0, tornarAtivo = true)
         advanceUntilIdle()
         assertEquals("v2", r.veiculoAtivo.value?.id)
@@ -107,7 +112,7 @@ class VeiculoRepositoryTest {
     @Test
     fun `remover um veiculo que nao e o ativo mantem o ativo e some da lista`() = runTest {
         val r = repo()
-        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
         r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
         advanceUntilIdle()
         r.remover("v2")
@@ -117,19 +122,60 @@ class VeiculoRepositoryTest {
     }
 
     @Test
-    fun `remover o ultimo deixa sem veiculo ativo`() = runTest {
+    fun `nao remove o ultimo veiculo`() = runTest {
         val r = repo()
-        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
-        r.remover("v1")
+        r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
+        assertFalse(r.remover("v1"))
         advanceUntilIdle()
-        assertNull(r.veiculoAtivo.value)
-        assertNull(r.ativoAgora())
+        assertEquals("v1", r.veiculoAtivo.value?.id)
+        assertNull(store.getVeiculo("v1")!!.removidoEm)
+        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        assertTrue(r.remover("v1"))
+    }
+
+    // ---------- primeira moto do aparelho usa o id legado (I2) ----------
+
+    @Test
+    fun `a primeira moto de um aparelho sem veiculos usa o id legado`() = runTest {
+        val r = repo()
+        val m = r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        assertEquals(VEICULO_LEGADO_ID, m.id)
+        assertEquals(VEICULO_LEGADO_ID, r.veiculoAtivo.value?.id ?: ativo.ler())
+        val segunda = r.adicionar(TipoVeiculo.MOTO, "Outra", tanqueLitros = 13.0)
+        assertEquals("v1", segunda.id, "a segunda usa id novo")
+    }
+
+    @Test
+    fun `carro primeiro usa id novo e a moto seguinte tambem`() = runTest {
+        val r = repo()
+        assertEquals("v1", r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0).id)
+        assertEquals("v2", r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0).id)
+    }
+
+    @Test
+    fun `viagens sem veiculo vao para o primeiro veiculo criado`() = runTest {
+        val r = repo()
+        r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
+        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        assertEquals(listOf("v1"), store.viagensAtribuidas)
+    }
+
+    @Test
+    fun `veiculos faltantes das linhas tem tanque do hodometro e marca do perfil no migrado`() {
+        val r = veiculosFaltantes(listOf(VEICULO_LEGADO_ID, "x"), UserProfile("Ana", "Honda", "Hunter", 2022), mapOf("x" to 50.0))
+        assertEquals(listOf(VEICULO_LEGADO_ID, "x"), r.map { it.id })
+        assertEquals("Honda", r[0].marca)
+        assertEquals(13.0, r[0].tanqueLitros)
+        assertEquals("", r[1].marca)
+        assertEquals(50.0, r[1].tanqueLitros)
+        assertTrue(r.all { it.tipo == "MOTO" && it.apelido == "Minha moto" })
+        assertTrue(veiculosFaltantes(emptyList(), null, emptyMap()).isEmpty())
     }
 
     @Test
     fun `preferido inexistente cai no primeiro e ativoAgora concorda com o fluxo`() = runTest {
         val r = repo()
-        r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
         r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
         ativo.gravar("fantasma") // p.ex. o perfil sincronizado trouxe um id que este aparelho nao tem
         advanceUntilIdle()
@@ -140,7 +186,7 @@ class VeiculoRepositoryTest {
     @Test
     fun `editar muda os dados, mantem id e criacao e marca sujo`() = runTest {
         val r = repo()
-        val v = r.adicionar(TipoVeiculo.MOTO, "Moto", tanqueLitros = 13.0)
+        val v = r.adicionar(TipoVeiculo.CARRO, "Carro 1", tanqueLitros = 45.0)
         store.salvar(store.getVeiculo("v1")!!.copy(dirty = false))
         r.editar(v.copy(apelido = "Hunter", marca = "Honda", modelo = "Hunter 350", ano = 2023, tanqueLitros = 13.0))
         val e = store.getVeiculo("v1")!!
@@ -150,6 +196,15 @@ class VeiculoRepositoryTest {
         assertEquals(v.criadoEm, e.criadoEm)
         assertTrue(e.dirty)
         assertTrue(e.updatedAtMs > v.criadoEm)
+    }
+
+    @Test
+    fun `editar o tanque tambem atualiza o tanque do hodometro do veiculo`() = runTest {
+        val r = repo()
+        val v = r.adicionar(TipoVeiculo.CARRO, "Carro", tanqueLitros = 45.0)
+        r.editar(v.copy(tanqueLitros = 55.0))
+        assertEquals(55.0, store.tanquesDoHodometro["v1"])
+        assertEquals(55.0, store.getVeiculo("v1")!!.tanqueLitros)
     }
 
     // ---------- veículo migrado: preenchimento pelo perfil ----------

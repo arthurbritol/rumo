@@ -65,6 +65,7 @@ import app.hunter.model.FuelSegment
 import app.hunter.model.Fuelup
 import app.hunter.model.GeoBox
 import app.hunter.podble.PodPhase
+import app.hunter.app.veiculo.garagemTemDados
 import app.hunter.app.veiculo.podPermitido
 import java.util.Locale
 import kotlin.math.max
@@ -78,6 +79,7 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
     val tank by vm.tankLiters.collectAsStateWithLifecycle()
     val pod by vm.pod.collectAsStateWithLifecycle()
 
+    val veiculoDaGaragem by vm.veiculoAtivo.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(0) }
     var editOdo by remember { mutableStateOf(false) }
 
@@ -160,6 +162,11 @@ fun GarageScreen(vm: HunterViewModel, onOpenProfile: () -> Unit = {}) {
 
         // Veículo ativo: o conteúdo da Garagem é sempre dele; toque para trocar, adicionar, editar ou remover.
         SeletorDeVeiculoDaGaragem(vm)
+        // Sem veículo ativo não há dado a mostrar nem ação possível: só o estado vazio com "Adicionar veículo".
+        if (!garagemTemDados(veiculoDaGaragem != null)) {
+            SemVeiculoNaGaragem(vm)
+            return@Column
+        }
 
         // 2. Cockpit Fixo Hero: Hodômetro em destaque
         HeroMetricCard(

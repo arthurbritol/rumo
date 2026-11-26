@@ -59,7 +59,7 @@ class SocialMappingTest {
     @Test
     fun `perfil publico limita texto e omite ano fora da faixa`() {
         val m = publicProfileToMap(profile.copy(displayName = "  ", brand = " ", model = "x".repeat(80), year = 1900))
-        assertEquals("Você", m["displayName"])
+        assertEquals("Motociclista", m["displayName"])
         assertNull(m["brand"])
         assertEquals(60, (m["model"] as String).length)
         assertFalse("year" in m)

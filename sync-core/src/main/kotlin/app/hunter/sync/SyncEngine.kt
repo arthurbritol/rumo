@@ -89,14 +89,18 @@ class SyncEngine(
     private suspend fun reconcile() {
         if (resumePendingDeletion()) throw DeletionPendingException()
         val now = clock()
-        val snap = remote.fetchAll()
+        val raw = remote.fetchAll()
         val dirtyBefore = local.dirty()
         val localDirtyMeta = local.hasDirtyOdometerOrProfile()
         val localOdos = local.odometers()
         val localProfile = local.profile()
 
         val localDocs = local.all()
-        val plan = merge(localDocs, snap.docs, now)
+        // Documentos antigos (sem veiculoId) passam ao veículo migrado; os veículos deste aparelho entram na escolha
+        // (a moto cadastrada aqui antes da conta chegar é a dona do histórico). `raw` serve para o envio: o que
+        // ganhou veiculoId agora sobe à nuvem mesmo num empate de versão (M1).
+        val snap = atribuirVeiculoLegado(raw, localDocs.filter { it.kind == Kind.VEICULO })
+        val plan = merge(localDocs, snap.docs, now, remoteOriginal = raw.docs)
         // Hodômetro de cada veículo: último a escrever vence, corrigido pelas viagens (do mesmo veículo) que a
         // mesclagem trouxe ao lado vencedor (ver KDoc de mergeOdometerWithTrips).
         val veiculoIds = (localOdos.map { it.veiculoId } + snap.odometers.map { it.veiculoId }).distinct()

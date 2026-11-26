@@ -72,21 +72,34 @@ class BikeFormTest {
         assertEquals(13.0, BikeForm.defaultTankLiters("Outra", "qualquer"))
     }
 
-    @Test fun `ano fora de 1900 ate 2100 e recusado`() {
+    @Test fun `ano fora de 1950 ate o ano seguinte e recusado, para moto e carro`() {
+        for (tipo in app.hunter.model.TipoVeiculo.entries) {
+            val f = BikeForm(short = false)
+            f.escolherTipo(tipo)
+            f.selectBike("Marca", "Modelo")
+            f.odometerKm = "1"
+            f.year = "1949"
+            assertEquals(setOf(FormField.YEAR), fields(f))
+            f.year = "2028"
+            assertEquals(setOf(FormField.YEAR), fields(f))
+            f.year = "1950"
+            assertTrue(f.validate(2026).isEmpty())
+            f.year = "2027"
+            assertTrue(f.validate(2026).isEmpty())
+            f.year = ""
+            assertTrue(f.validate(2026).isEmpty())
+            assertNull(f.toProfile("A").year)
+        }
+    }
+
+    @Test fun `tanque ate 200 litros continua valendo`() {
         val f = BikeForm(short = false)
         f.selectBike("Honda", "CG 160")
         f.odometerKm = "1"
-        f.year = "1899"
-        assertEquals(setOf(FormField.YEAR), fields(f))
-        f.year = "2101"
-        assertEquals(setOf(FormField.YEAR), fields(f))
-        f.year = "1900"
-        assertTrue(f.validate().isEmpty())
-        f.year = "2100"
-        assertTrue(f.validate().isEmpty())
-        f.year = ""
-        assertTrue(f.validate().isEmpty())
-        assertNull(f.toProfile("A").year)
+        f.editTank("200")
+        assertTrue(f.validate(2026).isEmpty())
+        f.editTank("201")
+        assertEquals(setOf(FormField.TANK), fields(f))
     }
 
     @Test fun `tipo carro troca o padrao do tanque, limpa marca e modelo e respeita o tanque editado`() {

@@ -155,6 +155,52 @@ class VeiculosSyncTest {
     }
 
     @Test
+    fun `conta antiga restaurada em aparelho novo fica com uma so moto com todo o historico`() = runTest {
+        val local = FakeLocalStore()
+        val remote = FakeRemoteStore()
+        remote.docs[Kind.FUELUP to "f1"] = abastecimento("f1")
+        remote.docs[Kind.TRIP to "t1"] = viagem("t1", null, 1000.0, 1)
+        SyncEngine(local, remote) { now }.syncNow()
+        assertEquals(VEICULO_LEGADO_ID, local.docs[Kind.FUELUP to "f1"]!!.fields["veiculoId"])
+        assertEquals(VEICULO_LEGADO_ID, local.docs[Kind.TRIP to "t1"]!!.fields["veiculoId"])
+        assertEquals(VEICULO_LEGADO_ID, remote.docs[Kind.FUELUP to "f1"]!!.fields["veiculoId"]) // sobe com o campo
+    }
+
+    @Test
+    fun `corrida do onboarding a primeira moto com o id legado recebe o historico antigo sem criar outra`() = runTest {
+        val local = FakeLocalStore()
+        val remote = FakeRemoteStore()
+        local.put(veiculo(VEICULO_LEGADO_ID, apelido = "Minha moto", at = 500), dirty = true)
+        remote.docs[Kind.FUELUP to "f1"] = abastecimento("f1")
+        SyncEngine(local, remote) { now }.syncNow()
+        val veiculos = local.docs.values.filter { it.kind == Kind.VEICULO && !it.deleted }
+        assertEquals(listOf(VEICULO_LEGADO_ID), veiculos.map { it.gid })
+        assertEquals(VEICULO_LEGADO_ID, local.docs[Kind.FUELUP to "f1"]!!.fields["veiculoId"])
+    }
+
+    @Test
+    fun `veiculos locais entram como extras na escolha do dono do historico`() = runTest {
+        val local = FakeLocalStore()
+        val remote = FakeRemoteStore()
+        local.put(veiculo("m-local", criadoEm = 5, at = 500), dirty = true)
+        remote.docs[Kind.FUELUP to "f1"] = abastecimento("f1")
+        SyncEngine(local, remote) { now }.syncNow()
+        assertEquals("m-local", local.docs[Kind.FUELUP to "f1"]!!.fields["veiculoId"])
+    }
+
+    @Test
+    fun `documento antigo que so ganhou o veiculoId sobe mesmo no empate de versao`() = runTest {
+        val local = FakeLocalStore()
+        val remote = FakeRemoteStore()
+        local.put(veiculo(VEICULO_LEGADO_ID, at = 100), dirty = false)
+        local.put(abastecimento("f1", VEICULO_LEGADO_ID), dirty = false)
+        remote.docs[Kind.VEICULO to VEICULO_LEGADO_ID] = veiculo(VEICULO_LEGADO_ID, at = 100)
+        remote.docs[Kind.FUELUP to "f1"] = abastecimento("f1") // sem veiculoId, mesma versao
+        SyncEngine(local, remote) { now }.syncNow()
+        assertEquals(VEICULO_LEGADO_ID, remote.docs[Kind.FUELUP to "f1"]!!.fields["veiculoId"])
+    }
+
+    @Test
     fun `perfil leva o veiculo ativo`() = runTest {
         val local = FakeLocalStore()
         val remote = FakeRemoteStore()

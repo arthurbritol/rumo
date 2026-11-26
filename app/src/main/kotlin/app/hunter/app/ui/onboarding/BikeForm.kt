@@ -5,6 +5,7 @@ import app.hunter.maintenance.Odometer
 import app.hunter.model.TipoVeiculo
 import app.hunter.sync.OdometerDoc
 import app.hunter.sync.UserProfile
+import java.time.Year
 
 enum class FormField { NAME, NICKNAME, BRAND, MODEL, YEAR, ODOMETER, TANK }
 
@@ -51,14 +52,18 @@ class BikeForm(val short: Boolean) {
         tankLiters = text
     }
 
-    /** [currentYear] ficou só por compatibilidade: o ano segue as regras do Firestore (1900 a 2100). */
-    @Suppress("UNUSED_PARAMETER")
-    fun validate(currentYear: Int = 0): List<FormError> = buildList {
+    /** O ano vai de [MIN_YEAR] ao ano seguinte ao atual (moto e carro): cabe no perfil e nas regras do Firestore. */
+    fun validate(currentYear: Int = Year.now().value): List<FormError> = buildList {
         RegrasVeiculo.erroApelido(apelido)?.let { add(FormError(FormField.NICKNAME, it)) }
         if (!short) {
             RegrasVeiculo.erroMarca(brand)?.let { add(FormError(FormField.BRAND, it)) }
             RegrasVeiculo.erroModelo(model)?.let { add(FormError(FormField.MODEL, it)) }
-            RegrasVeiculo.erroAno(year)?.let { add(FormError(FormField.YEAR, it)) }
+            if (year.isNotBlank()) {
+                val y = year.trim().toIntOrNull()
+                if (y == null || y < MIN_YEAR || y > currentYear + 1) {
+                    add(FormError(FormField.YEAR, "O ano deve estar entre $MIN_YEAR e ${currentYear + 1}."))
+                }
+            }
         }
         val km = parseNumber(odometerKm)
         if (odometerKm.isBlank()) add(FormError(FormField.ODOMETER, "Informe os km do painel."))
@@ -71,7 +76,7 @@ class BikeForm(val short: Boolean) {
         displayName = name,
         brand = if (short) null else brand.trim().ifBlank { null },
         model = if (short) null else model.trim().ifBlank { null },
-        year = if (short) null else year.trim().toIntOrNull(),
+        year = if (short) null else year.trim().toIntOrNull()?.takeIf { it >= MIN_YEAR },
     )
 
     /**

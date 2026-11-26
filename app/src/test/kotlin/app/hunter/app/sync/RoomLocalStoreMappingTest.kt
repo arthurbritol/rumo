@@ -30,7 +30,7 @@ class RoomLocalStoreMappingTest {
         assertEquals(Kind.FUELUP, d.kind); assertEquals("g-f", d.gid); assertEquals(50, d.updatedAtMs); assertFalse(d.deleted)
         assertEquals(1_700_000_000_000, d.fields["dateMs"]); assertEquals(12000.5, d.fields["odometerKm"])
         assertEquals(11.2, d.fields["liters"]); assertEquals(68.9, d.fields["totalCost"]); assertEquals(true, d.fields["fullTank"])
-        assertTrue(dedupKey(d)!!.startsWith("1700000000000|12000.5|11.19"), dedupKey(d)) // os 4 campos da chave existem e entram nela
+        assertTrue(dedupKey(d)!!.startsWith("v1|1700000000000|12000.5|11.19"), dedupKey(d)) // os 4 campos da chave existem e entram nela
         // vindo do Firestore os números chegam como Long/Double indistintamente
         val back = fuelupFromDoc(d.copy(fields = d.fields + ("dateMs" to 1_700_000_000_000L)), existing = fuelup)
         assertEquals(fuelup.copy(dirty = false), back)
@@ -38,7 +38,7 @@ class RoomLocalStoreMappingTest {
 
     @Test fun `manutencao usa name intervalKm intervalDays e aceita nulos`() {
         val d = item.toDoc()
-        assertEquals("Óleo|5000|", dedupKey(d))
+        assertEquals("v1|Óleo|5000|", dedupKey(d))
         assertNull(d.fields["intervalDays"])
         val back = itemFromDoc(d, existing = null)
         assertEquals(item.copy(id = 0, dirty = false), back)
@@ -66,7 +66,7 @@ class RoomLocalStoreMappingTest {
     @Test fun `viagem concluida usa startedAtMs e distanceM`() {
         val d = trip.toDocOrNull()!!
         assertEquals(Kind.TRIP, d.kind)
-        assertEquals("1700000000000|42000", dedupKey(d))
+        assertEquals("|1700000000000|42000", dedupKey(d))
         assertEquals("Praia", d.fields["title"]); assertEquals(1_700_003_600_000, d.fields["endedAtMs"]); assertEquals(3, d.fields["stopCount"])
     }
 

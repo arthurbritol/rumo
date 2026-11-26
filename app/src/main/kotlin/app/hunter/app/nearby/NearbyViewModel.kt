@@ -89,6 +89,8 @@ class NearbyViewModel(
     private val respostaMs: Long = 15_000,
     /** Convida o uid pelo Social quando as duas pessoas marcaram; a tela liga isto ao `SocialViewModel` (sem ele, falha e o servidor reenvia depois). */
     var convidarAmigo: suspend (String) -> ConviteDeEncontro = { ConviteDeEncontro.FALHOU },
+    /** O rolê vale para o veículo ativo (só moto na versão A); ao virar falso (troca de veículo, até vinda da sincronização) desliga. */
+    rolePermitido: Flow<Boolean> = emptyFlow(),
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -176,6 +178,7 @@ class NearbyViewModel(
     init {
         scope.launch { stopRequests.collect { desligar() } }
         scope.launch { startFailures.collect { parar(NEARBY_AVISO_SERVICO) } }
+        scope.launch { rolePermitido.collect { if (!it) desligar() } }
     }
 
     fun ligar(p: Preferencia) {

@@ -22,14 +22,14 @@ fun dedupKey(d: SyncDoc): String? {
     if (d.deleted) return null
     val f = d.fields
     return when (d.kind) {
-        Kind.FUELUP -> listOf("dateMs", "odometerKm", "liters", "totalCost").joinToString("|") { fmt(f[it]) }
-        Kind.MAINTENANCE -> listOf("name", "intervalKm", "intervalDays").joinToString("|") { fmt(f[it]) }
+        Kind.FUELUP -> listOf("veiculoId", "dateMs", "odometerKm", "liters", "totalCost").joinToString("|") { fmt(f[it]) }
+        Kind.MAINTENANCE -> listOf("veiculoId", "name", "intervalKm", "intervalDays").joinToString("|") { fmt(f[it]) }
         Kind.PLACE -> "${fixed(f["lat"], 4)}|${fixed(f["lon"], 4)}|${fmt(f["name"])}"
         // Veículo: o id já é único (UUID); nunca é duplicata de outro por conteúdo.
         Kind.VEICULO -> "veiculo|${d.gid}"
         Kind.TRIP -> {
             val m = (f["distanceM"] as? Number)?.toDouble()?.let { Math.round(it).toString() } ?: ""
-            "${fmt(f["startedAtMs"])}|$m"
+            "${fmt(f["veiculoId"])}|${fmt(f["startedAtMs"])}|$m"
         }
     }
 }
@@ -76,7 +76,12 @@ private fun richerFirst(isLocal: (SyncDoc) -> Boolean): Comparator<SyncDoc> = Co
     if (byKind != 0) byKind else a.gid.compareTo(b.gid)
 }
 
-fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long): MergePlan {
+/**
+ * [remoteOriginal]: o remoto como veio da nuvem, antes de [atribuirVeiculoLegado]; o envio compara com ele,
+ * então um documento que só ganhou o `veiculoId` agora também é enviado.
+ */
+fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long, remoteOriginal: List<SyncDoc> = remote): MergePlan {
+    val remoteOriginalBy = remoteOriginal.associateBy { it.kind to it.gid }
     val localBy = local.associateBy { it.kind to it.gid }
     val remoteBy = remote.associateBy { it.kind to it.gid }
     val winners = LinkedHashMap<Pair<Kind, String>, SyncDoc>()
@@ -98,7 +103,7 @@ fun merge(local: List<SyncDoc>, remote: List<SyncDoc>, nowMs: Long): MergePlan {
     val pushRemote = ArrayList<SyncDoc>()
     for ((key, doc) in winners) {
         if (!sameDoc(localBy[key], doc)) applyLocal += doc
-        if (!sameDoc(remoteBy[key], doc)) pushRemote += doc
+        if (!sameDoc(remoteOriginalBy[key], doc)) pushRemote += doc
     }
     return MergePlan(applyLocal, pushRemote, winners.values.toList())
 }

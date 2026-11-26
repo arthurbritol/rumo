@@ -110,7 +110,7 @@ class TrackingService : Service() {
         })
         val nav = NavSession(
             scope = scope,
-            reroute = { from, to, profile, via -> NavServices.router.route(from, to.latLon, profile, via = via).firstOrNull() },
+            reroute = { from, to, profile, via, tipo -> NavServices.router.route(from, to.latLon, profile, via = via, tipo = tipo).firstOrNull() },
         )
         // Avisos de radar/lombada: ~1 Hz, no mesmo fluxo de posição (sem outro listener de GPS).
         val perigos = PerigoMonitor(PerigoStatus.repositorio)

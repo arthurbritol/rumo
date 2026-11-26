@@ -52,7 +52,7 @@ class NavAnnouncer(private val thresholdsM: IntArray = intArrayOf(800, 250, 60))
  */
 class NavSession(
     private val scope: CoroutineScope,
-    private val reroute: suspend (from: LatLon, to: Place, profile: RouteProfile, via: List<LatLon>) -> Route?,
+    private val reroute: suspend (from: LatLon, to: Place, profile: RouteProfile, via: List<LatLon>, tipo: TipoDeRota) -> Route?,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     private var engine: NavEngine? = null
@@ -91,8 +91,11 @@ class NavSession(
             speech += "Recalculando."
             // Só as paradas que ainda estão à frente (não volta a um posto já passado).
             val pending = st.via.filter { route.alongOf(it) > prog.alongM + 50.0 }
+            // Mesmo tipo da navegação; perfil que o tipo não tem cai em "Mais rápida".
+            val tipo = st.tipo
+            val perfil = RouteProfile.valido(route.profile, tipo)
             scope.launch {
-                val r = try { reroute(here, dest, route.profile, pending) } catch (e: Exception) { null }
+                val r = try { reroute(here, dest, perfil, pending, tipo) } catch (e: Exception) { null }
                 if (r != null) NavStatus.setRoute(r) else { rerouteLaunched = false; NavStatus.setRerouting(false) }
             }
         } else if (!st.rerouting) {

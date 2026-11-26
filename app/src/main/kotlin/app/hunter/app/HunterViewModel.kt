@@ -536,6 +536,9 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         hunter.veiculos.editar(f.paraVeiculo(base.id, base.criadoEm, base))
     }
 
+    /** Grava o veículo ativo já editado (Perfil: marca, modelo e ano). */
+    fun salvarVeiculoAtivo(v: app.hunter.model.Veiculo) = viewModelScope.launch { hunter.veiculos.editar(v) }
+
     /** Remoção lógica: os registros do veículo ficam guardados. */
     fun removerVeiculo(id: String) = viewModelScope.launch { hunter.veiculos.remover(id) }
 
@@ -744,7 +747,7 @@ class HunterViewModel(app: Application) : AndroidViewModel(app) {
         val p = _preview.value ?: return false
         val route = p.route ?: return false
         viewModelScope.launch { rememberPlace(p.place) }
-        NavStatus.start(route, p.place, via = listOfNotNull(p.via?.latLon))
+        NavStatus.start(route, p.place, via = listOfNotNull(p.via?.latLon), tipo = p.tipo)
         if (PerigoStatus.categorias.value.isNotEmpty()) app.hunter.app.perigos.PardalGraph.gatilho?.aoRota(route)
         adviceJob?.cancel()
         _preview.value = null

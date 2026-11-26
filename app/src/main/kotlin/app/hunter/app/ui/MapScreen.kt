@@ -207,8 +207,7 @@ fun MapScreen(
 
     // Saiu da conta com a procura ligada: para tudo.
     LaunchedEffect(signedIn) { if (!signedIn) nearbyVm.desligar() }
-    // Trocou para carro com o rolê ligado: desliga pelo mesmo caminho do "Desligar".
-    LaunchedEffect(roleOk) { if (!roleOk) nearbyVm.desligar() }
+    // Trocou para carro com o rolê ligado: o NearbyViewModel desliga sozinho (rolePermitido), em qualquer aba.
     LaunchedEffect(nearbyState) {
         if (nearbyState is NearbyUiState.Desligado) {
             selectedRider = null

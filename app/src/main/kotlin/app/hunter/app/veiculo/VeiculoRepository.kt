@@ -8,6 +8,7 @@ import app.hunter.model.TipoVeiculo
 import app.hunter.model.Veiculo
 import app.hunter.model.resolverVeiculoAtivo
 import app.hunter.sync.UserProfile
+import app.hunter.trips.data.TripDao
 import app.hunter.sync.VEICULO_LEGADO_ID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
@@ -29,9 +30,24 @@ interface VeiculoStore {
 
     /** Grava a linha como está (quem chama decide se é uma alteração do usuário: [VeiculoEntity.touch]). */
     suspend fun salvar(v: VeiculoEntity)
+
+    /** O tanque do veículo editado vale também no hodômetro dele (a autonomia lê o hodômetro primeiro). Sem hodômetro: nada. */
+    suspend fun atualizarTanqueDoHodometro(id: String, litros: Double) {}
+
+    /** Viagens gravadas sem veículo ativo ficam sem `veiculoId`; passam a ser deste veículo (e vão para a nuvem). */
+    suspend fun atribuirViagensSemVeiculo(id: String) {}
 }
 
-class RoomVeiculoStore(private val dao: MaintenanceDao) : VeiculoStore {
+class RoomVeiculoStore(private val dao: MaintenanceDao, private val tripDao: TripDao? = null) : VeiculoStore {
+    override suspend fun atualizarTanqueDoHodometro(id: String, litros: Double) {
+        val o = dao.getOdometer(id) ?: return
+        if (o.tankLiters != litros) dao.putOdometer(o.copy(tankLiters = litros))
+    }
+
+    override suspend fun atribuirViagensSemVeiculo(id: String) {
+        tripDao?.atribuirViagensSemVeiculo(id, System.currentTimeMillis())
+    }
+
     override fun observeVeiculos() = dao.observeVeiculos()
     override suspend fun getVeiculos() = dao.getVeiculos()
     override suspend fun getVeiculo(id: String) = dao.getVeiculo(id)
@@ -92,7 +108,10 @@ class VeiculoRepository(
     suspend fun ativoAgora(): Veiculo? =
         resolverVeiculoAtivo(store.getVeiculos().map { it.toModel() }, ativoStore.ler())
 
-    /** Cadastra um veículo. O primeiro vira o ativo; os demais só se [tornarAtivo]. */
+    /**
+     * Cadastra um veículo. O primeiro vira o ativo; os demais só se [tornarAtivo]. Viagens gravadas sem veículo
+     * ativo (veiculoId nulo) passam a ser do primeiro veículo criado depois ([VeiculoStore.atribuirViagensSemVeiculo]).
+     */
     suspend fun adicionar(
         tipo: TipoVeiculo,
         apelido: String,
@@ -105,11 +124,16 @@ class VeiculoRepository(
     ): Veiculo {
         val primeiro = ativoAgora() == null
         val agora = clock()
+        // A primeira moto de um aparelho sem nenhum veículo usa o id fixo do veículo migrado: se a conta é antiga,
+        // o histórico sem veiculoId que a nuvem traz cai nela (e não numa segunda "Minha moto"). Carro e os
+        // seguintes usam id novo.
+        val id = if (primeiro && tipo == TipoVeiculo.MOTO && store.getVeiculo(VEICULO_LEGADO_ID) == null) VEICULO_LEGADO_ID else novoId()
         val e = VeiculoEntity(
-            id = novoId(), tipo = tipo.name, apelido = apelido, marca = marca, modelo = modelo, ano = ano,
+            id = id, tipo = tipo.name, apelido = apelido, marca = marca, modelo = modelo, ano = ano,
             tanqueLitros = tanqueLitros, consumoPadraoKmL = consumoPadraoKmL, criadoEm = agora, updatedAtMs = agora, dirty = true,
         )
         store.salvar(e)
+        if (primeiro) store.atribuirViagensSemVeiculo(e.id)
         if (primeiro || tornarAtivo) ativoStore.gravar(e.id)
         requestSync()
         return e.toModel()
@@ -124,17 +148,23 @@ class VeiculoRepository(
                 tanqueLitros = v.tanqueLitros, consumoPadraoKmL = v.consumoPadraoKmL, updatedAtMs = clock(), dirty = true,
             ),
         )
+        store.atualizarTanqueDoHodometro(v.id, v.tanqueLitros)
         requestSync()
     }
 
-    /** Remoção lógica: some das listas, os dados dele ficam. Se era o ativo, passa para o primeiro que sobrar. */
-    suspend fun remover(id: String) {
-        val cur = store.getVeiculo(id) ?: return
-        if (cur.removidoEm != null) return
+    /**
+     * Remoção lógica: some das listas, os dados dele ficam. Se era o ativo, passa para o primeiro que sobrar.
+     * O último veículo não se remove (devolve false): sem veículo, as ações de dados ficariam sem destino.
+     */
+    suspend fun remover(id: String): Boolean {
+        val cur = store.getVeiculo(id) ?: return false
+        if (cur.removidoEm != null) return false
+        if (store.getVeiculos().none { it.id != id }) return false
         val agora = clock()
         store.salvar(cur.copy(removidoEm = agora, updatedAtMs = agora, dirty = true))
         if (ativoStore.ler() == id) ativoStore.gravar(ativoAgora()?.id)
         requestSync()
+        return true
     }
 
     /** Escolhe o veículo ativo. Id inexistente ou removido: ignora. */
@@ -171,3 +201,14 @@ fun completarVeiculoLegado(v: VeiculoEntity, perfil: UserProfile?, agora: Long =
     if (marca.isEmpty() && modelo.isEmpty()) return null
     return v.copy(marca = marca, modelo = modelo, ano = v.ano ?: perfil.year, updatedAtMs = agora, dirty = true)
 }
+
+/**
+ * Veículos que faltam para os ids que as linhas de dados citam (conta antiga restaurada, onde o veículo migrado só
+ * existia no banco do outro aparelho): moto "Minha moto" com o tanque do hodômetro ([tanques]) ou 13 L, completada
+ * com marca/modelo do perfil quando é o veículo migrado.
+ */
+fun veiculosFaltantes(ids: List<String>, perfil: UserProfile?, tanques: Map<String, Double>): List<VeiculoEntity> =
+    ids.map { id ->
+        val v = VeiculoEntity(id = id, tipo = "MOTO", apelido = "Minha moto", tanqueLitros = tanques[id] ?: 13.0)
+        completarVeiculoLegado(v, perfil) ?: v
+    }

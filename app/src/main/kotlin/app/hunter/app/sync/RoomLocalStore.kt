@@ -6,6 +6,7 @@ import app.hunter.app.data.AppDatabase
 import app.hunter.app.data.SyncDao
 import app.hunter.app.data.TombstoneEntity
 import app.hunter.app.veiculo.completarVeiculoLegado
+import app.hunter.app.veiculo.veiculosFaltantes
 import app.hunter.maintenance.data.VeiculoEntity
 import app.hunter.sync.VEICULO_LEGADO_ID
 import app.hunter.sync.Kind
@@ -97,10 +98,8 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
         val faltando = maintenance.veiculoIdsSemLinha()
         if (faltando.isEmpty()) return
         val perfil = ProfilePrefs.read(prefs)
-        for (id in faltando) {
-            val v = VeiculoEntity(id = id, tipo = "MOTO", apelido = "Minha moto", tanqueLitros = maintenance.getOdometer(id)?.tankLiters ?: 13.0)
-            dao.putVeiculo(completarVeiculoLegado(v, perfil) ?: v)
-        }
+        val tanques = faltando.mapNotNull { id -> maintenance.getOdometer(id)?.tankLiters?.let { id to it } }.toMap()
+        for (v in veiculosFaltantes(faltando, perfil, tanques)) dao.putVeiculo(v)
     }
 
     /**
@@ -143,6 +142,8 @@ class RoomLocalStore(private val db: AppDatabase, private val prefs: SharedPrefe
         if (cur == null || shouldApply(cur.updatedAtMs, o.updatedAtMs)) {
             maintenance.putOdometerRaw(odometerFromDoc(o).copy(dirty = dirty))
         }
+        // Hodômetro de um veículo que nunca chegou (só hodômetro, ou chegou depois dos registros): cria o veículo.
+        garantirVeiculosDasLinhas()
     }
 
     override suspend fun profile(): UserProfile? = ProfilePrefs.read(prefs)

@@ -89,13 +89,13 @@ class MergeTest {
     @Test
     fun `dedupKey por tipo`() {
         assertNull(dedupKey(fuel("a", 1, deleted = true)))
-        assertEquals("5000|1000|10|60", dedupKey(fuel("a", 1)))
+        assertEquals("|5000|1000|10|60", dedupKey(fuel("a", 1)))
         val m = SyncDoc(Kind.MAINTENANCE, "m", 1, false, mapOf("name" to "Óleo", "intervalKm" to 3000, "intervalDays" to 180L))
-        assertEquals("Óleo|3000|180", dedupKey(m))
+        assertEquals("|Óleo|3000|180", dedupKey(m))
         val p = SyncDoc(Kind.PLACE, "p", 1, false, mapOf("lat" to -8.0476123, "lon" to -34.877, "name" to "Casa"))
         assertEquals("-8.0476|-34.8770|Casa", dedupKey(p))
         val t = SyncDoc(Kind.TRIP, "t", 1, false, mapOf("startedAtMs" to 77L, "distanceM" to 1234.6))
-        assertEquals("77|1235", dedupKey(t))
+        assertEquals("|77|1235", dedupKey(t))
     }
 
     @Test
@@ -121,8 +121,8 @@ class MergeTest {
     fun `dedupKey com NaN ou infinito não lança`() {
         val nan = fuel("a", 1, liters = Double.NaN)
         val inf = fuel("b", 1, liters = Double.POSITIVE_INFINITY)
-        assertEquals("5000|1000|NaN|60", dedupKey(nan))
-        assertEquals("5000|1000|Infinity|60", dedupKey(inf))
+        assertEquals("|5000|1000|NaN|60", dedupKey(nan))
+        assertEquals("|5000|1000|Infinity|60", dedupKey(inf))
         merge(listOf(nan), listOf(inf), now)
     }
 
@@ -216,5 +216,32 @@ class MergeTest {
         assertEquals(lapides, plan.pushRemote.filter { it.deleted }.sortedBy { it.gid })
         assertEquals(listOf("a"), plan.pushRemote.filter { !it.deleted }.map { it.gid }) // "a" só existia local
         assertEquals(lapides, plan.applyLocal.filter { it.deleted }.sortedBy { it.gid })
+    }
+
+    private fun item(gid: String, veiculo: String?, name: String = "Fluido de freio") = SyncDoc(
+        Kind.MAINTENANCE, gid, 100, false,
+        buildMap { put("name", name); put("intervalKm", 20000.0); put("intervalDays", 730.0); if (veiculo != null) put("veiculoId", veiculo) },
+    )
+
+    private fun viagemDoc(gid: String, veiculo: String) = SyncDoc(
+        Kind.TRIP, gid, 100, false, mapOf("startedAtMs" to 9_000L, "distanceM" to 5000.0, "veiculoId" to veiculo),
+    )
+
+    @Test
+    fun `itens iguais de veiculos diferentes nao viram duplicata`() {
+        val local = listOf(item("m1", "moto1"), item("m2", "moto2"), item("c1", "carro"))
+        val plan = merge(local, emptyList(), now)
+        assertTrue(plan.merged.none { it.deleted })
+        val fuels = listOf(fuel("f1", 100).let { it.copy(fields = it.fields + ("veiculoId" to "a")) },
+            fuel("f2", 100).let { it.copy(fields = it.fields + ("veiculoId" to "b")) })
+        assertTrue(merge(fuels, emptyList(), now).merged.none { it.deleted })
+        assertTrue(merge(listOf(viagemDoc("t1", "a"), viagemDoc("t2", "b")), emptyList(), now).merged.none { it.deleted })
+    }
+
+    @Test
+    fun `duplicata real dentro do mesmo veiculo continua deduplicada`() {
+        val plan = merge(listOf(item("b", "moto1")), listOf(item("a", "moto1")), now)
+        assertEquals(1, plan.merged.count { it.deleted })
+        assertEquals(1, plan.merged.count { !it.deleted })
     }
 }

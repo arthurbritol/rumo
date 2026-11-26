@@ -59,6 +59,7 @@ import app.hunter.app.UpdateCheck
 import app.hunter.app.account.AccountViewModel
 import app.hunter.app.account.AuthState
 import app.hunter.app.ui.onboarding.BikeForm
+import app.hunter.app.veiculo.PerfilVeiculo
 import app.hunter.app.ui.onboarding.FormError
 import app.hunter.app.ui.onboarding.FormField
 import app.hunter.app.ui.onboarding.findActivity
@@ -149,7 +150,7 @@ fun ProfileRoute(
         onReopenIntro = onReopenIntro,
         onBack = onBack,
         onDismissMessage = { vm.clearError(); vm.consumeNotice() },
-        editProfile = (state as? AuthState.SignedIn)?.let { s -> { ProfileEditForm.from(profile, s.name) } },
+        editProfile = (state as? AuthState.SignedIn)?.let { s -> { PerfilVeiculo.formDe(profile, s.name, veiculoAtivo) } },
         profileSummary = profile?.let(::profileSummary),
         onSaveProfile = { onSaveProfile(it); saves++ },
         versionName = versionName,
@@ -450,9 +451,11 @@ fun ProfileScreen(
 
         // 3. Seção: Dados do veículo
         HCard {
-            val currentBrand = profile?.brand?.ifBlank { null } ?: editProfile?.invoke()?.brand?.ifBlank { null }
-            val currentModel = profile?.model?.ifBlank { null } ?: editProfile?.invoke()?.model?.ifBlank { null }
-            val currentYear = profile?.year?.toString() ?: editProfile?.invoke()?.year?.ifBlank { null }
+            // O cartão mostra o veículo ativo (a Garagem lê dele); sem veículo, o perfil.
+            val dados = PerfilVeiculo.dadosExibidos(veiculoAtivo, profile)
+            val currentBrand = dados.marca
+            val currentModel = dados.modelo
+            val currentYear = dados.ano
             val bikeSummary = listOfNotNull(currentBrand, currentModel).joinToString(" ").ifEmpty { "Veículo não cadastrado" }
 
             Row(
